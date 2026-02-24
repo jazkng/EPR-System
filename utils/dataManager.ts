@@ -12,6 +12,36 @@ import {
 import { APP_VERSION } from "../components/constants/versionHistory";
 
 export class DataManager {
+    // 插入到这里 ↓
+    static async executeSettlementTransaction(record: SettlementRecord): Promise<void> {
+        const settlementRef = doc(db, 'settlements', record.id);
+        const activeShiftRef = doc(db, 'config', 'active_shift');
+        
+        await runTransaction(db, async (transaction) => {
+            // 1. 事务内防重校验
+            const historyRef = collection(db, 'settlements');
+            const q = query(historyRef, where('date', '==', record.date), limit(1));
+            const existingDocs = await getDocs(q); 
+            
+            if (!existingDocs.empty) {
+                throw new Error(`DATE_ALREADY_SETTLED:${record.date}`);
+            }
+
+            // 2. 写入结算单
+            transaction.set(settlementRef, record);
+
+            // 3. 将班次支出转存为独立支出 (AP)
+            if (record.expenses && record.expenses.length > 0) {
+                record.expenses.forEach(exp => {
+                    const expRef = doc(db, 'standalone_expenses', exp.id);
+                    transaction.set(expRef, { ...exp, settlementId: record.id });
+                });
+            }
+
+            // 4. 清除班次状态
+            transaction.delete(activeShiftRef);
+        });
+    }
     // EMPLOYEES
     static async getEmployees(): Promise<Employee[]> {
         const snap = await getDocs(collection(db, 'employees'));

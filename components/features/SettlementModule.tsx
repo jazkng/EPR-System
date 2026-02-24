@@ -510,13 +510,12 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     };
 
     const handleSubmitSettlement = async () => {
-        const latestHistory = await DataManager.getSettlements();
-        if (latestHistory.some(r => r.date === businessDate)) {
-             alert(`📅 日期 ${businessDate} 已经结算过了！\n\n系统检测到重复记录。若需重新提交，请先在“历史”页面删除该日期的旧记录。`);
-             return;
-        }
+        // 1. 基础确认
         if (!confirm(`⚠️ 确认提交结算？\n日期: ${businessDate}\n现金差异: RM ${totals.variance.toFixed(2)}`)) return;
+        
         setIsSubmitting(true);
+
+        // 2. 构造数据对象
         const record: SettlementRecord = {
             id: `settle_${businessDate}_${Date.now()}`,
             date: businessDate,
@@ -542,13 +541,12 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
             submittedBy: 'Manager',
             isClosed: true
         };
+
         try {
-            await DataManager.saveSettlement(record);
-            for (const exp of shiftExpenses) {
-                const standaloneExp = { ...exp, settlementId: record.id };
-                await DataManager.saveStandaloneExpense(standaloneExp);
-            }
-            await DataManager.clearActiveShift();
+            // 3. 执行原子事务 (代替原先的多个 await)
+            await DataManager.executeSettlementTransaction(record);
+
+            // 4. UI 状态重置
             const nextDateStr = getBusinessDateStr(storeConfig.businessDayCutoff || 4);
             setBusinessDate(nextDateStr);
             setOpeningCounts({ 100:0, 50:0, 20:0, 10:0, 5:0, 1:0 });
@@ -558,11 +556,21 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
             setShiftExpenses([]);
             setVarianceReason('');
             setIsShiftOpen(false);
+            
             alert("✅ 结算成功！数据已转入历史记录。");
             setActiveTab('HISTORY');
             const updatedHistory = await DataManager.getSettlements();
             setHistoryRecords(updatedHistory);
-        } catch (error) { console.error("Settlement Error", error); alert("提交失败，请重试"); } finally { setIsSubmitting(false); }
+        } catch (error: any) {
+            console.error("Settlement Error", error);
+            if (error.message?.includes('DATE_ALREADY_SETTLED')) {
+                alert(`📅 错误：日期 ${businessDate} 已经结算过了，请勿重复提交！`);
+            } else {
+                alert("提交失败：系统检测到并发冲突或网络异常，请稍后重试。");
+            }
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const handleForceToday = () => {
