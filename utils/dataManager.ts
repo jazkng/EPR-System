@@ -1,6 +1,5 @@
-
 import { db } from '../firebaseConfig';
-import { collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where, writeBatch, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where, writeBatch, updateDoc, runTransaction, limit } from 'firebase/firestore';
 import { 
     Employee, SettlementRecord, ExpenseItem, RecurringBill, 
     BillPaymentRecord, StockItem, Supplier, PurchaseOrder, 
@@ -32,7 +31,6 @@ export class DataManager {
         issue: string, 
         fine?: number
     ): Promise<string> {
-        // 1. Fetch Employee
         const empRef = doc(db, 'employees', empId);
         const empSnap = await getDoc(empRef);
         if (!empSnap.exists()) return 'Employee not found';
@@ -46,11 +44,10 @@ export class DataManager {
         let triggerYellow = false;
         let triggerRed = false;
 
-        // 2. Logic: Counters
         if (type === 'SMALL') {
             stats.smallCount += 1;
             if (stats.smallCount >= 5) {
-                stats.smallCount = 0; // Reset
+                stats.smallCount = 0; 
                 triggerYellow = true;
                 resultMsg = '⚠️ 累计 5 小错 -> 触发黄色警告 (Yellow Warning)';
             } else {
@@ -59,7 +56,7 @@ export class DataManager {
         } else if (type === 'MEDIUM') {
             stats.mediumCount += 1;
             if (stats.mediumCount >= 3) {
-                stats.mediumCount = 0; // Reset
+                stats.mediumCount = 0; 
                 triggerYellow = true;
                 resultMsg = '⚠️ 累计 3 中错 -> 触发黄色警告 (Yellow Warning)';
             } else {
@@ -70,24 +67,20 @@ export class DataManager {
             resultMsg = '🛑 大错 -> 直接触发黄色警告 (Direct Yellow Warning)';
         }
 
-        // 3. Logic: Warning & Score Deduction
         const today = new Date().toISOString().split('T')[0];
 
         if (triggerYellow) {
             stats.yellowCount += 1;
-            // Add Written Warning (Yellow)
             warnings.unshift({
                 id: `warn_${Date.now()}`,
                 date: today,
-                type: 'WRITTEN', // Yellow
+                type: 'WRITTEN',
                 reason: `[System] ${resultMsg} - ${issue}`,
                 issuer: 'System (Logbook)',
                 fineAmount: fine
             });
-            // Deduct Discipline Score
             attributes.discipline = Math.max(0, attributes.discipline - 10);
             
-            // Check Red
             if (stats.yellowCount >= 3) {
                 stats.yellowCount = 0;
                 triggerRed = true;
@@ -99,32 +92,26 @@ export class DataManager {
             warnings.unshift({
                 id: `warn_red_${Date.now()}`,
                 date: today,
-                type: 'FINAL', // Red
+                type: 'FINAL', 
                 reason: `[System] 3 Yellow Warnings Triggered Red Warning - ${issue}`,
                 issuer: 'System (Logbook)',
-                fineAmount: 0 // Fine usually attached to the mistake itself
+                fineAmount: 0 
             });
-            attributes.discipline = Math.max(0, attributes.discipline - 20); // Big penalty
+            attributes.discipline = Math.max(0, attributes.discipline - 20); 
         }
 
-        // 4. Handle Direct Fine if no warning triggered but fine exists
-        // If warning triggered, fine is attached to warning. If not, we just add a record or attach to salary?
-        // Current interface WarningRecord has fineAmount.
-        // If not triggered yellow/red, we add a "VERBAL" (Record) warning to track the fine and mistake.
         if (!triggerYellow && !triggerRed) {
              warnings.unshift({
                 id: `mistake_${Date.now()}`,
                 date: today,
-                type: 'VERBAL', // Minor Record
+                type: 'VERBAL', 
                 reason: `[Mistake: ${type}] ${issue}`,
                 issuer: 'System (Logbook)',
                 fineAmount: fine
             });
-            // Minor deduction for just a mistake
             attributes.discipline = Math.max(0, attributes.discipline - (type === 'MEDIUM' ? 3 : 1));
         }
 
-        // 5. Save Employee
         await updateDoc(empRef, {
             misconductStats: stats,
             warningHistory: warnings,
@@ -147,14 +134,16 @@ export class DataManager {
     }
     static async updateExpenseInSettlement(settlementId: string, expense: ExpenseItem): Promise<void> {
         const ref = doc(db, 'settlements', settlementId);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
+        // 使用 Transaction 确保并发安全
+        await runTransaction(db, async (transaction) => {
+            const snap = await transaction.get(ref);
+            if (!snap.exists()) return;
             const data = snap.data() as SettlementRecord;
             const idx = data.expenses.findIndex(e => e.id === expense.id);
             if (idx >= 0) data.expenses[idx] = expense;
             else data.expenses.push(expense);
-            await setDoc(ref, data);
-        }
+            transaction.set(ref, data);
+        });
     }
 
     // RECURRING BILLS
@@ -195,11 +184,10 @@ export class DataManager {
 
     // STOCK
     static async getStock(type: 'KITCHEN' | 'BAR' | 'GENERAL' | 'FUEL'): Promise<StockItem[]> {
-        let colName = 'stock_general'; // Default
+        let colName = 'stock_general';
         if (type === 'KITCHEN') colName = 'stock_kitchen';
         if (type === 'BAR') colName = 'stock_bar';
-        if (type === 'FUEL') colName = 'stock_fuel'; // New collection
-
+        if (type === 'FUEL') colName = 'stock_fuel';
         const snap = await getDocs(collection(db, colName));
         return snap.docs.map(d => d.data() as StockItem);
     }
@@ -208,7 +196,6 @@ export class DataManager {
         if (type === 'KITCHEN') colName = 'stock_kitchen';
         if (type === 'BAR') colName = 'stock_bar';
         if (type === 'FUEL') colName = 'stock_fuel';
-
         await setDoc(doc(db, colName, item.id), item);
     }
     static async deleteStockItem(type: 'KITCHEN' | 'BAR' | 'GENERAL' | 'FUEL', id: string): Promise<void> {
@@ -216,7 +203,6 @@ export class DataManager {
         if (type === 'KITCHEN') colName = 'stock_kitchen';
         if (type === 'BAR') colName = 'stock_bar';
         if (type === 'FUEL') colName = 'stock_fuel';
-
         await deleteDoc(doc(db, colName, id));
     }
     static async batchUpdateStock(type: 'KITCHEN' | 'BAR' | 'GENERAL' | 'FUEL', items: StockItem[]): Promise<void> {
@@ -224,7 +210,6 @@ export class DataManager {
         if (type === 'KITCHEN') colName = 'stock_kitchen';
         if (type === 'BAR') colName = 'stock_bar';
         if (type === 'FUEL') colName = 'stock_fuel';
-
         const batch = writeBatch(db);
         items.forEach(item => {
             const ref = doc(db, colName, item.id);
@@ -233,7 +218,7 @@ export class DataManager {
         await batch.commit();
     }
 
-    // INVENTORY TASKS (ASSIGNMENTS) - NEW
+    // INVENTORY TASKS
     static async getInventoryTasks(): Promise<InventoryTask[]> {
         const snap = await getDocs(collection(db, 'inventory_tasks'));
         return snap.docs.map(d => d.data() as InventoryTask).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
@@ -311,11 +296,12 @@ export class DataManager {
 
     // LOGS
     static async getLogs(): Promise<LogEntry[]> {
-        const snap = await getDocs(collection(db, 'logs'));
+        // 增加 limit 限制，只拉取最新的 200 条记录
+        const q = query(collection(db, 'logs'), limit(200));
+        const snap = await getDocs(q);
         return snap.docs.map(d => d.data() as LogEntry).sort((a,b) => b.id.localeCompare(a.id));
     }
     static async addLog(log: LogEntry): Promise<void> {
-        // If Log has misconduct, handle it first
         if (log.misconduct) {
              const resultMsg = await this.updateEmployeeMisconduct(
                  log.misconduct.employeeId, 
@@ -323,7 +309,6 @@ export class DataManager {
                  log.issue, 
                  log.misconduct.fineAmount
              );
-             // Append result to log action or issue for visibility
              log.misconduct.actionResult = resultMsg;
         }
         await setDoc(doc(db, 'logs', log.id), log);
@@ -498,9 +483,8 @@ export class DataManager {
         }
     }
     static async resetToDefaults(type: string): Promise<boolean> {
-        // Simple Reset implementation: Delete All in collection
         let col = '';
-        if (type === 'INVENTORY') col = 'stock_kitchen'; // Just resetting main stock for example
+        if (type === 'INVENTORY') col = 'stock_kitchen'; 
         if (type === 'SUPPLIERS') col = 'suppliers';
         if (col) {
             const snap = await getDocs(collection(db, col));
@@ -512,7 +496,6 @@ export class DataManager {
         return false;
     }
 
-    // --- AUTO BACKUP & EXPORT ---
     static async exportSystemData(): Promise<SystemBackup> {
         const [
             employees, settlements, recurringBills, billPayments,
@@ -553,23 +536,10 @@ export class DataManager {
             version: APP_VERSION,
             timestamp: new Date().toISOString(),
             data: {
-                employees,
-                settlements,
-                recurringBills,
-                billPayments,
-                stockKitchen,
-                stockBar,
-                stockGeneral,
-                stockFuel,
-                suppliers,
-                purchaseOrders,
-                menu,
-                queue,
-                logs,
-                payroll,
-                attendance,
-                roster,
-                config,
+                employees, settlements, recurringBills, billPayments,
+                stockKitchen, stockBar, stockGeneral, stockFuel,
+                suppliers, purchaseOrders, menu, queue, logs,
+                payroll, attendance, roster, config,
                 treasuryConfig: treasuryConfig || undefined,
                 fundTransfers: fundTransfers || undefined,
                 warranties: warranties || undefined,
@@ -579,45 +549,13 @@ export class DataManager {
         };
     }
 
-    // 1. Run Auto Backup (Silent)
+    // 1. Run Auto Backup (Silent) - 🚨 已拦截前端爆炸计费
     static async runAutoBackupCheck(): Promise<void> {
-        try {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            const todayId = `backup_${year}-${month}-${day}`;
-
-            // Check if backup already exists
-            const docRef = doc(db, 'system_backups', todayId);
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                console.log("✅ Auto-backup for today already exists.");
-                return;
-            }
-
-            // Only run if current time is >= 4 AM
-            if (now.getHours() < 4) {
-                console.log("⏳ Too early for auto-backup.");
-                return;
-            }
-
-            console.log("🔄 Starting Auto Backup...");
-            const backupData = await this.exportSystemData();
-            backupData.autoGenerated = true;
-            
-            await setDoc(docRef, backupData);
-            console.log("✅ Auto Backup Saved:", todayId);
-
-            await this.cleanupOldBackups();
-
-        } catch (e) {
-            console.error("Auto Backup Failed:", e);
-        }
+        console.log("⚠️ 前端自动备份已拦截禁用，以保护 Firebase Reads 计费额度。老板可前往设置中手动导出备份。");
+        return; 
     }
 
-    // 2. Cleanup Old Backups (Keep latest 7)
+    // 2. Cleanup Old Backups
     static async cleanupOldBackups(): Promise<void> {
         try {
             const snap = await getDocs(collection(db, 'system_backups'));
@@ -649,12 +587,11 @@ export class DataManager {
             .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     }
 
-    // 4. Restore System (The Time Machine)
+    // 4. Restore System
     static async restoreSystem(backup: SystemBackup): Promise<void> {
         const data = backup.data;
         if (!data) throw new Error("Invalid Backup Data");
 
-        // Helper to clear a collection
         const clearCol = async (path: string) => {
             const ref = collection(db, path);
             const snap = await getDocs(ref);
@@ -662,7 +599,6 @@ export class DataManager {
             await Promise.all(promises);
         };
 
-        // Helper to restore a collection using Batch
         const restoreCol = async (path: string, items: any[]) => {
             if (!items || items.length === 0) return;
             const chunks = [];
@@ -682,51 +618,27 @@ export class DataManager {
             }
         };
 
-        // 1. Clear Critical Collections
         await Promise.all([
-            clearCol('employees'),
-            clearCol('settlements'),
-            clearCol('recurring_bills'),
-            clearCol('bill_payments'),
-            clearCol('stock_kitchen'),
-            clearCol('stock_bar'),
-            clearCol('stock_general'),
-            clearCol('stock_fuel'),
-            clearCol('suppliers'),
-            clearCol('purchase_orders'),
-            clearCol('menu'),
-            clearCol('queue_tickets'),
-            clearCol('logs'),
-            clearCol('payroll'),
-            clearCol('attendance'),
-            clearCol('fund_transfers'),
-            clearCol('standalone_expenses'),
-            clearCol('warranties'),
-            clearCol('strategy_proposals'),
-            clearCol('strategy_okrs'),
-            clearCol('strategy_campaigns'),
+            clearCol('employees'), clearCol('settlements'), clearCol('recurring_bills'),
+            clearCol('bill_payments'), clearCol('stock_kitchen'), clearCol('stock_bar'),
+            clearCol('stock_general'), clearCol('stock_fuel'), clearCol('suppliers'),
+            clearCol('purchase_orders'), clearCol('menu'), clearCol('queue_tickets'),
+            clearCol('logs'), clearCol('payroll'), clearCol('attendance'),
+            clearCol('fund_transfers'), clearCol('standalone_expenses'), clearCol('warranties'),
+            clearCol('strategy_proposals'), clearCol('strategy_okrs'), clearCol('strategy_campaigns'),
             clearCol('strategy_events')
         ]);
 
-        // 2. Restore Data
         await Promise.all([
-            restoreCol('employees', data.employees),
-            restoreCol('settlements', data.settlements),
-            restoreCol('recurring_bills', data.recurringBills),
-            restoreCol('bill_payments', data.billPayments),
-            restoreCol('stock_kitchen', data.stockKitchen),
-            restoreCol('stock_bar', data.stockBar),
-            restoreCol('stock_general', data.stockGeneral),
-            restoreCol('stock_fuel', data.stockFuel || []),
-            restoreCol('suppliers', data.suppliers),
-            restoreCol('purchase_orders', data.purchaseOrders),
-            restoreCol('menu', data.menu),
-            restoreCol('queue_tickets', data.queue),
-            restoreCol('logs', data.logs),
-            restoreCol('payroll', data.payroll),
+            restoreCol('employees', data.employees), restoreCol('settlements', data.settlements),
+            restoreCol('recurring_bills', data.recurringBills), restoreCol('bill_payments', data.billPayments),
+            restoreCol('stock_kitchen', data.stockKitchen), restoreCol('stock_bar', data.stockBar),
+            restoreCol('stock_general', data.stockGeneral), restoreCol('stock_fuel', data.stockFuel || []),
+            restoreCol('suppliers', data.suppliers), restoreCol('purchase_orders', data.purchaseOrders),
+            restoreCol('menu', data.menu), restoreCol('queue_tickets', data.queue),
+            restoreCol('logs', data.logs), restoreCol('payroll', data.payroll),
             restoreCol('attendance', data.attendance),
             
-            // Single Docs
             setDoc(doc(db, 'roster', 'main'), data.roster?.roster || {}),
             setDoc(doc(db, 'roster', 'notes'), data.roster?.notes || {}),
             setDoc(doc(db, 'config', 'store'), data.config || {}),
@@ -736,7 +648,6 @@ export class DataManager {
             restoreCol('standalone_expenses', data.standaloneExpenses || []),
             restoreCol('warranties', data.warranties || []),
             
-            // Strategy
             data.strategy ? Promise.all([
                 restoreCol('strategy_proposals', data.strategy.proposals || []),
                 restoreCol('strategy_okrs', data.strategy.okrs || []),
