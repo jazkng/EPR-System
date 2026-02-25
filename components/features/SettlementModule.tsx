@@ -4,12 +4,11 @@ import {
     AlertTriangle, Calculator, Play, Power, History, 
     ArrowRight, Receipt, Wallet, Banknote, CreditCard, 
     Coins, X, Calendar, ChevronRight, Truck, CheckCircle2, 
-    RotateCcw, AlertCircle, MinusCircle, Loader2, User, FileText
+    RotateCcw, AlertCircle, MinusCircle, Loader2, User, FileText, UserMinus // 🟢 1. 把 UserMinus 加到这里
 } from 'lucide-react';
 import { SettlementRecord, ExpenseItem, StoreConfig, Employee, Supplier } from '../../types';
 import { DataManager } from '../../utils/dataManager';
 import { ModuleGuideButton } from '../ui/ModuleGuide';
-import { UserMinus } from 'lucide-react';
 
 interface SettlementModuleProps {
     storeConfig: StoreConfig;
@@ -100,7 +99,7 @@ const ExpenseModal = ({
 
         const expense: ExpenseItem = {
             id: `exp_${Date.now()}`,
-            category: category,
+            category: category as any,
             expenseType: 'CASH_OUT',
             company: companyName,
             amount: parseFloat(amount),

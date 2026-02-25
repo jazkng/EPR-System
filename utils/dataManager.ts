@@ -33,7 +33,8 @@ export class DataManager {
             // 3. 将班次支出转存为独立支出 (AP)
             if (record.expenses && record.expenses.length > 0) {
                 record.expenses.forEach(exp => {
-                    const expRef = doc(db, 'standalone_expenses', exp.id);
+                    // 🟢 唯一修改的地方：加上 as string
+                    const expRef = doc(db, 'standalone_expenses', exp.id as string);
                     transaction.set(expRef, { ...exp, settlementId: record.id });
                 });
             }
@@ -160,28 +161,23 @@ export class DataManager {
         const snap = await getDocs(q);
         return !snap.empty;
     }
-    static async getSettlements(monthStr?: string): Promise<SettlementRecord[]> {
+   static async getSettlements(monthStr?: string): Promise<SettlementRecord[]> {
         const colRef = collection(db, 'settlements');
-        let q;
         
-        if (monthStr) {
-            // monthStr 格式如 "2024-05"
-            q = query(
+        // 🟢 修复红字：直接声明常量 q，让 TypeScript 自动推断出正确的 Query 类型
+        const q = monthStr 
+            ? query(
                 colRef, 
                 where('date', '>=', `${monthStr}-01`), 
                 where('date', '<=', `${monthStr}-31`),
-                orderBy('date', 'desc'), // 🟢 确保拿到的是该月最新的
-                limit(31) 
-            );
-        } else {
-            // 🟢 修复核心：必须加上 orderBy('date', 'desc')，否则 limit(30) 拉取的是最老的记录！
-            q = query(colRef, orderBy('date', 'desc'), limit(30)); 
-        }
+                orderBy('date', 'desc'), 
+                limit(31)
+            )
+            : query(colRef, orderBy('date', 'desc'), limit(30));
 
         const snap = await getDocs(q);
         return snap.docs
             .map(d => d.data() as SettlementRecord)
-            // 数据库已经排过序，这里保留基于内存的二次保险排序
             .sort((a, b) => b.date.localeCompare(a.date)); 
     }
     static async saveSettlement(record: SettlementRecord): Promise<void> {
