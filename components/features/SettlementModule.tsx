@@ -436,8 +436,20 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     };
 
     const handleSubmitSettlement = async () => {
-        if (!confirm(`⚠️ 确认提交结算？\n日期: ${businessDate}\n现金差异: RM ${totals.variance.toFixed(2)}`)) return;
         setIsSubmitting(true);
+        
+        // 1. O(1) 极简查重，省钱又快
+        const isDuplicate = await DataManager.checkSettlementExists(businessDate);
+        if (isDuplicate) {
+             alert(`📅 日期 ${businessDate} 已经结算过了！\n\n系统检测到重复记录。若需重新提交，请先在“历史”页面删除该日期的旧记录。`);
+             setIsSubmitting(false);
+             return;
+        }
+        
+        if (!confirm(`⚠️ 确认提交结算？\n日期: ${businessDate}\n现金差异: RM ${totals.variance.toFixed(2)}`)) {
+            setIsSubmitting(false);
+            return;
+        }
         
         const record: SettlementRecord = {
             id: `settle_${businessDate}_${Date.now()}`,
@@ -446,17 +458,30 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
             openingCash: openingTotal,
             closingCash: closingCashInput,
             sales: {
-                total: totals.totalRevenue, storeHubTotal: totals.storeHubTotal, refundTotal: salesData.refundTotal || 0,
-                cash: salesData.cash || 0, tng: salesData.tng || 0, duitnow: salesData.duitnow || 0, card: salesData.card || 0, 
-                deliveryBreakdown: { grab: salesData.grab || 0, panda: salesData.panda || 0, shopee: salesData.shopee || 0, lalamove: salesData.lalamove || 0 }
+                total: totals.totalRevenue,
+                storeHubTotal: totals.storeHubTotal,
+                refundTotal: salesData.refundTotal || 0,
+                cash: salesData.cash || 0,
+                tng: salesData.tng || 0,
+                duitnow: salesData.duitnow || 0, 
+                card: salesData.card || 0, 
+                deliveryBreakdown: {
+                    grab: salesData.grab || 0, panda: salesData.panda || 0, 
+                    shopee: salesData.shopee || 0, lalamove: salesData.lalamove || 0
+                }
             },
             expenses: shiftExpenses,
-            variance: totals.variance, varianceReason: varianceReason,
-            submittedBy: 'Manager', isClosed: true
+            variance: totals.variance,
+            varianceReason: varianceReason,
+            submittedBy: 'Manager',
+            isClosed: true
         };
-
+        
         try {
+            // 2. 🟢 核心修复：调用你刚写的无敌事务方法，一键完成所有操作
             await DataManager.executeSettlementTransaction(record);
+
+            // 3. 清理前端状态
             const nextDateStr = getBusinessDateStr(storeConfig.businessDayCutoff || 4);
             setBusinessDate(nextDateStr);
             setOpeningCounts({ 100:0, 50:0, 20:0, 10:0, 5:0, 1:0 });
@@ -466,13 +491,25 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
             setShiftExpenses([]);
             setVarianceReason('');
             setIsShiftOpen(false);
+            
             alert("✅ 结算成功！数据已转入历史记录。");
+            
+            // 4. 刷新历史记录
             setActiveTab('HISTORY');
+            const updatedHistory = await DataManager.getSettlements();
+            setHistoryRecords(updatedHistory);
+            
         } catch (error: any) { 
-            console.error(error); 
-            if (error.message?.includes('ALREADY')) alert(`📅 错误：日期 ${businessDate} 已经结算过了！`);
-            else alert("提交失败");
-        } finally { setIsSubmitting(false); }
+            console.error("Settlement Error", error); 
+            // 拦截后端事务抛出的重复结算错误
+            if (error.message.includes('DATE_ALREADY_SETTLED')) {
+                alert("❌ 提交被拦截：该日期刚刚已被其他设备结算！");
+            } else {
+                alert("❌ 提交失败，请检查网络后重试"); 
+            }
+        } finally { 
+            setIsSubmitting(false); 
+        }
     };
 
     const handleForceToday = () => {
