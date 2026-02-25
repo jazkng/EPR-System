@@ -97,12 +97,22 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
     const printRef = useRef<HTMLDivElement>(null);
 
     // --- UI STATES ---
-    // Default to Current Month (1st to Today)
+    // 🟢 修复时区偏移 Bug：直接手动拼接本地时间字符串
     const getMonthStartStr = () => {
         const date = new Date();
-        return new Date(date.getFullYear(), date.getMonth(), 1).toISOString().split('T')[0];
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        return `${year}-${month}-01`; // 强制锁定本地时间的 01 号
     };
-    const getTodayStr = () => new Date().toISOString().split('T')[0];
+    
+    // 顺手把 Today 的也修了，防范同样的晚上 12 点前变“昨天”的 Bug
+    const getTodayStr = () => {
+        const date = new Date();
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
     
     const [startDate, setStartDate] = useState(getMonthStartStr()); 
     const [endDate, setEndDate] = useState(getTodayStr());

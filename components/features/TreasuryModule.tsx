@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { TreasuryConfig, FundTransfer, SettlementRecord, ExpenseItem, BillPaymentRecord, Shareholder } from '../../types';
 import { DataManager } from '../../utils/dataManager';
-import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, doc, query, where } from "firebase/firestore";
 import { db } from '../../firebaseConfig';
 import { ModuleGuideButton } from '../ui/ModuleGuide';
 import { jsPDF } from "jspdf";
@@ -184,22 +184,32 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         loadData();
     }, []);
 
+    // 🟢 1. 替换 loadData 和 loadExpenses：专为资金盘定制的全量拉取，补回丢失的几十万收入
     const loadData = async () => {
         setLoading(true);
         try {
-            const [cfg, trf, stl, bills] = await Promise.all([
-                DataManager.getTreasuryConfig(),
+            const cfg = await DataManager.getTreasuryConfig();
+            if (cfg) setConfig(cfg);
+            
+            const startDateStr = cfg ? cfg.initialDate : '2020-01-01';
+
+            const [trf, bills] = await Promise.all([
                 DataManager.getFundTransfers(),
-                DataManager.getSettlements(),
                 DataManager.getBillPayments()
             ]);
 
-            if (cfg) setConfig(cfg);
+            // 🌟 核心修复点：绕过 dataManager 的 limit(100) 限制
+            // 精准抓取生效日期后的所有结算单，保证资金盘基数不缩水
+            const qSettlements = query(collection(db, 'settlements'), where('date', '>=', startDateStr));
+            const stlSnap = await getDocs(qSettlements);
+            const stl = stlSnap.docs.map(d => d.data() as SettlementRecord);
+
             setTransfers(trf);
             setSettlements(stl);
             setBillPayments(bills);
 
-            loadExpenses();
+            // 将取到的全量结算单传过去，防止结算单里的支出对不上
+            loadExpenses(stl);
 
         } catch (e) {
             console.error(e);
@@ -208,35 +218,33 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         }
     };
 
-    const loadExpenses = async () => {
+    const loadExpenses = async (fullSettlements: SettlementRecord[] = settlements) => {
         try {
-            // Load all expenses (Merge Settlements + AP Standalone)
-            const stl = await DataManager.getSettlements();
             const allExp: ExpenseItem[] = [];
-            stl.forEach(s => {
+            // 🌟 使用传入的全量结算单提取支出
+            fullSettlements.forEach(s => {
                 if (s.expenses) allExp.push(...s.expenses);
             });
+            
             const snap = await getDocs(collection(db, 'standalone_expenses'));
             snap.forEach(doc => allExp.push(doc.data() as ExpenseItem));
             
             const uniqueExp = Array.from(new Map(allExp.map(item => [item.id, item])).values());
 
-            // MERGE BILL PAYMENTS INTO EXPENSE LIST FOR DISPLAY
             const bills = await DataManager.getBillPayments();
             const billExpenses: ExpenseItem[] = bills.map(b => ({
                 id: b.id,
                 category: b.category,
                 expenseType: 'RECURRING',
-                company: b.name, // Display name
-                amount: b.amount,
+                company: b.name, 
+                amount: Number(b.amount) || 0, 
                 note: b.referenceNo ? `[Bill] ${b.referenceNo}` : '[Bill Payment]',
-                time: `${b.date}T12:00:00`, // Approximate time for sort
+                time: `${b.date}T12:00:00`, 
                 paymentMethod: b.method,
                 paymentStatus: 'PAID'
             }));
 
             const combined = [...uniqueExp, ...billExpenses];
-            // Sort by date descending
             combined.sort((a,b) => new Date(b.time).getTime() - new Date(a.time).getTime());
             setExpenses(combined);
         } catch (e) {
@@ -287,48 +295,62 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         return { total, thisMonthTotal, breakdown, records };
     }, [transfers]);
 
+    // 🟢 2. 替换 balances：全面阻断字符串加法带来的金额异常
     const balances = useMemo(() => {
-        let cash = config.initialCash;
-        let bank = config.initialBank;
+        let cash = Number(config.initialCash) || 0;
+        let bank = Number(config.initialBank) || 0;
         const startDate = new Date(config.initialDate);
+        
         settlements.forEach(s => {
             if (new Date(s.date) >= startDate) {
-                const actualCashIncome = (s.sales.cash || 0) + (s.variance || 0);
+                // 强制转 Number，防止 "100" + "50" 变成 "10050"
+                const actualCashIncome = Number(s.sales.cash || 0) + Number(s.variance || 0);
                 cash += actualCashIncome;
-                const bankIncome = (s.sales.tng || 0) + (s.sales.duitnow || 0) + (s.sales.card || 0);
+                
+                const bankIncome = Number(s.sales.tng || 0) + Number(s.sales.duitnow || 0) + Number(s.sales.card || 0);
                 const deliveryIncome = s.sales.deliveryBreakdown ? Object.values(s.sales.deliveryBreakdown).reduce((a:number, b:any) => a + (Number(b)||0), 0) : 0;
-                const debitFee = (s.sales.duitnow || 0) * 0.0045;
-                const creditFee = (s.sales.card || 0) * 0.01;
+                
+                const debitFee = Number(s.sales.duitnow || 0) * 0.0045;
+                const creditFee = Number(s.sales.card || 0) * 0.01;
                 bank += ((bankIncome + deliveryIncome) - (debitFee + creditFee));
             }
         });
+        
         expenses.forEach(e => {
             if (e.expenseType === 'RECURRING') return;
             if (e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL') {
-                const payDate = new Date(e.time);
+                const payDate = new Date(e.time.split('T')[0]); // 修复时区偏差漏算支出
                 if (payDate >= startDate) {
-                    const amt = e.amount || 0;
+                    const amt = Number(e.amount) || 0;
                     const method = e.paymentMethod ? e.paymentMethod.toUpperCase() : 'BANK_TRANSFER';
                     if (method.includes('CASH')) cash -= amt; else bank -= amt;
                 }
             }
         });
+        
         billPayments.forEach(b => {
             if (new Date(b.date) >= startDate) {
-                const amt = b.amount || 0;
+                const amt = Number(b.amount) || 0;
                 const method = b.method ? b.method.toUpperCase() : 'BANK_TRANSFER';
                 if (method.includes('CASH')) cash -= amt; else bank -= amt;
             }
         });
+        
         transfers.forEach(t => {
-            if (new Date(t.date) >= startDate) {
-                if (t.fromAccount === 'CASH') cash -= t.amount; else if (t.fromAccount === 'BANK') bank -= t.amount;
-                if (t.fromAccount === 'SHAREHOLDER' as any || t.fromAccount === 'OTHER' as any) { if (t.toAccount === 'CASH') cash += t.amount; else bank += t.amount; } 
-                else { if (t.toAccount === 'CASH') cash += t.amount; else if (t.toAccount === 'BANK') bank += t.amount; }
+            if (new Date(t.date.split('T')[0]) >= startDate) {
+                const amt = Number(t.amount) || 0;
+                if (t.fromAccount === 'CASH') cash -= amt; else if (t.fromAccount === 'BANK') bank -= amt;
+                
+                if (t.fromAccount === 'SHAREHOLDER' as any || t.fromAccount === 'OTHER' as any) { 
+                    if (t.toAccount === 'CASH') cash += amt; else bank += amt; 
+                } else { 
+                    if (t.toAccount === 'CASH') cash += amt; else if (t.toAccount === 'BANK') bank += amt; 
+                }
             }
         });
+        
         return { cash, bank, total: cash + bank };
-    }, [config, settlements, expenses, billPayments, transfers]); 
+    }, [config, settlements, expenses, billPayments, transfers]);
 
     const getLedgerData = (type: 'CASH' | 'BANK') => {
         const items: LedgerItem[] = [];
