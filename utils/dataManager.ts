@@ -1,5 +1,5 @@
 import { db } from '../firebaseConfig';
-import { collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where, writeBatch, updateDoc, runTransaction, limit } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where, writeBatch, updateDoc, runTransaction, limit, orderBy } from 'firebase/firestore';
 import { 
     Employee, SettlementRecord, ExpenseItem, RecurringBill, 
     BillPaymentRecord, StockItem, Supplier, PurchaseOrder, 
@@ -152,6 +152,14 @@ export class DataManager {
     }
 
     // SETTLEMENTS
+    // ==========================================
+    // 🟢 1. 新增：结算防重专属检测（极其省 Reads）
+    // ==========================================
+    static async checkSettlementExists(date: string): Promise<boolean> {
+        const q = query(collection(db, 'settlements'), where('date', '==', date), limit(1));
+        const snap = await getDocs(q);
+        return !snap.empty;
+    }
     static async getSettlements(monthStr?: string): Promise<SettlementRecord[]> {
         const colRef = collection(db, 'settlements');
         let q;
@@ -162,17 +170,19 @@ export class DataManager {
                 colRef, 
                 where('date', '>=', `${monthStr}-01`), 
                 where('date', '<=', `${monthStr}-31`),
-                limit(31) // 计费护栏：一个月最多31条
+                orderBy('date', 'desc'), // 🟢 确保拿到的是该月最新的
+                limit(31) 
             );
         } else {
-            // 默认只显示最近的 30 条记录，防止全量拉取爆炸
-            q = query(colRef, limit(30)); 
+            // 🟢 修复核心：必须加上 orderBy('date', 'desc')，否则 limit(30) 拉取的是最老的记录！
+            q = query(colRef, orderBy('date', 'desc'), limit(30)); 
         }
 
         const snap = await getDocs(q);
         return snap.docs
             .map(d => d.data() as SettlementRecord)
-            .sort((a, b) => b.date.localeCompare(a.date));
+            // 数据库已经排过序，这里保留基于内存的二次保险排序
+            .sort((a, b) => b.date.localeCompare(a.date)); 
     }
     static async saveSettlement(record: SettlementRecord): Promise<void> {
         await setDoc(doc(db, 'settlements', record.id), record);
@@ -268,21 +278,40 @@ export class DataManager {
 
     // INVENTORY TASKS
     static async getInventoryTasks(): Promise<InventoryTask[]> {
-        const snap = await getDocs(collection(db, 'inventory_tasks'));
-        return snap.docs.map(d => d.data() as InventoryTask).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+        // 🟢 修复：必须加上 orderBy('createdAt', 'desc')，确保拉取的是最新的 100 条
+        const q = query(
+            collection(db, 'inventory_tasks'), 
+            orderBy('createdAt', 'desc'), 
+            limit(100)
+        );
+        const snap = await getDocs(q);
+        return snap.docs
+            .map(d => d.data() as InventoryTask)
+            .sort((a,b) => b.createdAt.localeCompare(a.createdAt)); // 内存二次防线，保持你原有的逻辑
     }
+    
     static async saveInventoryTask(task: InventoryTask): Promise<void> {
         await setDoc(doc(db, 'inventory_tasks', task.id), task);
     }
+    
     static async deleteInventoryTask(id: string): Promise<void> {
         await deleteDoc(doc(db, 'inventory_tasks', id));
     }
 
     // INVENTORY LOGS
     static async getInventoryLogs(): Promise<InventoryLog[]> {
-        const snap = await getDocs(collection(db, 'inventory_logs'));
-        return snap.docs.map(d => d.data() as InventoryLog).sort((a,b) => b.timestamp.localeCompare(a.timestamp));
+        // 🟢 修复：必须加上 orderBy('timestamp', 'desc')，确保拉取的是最新的 200 条
+        const q = query(
+            collection(db, 'inventory_logs'), 
+            orderBy('timestamp', 'desc'), 
+            limit(200)
+        );
+        const snap = await getDocs(q);
+        return snap.docs
+            .map(d => d.data() as InventoryLog)
+            .sort((a,b) => b.timestamp.localeCompare(a.timestamp)); // 内存二次防线
     }
+    
     static async saveInventoryLog(log: InventoryLog): Promise<void> {
         await setDoc(doc(db, 'inventory_logs', log.id), log);
     }
