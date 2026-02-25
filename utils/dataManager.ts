@@ -152,9 +152,27 @@ export class DataManager {
     }
 
     // SETTLEMENTS
-    static async getSettlements(): Promise<SettlementRecord[]> {
-        const snap = await getDocs(collection(db, 'settlements'));
-        return snap.docs.map(d => d.data() as SettlementRecord).sort((a,b) => b.date.localeCompare(a.date));
+    static async getSettlements(monthStr?: string): Promise<SettlementRecord[]> {
+        const colRef = collection(db, 'settlements');
+        let q;
+        
+        if (monthStr) {
+            // monthStr 格式如 "2024-05"
+            q = query(
+                colRef, 
+                where('date', '>=', `${monthStr}-01`), 
+                where('date', '<=', `${monthStr}-31`),
+                limit(31) // 计费护栏：一个月最多31条
+            );
+        } else {
+            // 默认只显示最近的 30 条记录，防止全量拉取爆炸
+            q = query(colRef, limit(30)); 
+        }
+
+        const snap = await getDocs(q);
+        return snap.docs
+            .map(d => d.data() as SettlementRecord)
+            .sort((a, b) => b.date.localeCompare(a.date));
     }
     static async saveSettlement(record: SettlementRecord): Promise<void> {
         await setDoc(doc(db, 'settlements', record.id), record);
