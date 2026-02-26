@@ -1,12 +1,10 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Calendar, Search, ArrowDown, ArrowUp, ArrowRight, Filter, PieChart, TrendingUp, DollarSign, Download, Printer, Loader2, ChevronRight, BarChart3, AlertCircle, ListChecks, ArrowDownLeft, ChevronDown, ChevronUp, Percent, LayoutList, Info, Users, HelpCircle, Eye, EyeOff, ArrowRightLeft, FileText, Banknote, Landmark, RefreshCw, CalendarRange, Wallet, CreditCard, Truck, Calculator, Coins, ShoppingBag, Receipt, UserMinus, UserCheck, Briefcase } from 'lucide-react';
 import { SettlementRecord, ExpenseItem, BillPaymentRecord, FundTransfer, TreasuryConfig, PayrollRecord } from '../../types';
 import { DataManager } from '../../utils/dataManager';
-import { ModuleGuideButton } from '../ui/ModuleGuide';
 import { jsPDF } from "jspdf";
 import html2canvas from 'html2canvas';
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from '../../firebaseConfig';
 
 interface FinancialReportProps {
@@ -97,15 +95,13 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
     const printRef = useRef<HTMLDivElement>(null);
 
     // --- UI STATES ---
-    // 🟢 修复时区偏移 Bug：直接手动拼接本地时间字符串
     const getMonthStartStr = () => {
         const date = new Date();
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, '0');
-        return `${year}-${month}-01`; // 强制锁定本地时间的 01 号
+        return `${year}-${month}-01`; 
     };
     
-    // 顺手把 Today 的也修了，防范同样的晚上 12 点前变“昨天”的 Bug
     const getTodayStr = () => {
         const date = new Date();
         const year = date.getFullYear();
@@ -128,20 +124,33 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
     // Drill Down State
     const [detailView, setDetailView] = useState<{ title: string, type: 'COGS' | 'LABOR' | 'OPEX', items: DetailedExpenseItem[] } | null>(null);
 
+    // 🛡️ 御膳智控防线：包含时间过滤的拉取逻辑
     useEffect(() => {
         const loadData = async () => {
             setLoading(true);
             try {
-                const [settlements, bills, funds, config, payrolls] = await Promise.all([
-                    DataManager.getSettlements(),
+                // 1. 先拉取不需大范围分页的配置和账单
+                const [bills, funds, config, payrolls] = await Promise.all([
                     DataManager.getBillPayments(),
                     DataManager.getFundTransfers(),
                     DataManager.getTreasuryConfig(),
                     DataManager.getPayrollRecords()
                 ]);
 
-                const expSnap = await getDocs(collection(db, 'standalone_expenses'));
-                const expenses = expSnap.docs.map(d => d.data() as ExpenseItem);
+                const configStart = config?.initialDate || '2000-01-01';
+
+                // 2. 🛡️ 御膳智控直连：绕过 DataManager 的分页限制，强行拉取金库生效以来的所有结算和支出！
+                // 假设您的结算集合名称为 'settlements' (如果叫 'daily_settlements' 请自行修改)
+                const settlementsRef = collection(db, 'settlements'); 
+                const expensesRef = collection(db, 'standalone_expenses');
+
+                const [setSnap, expSnap] = await Promise.all([
+                    getDocs(query(settlementsRef, where("date", ">=", configStart))),
+                    getDocs(query(expensesRef, where("time", ">=", configStart)))
+                ]);
+
+                const settlements = setSnap.docs.map(d => ({ id: d.id, ...d.data() } as SettlementRecord));
+                const expenses = expSnap.docs.map(d => ({ id: d.id, ...d.data() } as ExpenseItem));
 
                 setSettlementRecords(settlements);
                 setStandaloneExpenses(expenses);
@@ -151,6 +160,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 setPayrollRecords(payrolls);
             } catch (error) {
                 console.error("Failed to load financial data", error);
+                alert("⚠️ 财务数据拉取异常，请检查网络或联系管理员。");
             } finally {
                 setLoading(false);
             }
@@ -160,28 +170,37 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
     const setQuickDate = (type: 'TODAY' | 'YESTERDAY' | 'WEEK' | 'MONTH' | 'LAST_MONTH') => {
         const now = new Date();
-        const start = new Date();
-        const end = new Date();
+        // 🛡️ 御膳智控防线：直接初始化为本地当天的 00:00:00，绝不跨天
+        let start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        let end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
         if (type === 'TODAY') {
             // No change
         } else if (type === 'YESTERDAY') {
-            start.setDate(now.getDate() - 1);
-            end.setDate(now.getDate() - 1);
+            start.setDate(start.getDate() - 1);
+            end.setDate(end.getDate() - 1);
         } else if (type === 'WEEK') {
-            const day = now.getDay() || 7; 
-            start.setDate(now.getDate() - day + 1);
-            end.setDate(now.getDate() - day + 7);
+            const day = start.getDay() || 7; 
+            start.setDate(start.getDate() - day + 1);
+            end.setDate(start.getDate() + 6);
         } else if (type === 'MONTH') {
             start.setDate(1); 
         } else if (type === 'LAST_MONTH') {
-            start.setMonth(start.getMonth() - 1);
-            start.setDate(1);
-            end.setDate(0); 
+            // 🛡️ 御膳智控防线：绝对安全的获取上月第一天与最后一天（无视任何 28/30/31 溢出问题）
+            start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            end = new Date(now.getFullYear(), now.getMonth(), 0);
         }
 
-        setStartDate(start.toISOString().split('T')[0]);
-        setEndDate(end.toISOString().split('T')[0]);
+        // 🛡️ 御膳智控防线：彻底弃用 .toISOString()，锁定本地时间输出 YYYY-MM-DD
+        const formatLocal = (d: Date) => {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        };
+
+        setStartDate(formatLocal(start));
+        setEndDate(formatLocal(end));
     };
 
     // --- ANALYTICS ENGINE ---
@@ -194,70 +213,69 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
         // 1. REVENUE
         const revenueDetails = {
-            cash: 0,
-            ewallet: 0, // TNG Only now
-            debitCard: 0, // Was DuitNow
-            creditCard: 0, // Was Card
-            delivery: 0,
-            totalRevenue: 0,
-            variance: 0 
+            cash: 0, ewallet: 0, debitCard: 0, creditCard: 0, delivery: 0, totalRevenue: 0, variance: 0 
         };
 
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
-            revenueDetails.totalRevenue += s.sales.total;
-            revenueDetails.cash += (s.sales.cash || 0);
-            
-            // Map old structure to new logic
-            revenueDetails.ewallet += (s.sales.tng || 0); 
-            revenueDetails.debitCard += (s.sales.duitnow || 0);
-            revenueDetails.creditCard += (s.sales.card || 0);
+            // 🛡️ 御膳智控防线：强制转换为 Number，粉碎一切 undefined 和 字符串拼接 导致的 NaN 漏洞
+            const cashAmt = Number(s.sales.cash || 0);
+            const tngAmt = Number(s.sales.tng || 0);
+            const duitnowAmt = Number(s.sales.duitnow || 0);
+            const cardAmt = Number(s.sales.card || 0);
+            const varianceAmt = Number(s.variance || 0);
 
+            // 外卖平台收入总和
             const del = s.sales.deliveryBreakdown 
                 ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0)
                 : 0;
-            revenueDetails.delivery += Number(del);
-            revenueDetails.variance += (s.variance || 0);
+            const deliveryAmt = Number(del);
+
+            // 🛡️ 核心修复：防止 s.sales.total 录入缺失或未含外卖，直接用底层加法计算绝对总营业额！
+            const rawTotal = Number(s.sales.total || 0);
+            const calculatedTotal = cashAmt + tngAmt + duitnowAmt + cardAmt + deliveryAmt;
+            
+            // 取两者最高值，防止有任何漏算
+            revenueDetails.totalRevenue += Math.max(rawTotal, calculatedTotal);
+            
+            revenueDetails.cash += cashAmt;
+            revenueDetails.ewallet += tngAmt; 
+            revenueDetails.debitCard += duitnowAmt;
+            revenueDetails.creditCard += cardAmt;
+            revenueDetails.delivery += deliveryAmt;
+            revenueDetails.variance += varianceAmt;
         });
 
         const totalPaymentMethodVolume = revenueDetails.cash + revenueDetails.ewallet + revenueDetails.debitCard + revenueDetails.creditCard; 
         const cashPercentage = totalPaymentMethodVolume > 0 ? (revenueDetails.cash / totalPaymentMethodVolume) * 100 : 0;
         const ewalletPercentage = totalPaymentMethodVolume > 0 ? ((revenueDetails.ewallet + revenueDetails.debitCard + revenueDetails.creditCard) / totalPaymentMethodVolume) * 100 : 0;
 
-
         // 2. EXPENSES (Detailed)
         let totalCOGS = 0, totalLabor = 0, totalOPEX = 0;
         const groups: Record<string, CostGroup> = {};
 
         const addCost = (amount: number, category: string, label?: string, isPending: boolean = false) => {
-            if (!amount && !isPending) return; // Don't add 0 unless it's a pending marker
+            if (!amount && !isPending) return; 
             
             const catKey = category ? category.toUpperCase() : 'OTHER';
             const type = categorizeExpense(catKey);
             
-            // Only add to TOTALS if NOT pending
             if (!isPending) {
                 if (type === 'COGS') totalCOGS += amount;
                 else if (type === 'LABOR') totalLabor += amount;
                 else totalOPEX += amount;
             }
 
-            // Always add to Breakdown List
             if (!groups[catKey]) groups[catKey] = { id: catKey, label: label || CATEGORY_LABELS[catKey] || catKey, amount: 0, type, isPending };
             groups[catKey].amount += amount;
         };
 
-        // A. Settlement Petty Cash
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
             s.expenses?.forEach(e => addCost(e.amount, e.category));
         });
 
-        // B. Standalone Expenses (AP Bills & Synced Settlement Expenses)
         standaloneExpenses.filter(e => isInRange(e.time)).forEach(e => {
-            // CRITICAL: Skip auto-generated payroll expenses to avoid double counting or wrong dates.
-            // We will calculate Payroll directly from PayrollRecord below.
             if (e.id.startsWith('payroll_') || e.category === 'PAYROLL') return;
-
-            if (e.settlementId) return; // Skip if belongs to settlement
+            if (e.settlementId) return; 
 
             const isPaid = e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL';
             if (includeUnpaid || isPaid) {
@@ -266,26 +284,17 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             }
         });
 
-        // C. Bill Payments (Recurring)
         billPayments.filter(b => isInRange(b.date)).forEach(b => addCost(b.amount, b.category));
 
-        // D. Payroll (LOGIC UPDATE: Accrual Basis)
-        // We use the PayrollRecord MONTH as the source of truth for the date.
-        // If Payroll is "2024-01", we assume the expense date is "2024-01-28" (End of Month).
         payrollRecords.forEach(p => {
-             // Construct an effective date for filtering (e.g. 28th of the payroll month)
              const effectiveDate = `${p.month}-28`;
              
              if (effectiveDate >= startDate && effectiveDate <= endDate && p.status === 'POSTED') {
-                 // 1. Net Pay (Always count if posted)
                  addCost(p.totalNetPay, 'PAYROLL', `Staff Payroll (Net - ${p.month})`);
                  
-                 // 2. Statutory (Count ONLY if paid, else mark Draft)
                  if (p.isStatutoryPaid) {
                      addCost(p.totalGovtPay, 'EPF_SOCSO', `Statutory Paid (${p.month})`);
                  } else {
-                     // Add as "Pending" (Amount 0 for Total Calculation, but visible in list)
-                     // Using a unique key to separate it from paid statutory
                      const pendingKey = `STAT_PENDING_${p.month}`;
                      if (!groups[pendingKey]) {
                          groups[pendingKey] = { 
@@ -300,7 +309,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
              }
         });
 
-        // E. Maybank Commission
         const debitFee = revenueDetails.debitCard * 0.0045;
         const creditFee = revenueDetails.creditCard * 0.01;
         const totalCommission = debitFee + creditFee;
@@ -347,20 +355,17 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const addItem = (item: DetailedExpenseItem) => {
             const itemType = categorizeExpense(item.category);
             
-            // Filter logic
             if (criteria.type && itemType !== criteria.type) return;
             if (criteria.categoryId && item.category.toUpperCase() !== criteria.categoryId && !criteria.categoryId.startsWith('STAT_PENDING')) return;
             
-            // Special handling for Pending Statutory drill down
             if (criteria.categoryId?.startsWith('STAT_PENDING')) {
-                 if (item.id !== criteria.categoryId) return; // Only show the virtual item
+                 if (item.id !== criteria.categoryId) return; 
             }
 
             item.type = itemType;
             rawItems.push(item);
         };
 
-        // 1. Settlements
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
             s.expenses?.forEach((e, idx) => {
                 addItem({
@@ -375,11 +380,8 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             });
         });
 
-        // 2. Standalone
         standaloneExpenses.filter(e => isInRange(e.time)).forEach(e => {
-            // Exclude Payroll generated items for drill down too
             if (e.id.startsWith('payroll_') || e.category === 'PAYROLL') return;
-
             if (e.settlementId) return;
             const isPaid = e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL';
             if (includeUnpaid || isPaid) {
@@ -396,7 +398,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             }
         });
 
-        // 3. Bill Payments
         billPayments.filter(b => isInRange(b.date)).forEach(b => {
             addItem({
                 id: b.id,
@@ -409,24 +410,21 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             });
         });
 
-        // 4. Payroll
         payrollRecords.forEach(p => {
              const effectiveDate = `${p.month}-28`;
              if (effectiveDate >= startDate && effectiveDate <= endDate && p.status === 'POSTED') {
-                 // Net Pay
                  if (!criteria.categoryId || criteria.categoryId === 'PAYROLL') {
                     addItem({
                         id: p.id,
                         date: effectiveDate,
                         category: 'PAYROLL',
                         desc: `Net Pay for ${p.month} (Staff Count: ${p.staffCount})`,
-                        amount: p.totalNetPay, // Use Net Pay
+                        amount: p.totalNetPay, 
                         source: 'Payroll (Net)',
                         type: 'LABOR'
                     });
                  }
                  
-                 // Statutory (Paid)
                  if (p.isStatutoryPaid && (!criteria.categoryId || criteria.categoryId === 'EPF_SOCSO')) {
                      addItem({
                          id: `${p.id}_STAT`,
@@ -439,7 +437,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                      });
                  }
 
-                 // Statutory (Pending) - Virtual Item
                  if (!p.isStatutoryPaid && criteria.categoryId === `STAT_PENDING_${p.month}`) {
                      addItem({
                         id: `STAT_PENDING_${p.month}`,
@@ -454,7 +451,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
              }
         });
 
-        // 5. Commission
         if (criteria.categoryId === 'MBB_COMM') {
              rawItems.push({
                  id: 'MBB_FEE_CALC',
@@ -481,22 +477,17 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
     // --- AUDIT TRAIL ENGINE (REFACTORED TO MATCH TREASURY BALANCE) ---
     const { auditTrail, openingBalance } = useMemo(() => {
-        // We must calculate from the BEGINNING of time (Initial Date) to get the correct running balance
-        // Then we slice the array to show only the requested range.
         const allTransactions: any[] = [];
         const configStart = treasuryConfig?.initialDate || '2000-01-01';
         let runningBalance = (treasuryConfig?.initialCash || 0) + (treasuryConfig?.initialBank || 0);
 
-        // 1. Settlement Inflows & Expenses
         settlementRecords.forEach(s => {
             if (s.date >= configStart) {
-                // Actual Cash Income (StoreHub + Variance)
                 if ((s.sales.cash || 0) + (s.variance || 0) !== 0) {
                     const actualCash = (s.sales.cash || 0) + (s.variance || 0);
                     allTransactions.push({ id: `cash_${s.id}`, date: s.date, time: s.timestamp, type: 'IN', category: 'SALES', description: 'Cash Sales (Net)', amount: actualCash, account: 'CASH' });
                 }
                 
-                // Bank Income
                 const bankIncome = (s.sales.tng || 0) + (s.sales.duitnow || 0) + (s.sales.card || 0);
                 const delivery = s.sales.deliveryBreakdown 
                     ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b:number)=>a+b,0) 
@@ -505,17 +496,15 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                     allTransactions.push({ id: `bank_${s.id}`, date: s.date, time: s.timestamp, type: 'IN', category: 'SALES', description: 'Digital/Delivery Sales', amount: bankIncome + delivery, account: 'BANK' });
                 }
 
-                // Expenses in Settlement (Petty Cash Out)
                 s.expenses?.forEach((e, idx) => { 
                     allTransactions.push({ id: `${s.id}_e_${idx}`, date: s.date, time: s.timestamp, type: 'OUT', category: e.category, description: `Petty: ${e.company || ''}`, amount: e.amount, account: 'CASH' }); 
                 });
             }
         });
 
-        // 2. Standalone Expenses (AP) - Prevent Duplicates
         standaloneExpenses.forEach(e => {
-            if (e.settlementId) return; // Skip if belongs to settlement
-            if (e.expenseType === 'RECURRING') return; // Skip, handled in Bills
+            if (e.settlementId) return; 
+            if (e.expenseType === 'RECURRING') return; 
             
             if ((e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL') && e.amount > 0) {
                 const transactionTime = e.paymentDate || e.time;
@@ -525,39 +514,27 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             }
         });
 
-        // 3. Bill Payments
         billPayments.forEach(b => {
             if (b.date >= configStart) allTransactions.push({ id: b.id, date: b.date, time: `${b.date}T12:00:00`, type: 'OUT', category: b.category, description: b.name, amount: b.amount, account: b.method || 'BANK' });
         });
 
-        // 4. Transfers (Only Injections/Extra Income affect Total Balance. Internal transfers do not change Total Assets)
         transfers.forEach(t => {
             if (t.date.split('T')[0] >= configStart) {
                 if (t.fromAccount === 'SHAREHOLDER' as any || t.fromAccount === 'OTHER' as any) {
                     allTransactions.push({ id: t.id, date: t.date.split('T')[0], time: t.date, type: 'IN', category: 'FUND', description: t.note || 'Injection', amount: t.amount, account: t.toAccount });
                 }
-                // Internal transfers (CASH <-> BANK) sum to 0 change in Total Assets, so we don't need them for the Total Balance Chart,
-                // BUT user might want to see them in audit trail.
-                // For Balance correctness, if we track "Total Assets", internal transfers don't matter. 
-                // Let's include them for visibility but they won't affect runningBalance if we tracked accounts separately.
-                // Since `runningBalance` here is TOTAL ASSETS, internal transfers are ignored for calculation.
             }
         });
 
-        // Sort Chronologically
         allTransactions.sort((a, b) => new Date(a.time || a.date).getTime() - new Date(b.time || b.date).getTime());
         
         const displayItems: AuditLogItem[] = [];
-        let balanceAtStartOfRange = runningBalance; // Initialize with Config Start Balance
+        let balanceAtStartOfRange = runningBalance; 
 
-        // Walk through history to build balance
         allTransactions.forEach(t => {
-            // Update Running Balance based on IN/OUT
-            // Note: Internal transfers are filtered out above for Total Asset calculation
             if (t.type === 'IN') runningBalance += t.amount; 
             else runningBalance -= t.amount;
             
-            // Check if transaction falls within user selected range
             if (t.date < startDate) {
                 balanceAtStartOfRange = runningBalance;
             } else if (t.date <= endDate) {
@@ -565,7 +542,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             }
         });
 
-        // Reverse for display (Newest First)
         return { auditTrail: displayItems.reverse(), openingBalance: balanceAtStartOfRange };
     }, [settlementRecords, standaloneExpenses, billPayments, transfers, treasuryConfig, startDate, endDate]);
 
@@ -588,10 +564,8 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
     return (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-0 md:p-4 backdrop-blur-sm animate-in zoom-in duration-200">
-            {/* Tablet Optimized Container: Wider and taller for iPad */}
             <div className="bg-[#F5F7FA] w-full h-full md:w-[95vw] md:h-[92vh] lg:max-w-7xl md:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
                 
-                {/* Header */}
                 <div className="bg-[#1A1A1A] p-4 md:p-5 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
                     <div className="flex items-center gap-4">
                         <div className="bg-[#FFD700] text-black p-2.5 rounded-xl shadow-lg"><PieChart size={24}/></div>
@@ -608,7 +582,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                     </div>
                 </div>
 
-                {/* Controls - Optimized Layout for Tablet */}
                 <div className="bg-white border-b border-gray-200 p-4 flex flex-col lg:flex-row justify-between items-center gap-4 shrink-0 shadow-sm z-10 touch-manipulation">
                     <div className="flex flex-col md:flex-row items-center gap-3 w-full lg:w-auto">
                         <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-1 px-3">
@@ -624,7 +597,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                         </div>
                     </div>
 
-                    {/* TAB SWITCHER - Improved sizing */}
                     <div className="flex bg-gray-100 p-1.5 rounded-xl overflow-x-auto w-full lg:w-auto scrollbar-hide">
                         {[
                             { id: 'OVERVIEW', label: '总览 (Overview)', icon: LayoutList },
@@ -644,14 +616,12 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                     </div>
                 </div>
 
-                {/* Content */}
                 <div className="flex-grow overflow-y-auto p-4 md:p-6 bg-[#F5F7FA] touch-pan-y">
                     {loading ? (
                         <div className="flex items-center justify-center h-40"><Loader2 size={32} className="animate-spin text-gray-400"/></div>
                     ) : (
                         <div className="max-w-7xl mx-auto">
                             
-                            {/* === TAB 1: OVERVIEW === */}
                             {activeTab === 'OVERVIEW' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
@@ -687,13 +657,11 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 </div>
                             )}
 
-                            {/* === TAB 2: SALES ANALYSIS === */}
                             {activeTab === 'SALES' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
                                     <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm">
                                         <h4 className="font-black text-sm text-[#1A1A1A] mb-6 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> 支付方式占比 (Payment Methods)</h4>
                                         
-                                        {/* Progress Bar Visual */}
                                         <div className="flex h-4 rounded-full overflow-hidden mb-4 bg-gray-100">
                                             <div className="bg-green-500 transition-all duration-1000" style={{ width: `${analytics.percentages.cash}%` }}></div>
                                             <div className="bg-blue-500 transition-all duration-1000" style={{ width: `${analytics.percentages.ewallet}%` }}></div>
@@ -744,7 +712,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 </div>
                             )}
 
-                            {/* === TAB 3: COST ANALYSIS === */}
                             {activeTab === 'COST' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -776,7 +743,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         </button>
                                     </div>
 
-                                    {/* MAYBANK COMMISSION ALERT */}
                                     {analytics.fees.totalCommission > 0 && (
                                         <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 flex justify-between items-center text-xs text-yellow-800">
                                             <div className="flex items-center gap-2 font-bold"><AlertCircle size={14}/> Maybank Merchant Fees Included in OPEX</div>
@@ -808,7 +774,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest border-b pb-2">Labor & OPEX (人工与运营)</h4>
                                             <div className="space-y-2 max-h-80 overflow-y-auto touch-pan-y">
                                                 <p className="text-[10px] font-black text-purple-600 uppercase mt-2 pl-2">Labor</p>
-                                                {/* SPECIAL: Staff Advance Shortcut */}
                                                 <div 
                                                     onClick={() => handleDrillDown({ categoryId: 'STAFF_ADVANCE' }, '员工预支 (Staff Advance)')}
                                                     className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-red-400 p-3 bg-red-50/50 hover:bg-red-100 cursor-pointer rounded-r-lg transition-colors group mb-1 active:scale-[0.98]"
@@ -844,7 +809,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                 ))}
                                                 <p className="text-[10px] font-black text-orange-600 uppercase mt-4 pl-2">OPEX</p>
                                                 
-                                                {/* AUTO GENERATED MBB COMMISSION */}
                                                 {analytics.fees.totalCommission > 0 && (
                                                     <div 
                                                         onClick={() => handleDrillDown({ categoryId: 'MBB_COMM' }, 'Maybank Commission (Auto-Calc)')}
@@ -877,7 +841,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 </div>
                             )}
 
-                            {/* === TAB 4: AUDIT TRAIL === */}
                             {activeTab === 'AUDIT' && (
                                 <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
                                     <div className="bg-white rounded-[2rem] shadow-sm border border-gray-200 overflow-hidden">
@@ -931,7 +894,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 </div>
                             )}
 
-                             {/* === TAB 5: DIVIDEND CALCULATOR (NEW) === */}
                              {activeTab === 'DIVIDEND' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
                                     <div className="bg-[#1A1A1A] p-6 rounded-[2rem] shadow-xl text-white relative overflow-hidden">
@@ -949,7 +911,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             </div>
                                         </div>
 
-                                        {/* Slider */}
                                         <div className="mt-8 bg-white/10 p-4 rounded-xl border border-white/10">
                                             <div className="flex justify-between text-xs font-bold mb-2">
                                                 <span>Retained Earnings (留存收益): <span className="text-[#FFD700]">{retentionRate}%</span></span>
@@ -995,7 +956,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                 </div>
                                             </div>
 
-                                            {/* Shareholder Breakdown */}
                                             <div className="col-span-full">
                                                 <h4 className="text-sm font-black text-[#1A1A1A] uppercase tracking-widest mb-4 ml-2 flex items-center gap-2">
                                                     <Users size={16}/> 股东分配明细 (Breakdown)
@@ -1035,7 +995,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 </div>
                              )}
 
-                            {/* Hidden Print Template */}
                             <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
                                 <div ref={printRef} className="w-[210mm] min-h-[297mm] bg-white p-12 font-sans text-black relative">
                                     <div className="flex justify-between items-start border-b-4 border-black pb-4 mb-8">
@@ -1049,7 +1008,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         </div>
                                     </div>
 
-                                    {/* P&L Section for PDF */}
                                     <div className="grid grid-cols-2 gap-8 mb-8 border-b border-gray-200 pb-8">
                                         <div>
                                             <p className="text-xs font-black uppercase mb-2">REVENUE</p>
@@ -1102,7 +1060,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                     )}
                 </div>
 
-                {/* DETAIL MODAL (DRILL DOWN) */}
+                {/* 🛡️ 御膳智控防线：加上了所有的 ?. 防止在未完全渲染时解构崩溃 */}
                 {detailView && (
                     <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                         <div className="bg-white rounded-[2rem] w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
@@ -1110,9 +1068,9 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 <div>
                                     <h3 className="font-black text-xl text-[#1A1A1A] flex items-center gap-2">
                                         <Receipt size={24} className="text-gray-400"/>
-                                        {detailView.title}
+                                        {detailView?.title}
                                     </h3>
-                                    <p className="text-xs text-gray-500 font-bold mt-1 uppercase tracking-widest">{detailView.items.length} Transactions found</p>
+                                    <p className="text-xs text-gray-500 font-bold mt-1 uppercase tracking-widest">{detailView?.items?.length} Transactions found</p>
                                 </div>
                                 <button onClick={() => setDetailView(null)} className="p-2 hover:bg-gray-100 rounded-full active:scale-95 transition-transform"><X size={24}/></button>
                             </div>
@@ -1128,10 +1086,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {detailView.items.length === 0 ? (
+                                        {detailView?.items?.length === 0 ? (
                                             <tr><td colSpan={4} className="p-10 text-center text-gray-400 italic">无相关记录</td></tr>
                                         ) : (
-                                            detailView.items.map((item, idx) => (
+                                            detailView?.items?.map((item, idx) => (
                                                 <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
                                                     <td className="p-4 font-mono text-gray-600 whitespace-nowrap">{item.date}</td>
                                                     <td className="p-4">
@@ -1161,7 +1119,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                             <div className="p-4 bg-gray-50 border-t border-gray-200 text-right">
                                 <span className="text-xs font-bold text-gray-500 uppercase mr-4">Total Selected</span>
                                 <span className="text-xl font-black font-mono text-[#1A1A1A]">
-                                    RM {detailView.items.reduce((sum, i) => sum + i.amount, 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                    RM {detailView?.items?.reduce((sum, i) => sum + i.amount, 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
                                 </span>
                             </div>
                         </div>
