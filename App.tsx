@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { UserRole, StaffRole, Employee } from './types';
 import { Login } from './components/Login';
@@ -60,12 +59,9 @@ export default function App() {
           // Check Version after restoring session
           checkVersion();
       }
+  }, []); // 🟢 useEffect 到这里完美闭合
 
-      // --- AUTO BACKUP TRIGGER ---
-      DataManager.runAutoBackupCheck();
-
-  }, []);
-
+  // 🟢 恢复独立的 checkVersion 方法
   const checkVersion = () => {
       const lastSeenVersion = localStorage.getItem('klk_last_seen_version');
       if (lastSeenVersion !== APP_VERSION) {
