@@ -1,11 +1,10 @@
-
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { User, Plus, Search, Edit3, Save, Trash2, ArrowLeft, CheckCircle2, Clock, Ban, Lock, Camera, ChevronUp, ChevronDown, Trophy, Shield, Settings2, Syringe, GraduationCap, Shirt, Ruler, Weight, History, Hash, HardDrive, LogOut, FileDown, Loader2, X, MapPin, Mail, Phone, Calendar, Briefcase, CreditCard, Eye, EyeOff, Activity, AlertTriangle, Zap, ClipboardList, Stethoscope, BookOpen, Printer, Archive, Home, CalendarDays, MessageSquarePlus, ThumbsUp, ThumbsDown, StickyNote, Crown, Image as ImageIcon, Medal, Layout, CheckSquare, Square, Star, Settings } from 'lucide-react';
 import { Employee, EmployeeAttributes, AppModule, WarningRecord, SalaryRecord, AttendanceRecord, ReviewRecord, EmployeeRank } from '../../../types';
 import { DataManager } from '../../../utils/dataManager';
 import { uploadToCloudinary } from '../../utils';
-import { DEFAULT_ROLES, NATIONALITY_OPTS, BANK_OPTIONS } from '../../constants';
-import { MODULE_DEFINITIONS } from '../../constants';
+import { DEFAULT_ROLES, NATIONALITY_OPTS, BANK_OPTIONS, MODULE_DEFINITIONS } from '../../constants';
+
 import { jsPDF } from "jspdf";
 import html2canvas from 'html2canvas';
 
@@ -154,7 +153,6 @@ const SystemAccessModal = ({ isOpen, onClose, allowedModules, onToggle, assessme
 
     if (!isOpen) return null;
 
-    // Define Groups for clearer UX
     const MODULE_GROUPS = [
         {
             title: '核心管理 (Core Management)',
@@ -178,7 +176,6 @@ const SystemAccessModal = ({ isOpen, onClose, allowedModules, onToggle, assessme
         }
     ];
 
-    // Helper to toggle a whole group
     const toggleGroup = (groupModules: AppModule[]) => {
         const allSelected = groupModules.every(m => allowedModules.includes(m));
         if (allSelected) {
@@ -188,12 +185,10 @@ const SystemAccessModal = ({ isOpen, onClose, allowedModules, onToggle, assessme
         }
     };
 
-    // Sub-component for Assessment Target Selection
     const AssessmentTargetSelector = () => {
         const groupedStaff = { 'KITCHEN': [], 'FLOOR': [], 'BAR': [], 'CLEANER': [] } as any;
         const currentTargets = assessmentTargets || [];
 
-        // Simple grouping logic
         allEmployees.forEach((e: Employee) => {
             if (e.isArchived || e.role.includes('Owner')) return;
             const r = e.role.toUpperCase();
@@ -216,10 +211,8 @@ const SystemAccessModal = ({ isOpen, onClose, allowedModules, onToggle, assessme
             const allIn = groupIds.every((id: string) => currentTargets.includes(id));
             
             if (allIn) {
-                // Remove all
                 onUpdateTargets(currentTargets.filter((id: string) => !groupIds.includes(id)));
             } else {
-                // Add missing
                 const toAdd = groupIds.filter((id: string) => !currentTargets.includes(id));
                 onUpdateTargets([...currentTargets, ...toAdd]);
             }
@@ -311,7 +304,6 @@ const SystemAccessModal = ({ isOpen, onClose, allowedModules, onToggle, assessme
                                                     </div>
                                                 </div>
                                                 
-                                                {/* Config Button for Assessment Module */}
                                                 {mod === 'ASSESSMENT' && isSelected && (
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); setIsTargetConfigOpen(true); }}
@@ -354,7 +346,6 @@ interface HRProfilesProps {
 }
 
 export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, currentBossId }) => {
-    // ... (Keep existing State & Logic) ...
     const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -417,7 +408,6 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
         { id: 'OTHERS', label: '❓ 其他 (Others)', bg: 'bg-gray-50', text: 'text-gray-800', border: 'border-gray-100' },
     ];
 
-    // ... (Keep existing useEffects and Handlers) ...
     useEffect(() => {
         if (!selectedEmpId) return;
         
@@ -455,7 +445,7 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
         if (!copy.warningHistory) copy.warningHistory = [];
         if (!copy.reviews) copy.reviews = [];
         if (!copy.allowedModules) copy.allowedModules = [];
-        if (!copy.assessmentTargets) copy.assessmentTargets = []; // Init target array
+        if (!copy.assessmentTargets) copy.assessmentTargets = [];
         setForm(copy);
         setIsEditing(false);
         setIsSalaryExpanded(false);
@@ -473,7 +463,7 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
             name: '', 
             role: 'Part-Time (兼职)', 
             status: 'PROBATION', 
-            rank: 'CREW', // Default rank
+            rank: 'CREW', 
             level: 'Probation', 
             phone: '', 
             joinDate: new Date().toISOString().split('T')[0], 
@@ -507,7 +497,6 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
         alert("✅ 档案已保存 (Saved)");
     };
 
-    // ... (Other handlers unchanged: Reviews, Delete, Restore etc.) ...
     const handleReviewImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setIsUploadingReviewImage(true); try { const url = await uploadToCloudinary(file); setReviewFormState(prev => ({ ...prev, image: url })); } catch (error) { alert('Upload Failed'); } finally { setIsUploadingReviewImage(false); if(reviewFileInputRef.current) reviewFileInputRef.current.value = ''; } };
     const handleAddReview = async () => { if (!reviewFormState.content.trim()) return; const newReview: ReviewRecord = { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], author: currentBossId ? 'Manager' : 'Admin', content: reviewFormState.content, type: reviewFormState.type, image: reviewFormState.image }; const updatedReviews = [newReview, ...(form.reviews || [])]; const updatedEmp = { ...form, reviews: updatedReviews } as Employee; await DataManager.saveEmployee(updatedEmp); setForm(updatedEmp); const newList = employees.map(e => e.id === updatedEmp.id ? updatedEmp : e); onSave(newList); setReviewFormState({ content: '', type: 'NOTE', image: '' }); };
     const handleDeleteReview = async (reviewId: string) => { if (!confirm("确定删除此条评语?")) return; const updatedReviews = (form.reviews || []).filter(r => r.id !== reviewId); const updatedEmp = { ...form, reviews: updatedReviews } as Employee; await DataManager.saveEmployee(updatedEmp); setForm(updatedEmp); const newList = employees.map(e => e.id === updatedEmp.id ? updatedEmp : e); onSave(newList); };
@@ -530,7 +519,6 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
         <div className="flex h-full w-full bg-[#FAFAFA] flex-col md:flex-row overflow-hidden relative">
             {/* List Sidebar */}
             <div className={`w-full md:w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 h-full ${selectedEmpId ? 'hidden md:flex' : 'flex'}`}>
-                {/* ... (Sidebar content remains exactly same) ... */}
                 <div className="p-4 border-b border-gray-100 space-y-3">
                     <div className="flex items-center justify-between">
                         <h3 className="font-black text-sm text-[#1A1A1A] uppercase tracking-widest">员工通讯录 (Directory)</h3>
@@ -580,13 +568,11 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                                 </div>
                             </div>
                             <div className="mt-4 md:mt-0 text-white">
-                                {/* NAME & GRADE BADGE ROW */}
                                 <div className="flex items-center gap-3">
                                     <h1 className="text-xl md:text-3xl font-black tracking-tight leading-tight flex items-center gap-3">
                                         {form.name || 'New Staff'}
                                     </h1>
                                     
-                                    {/* --- GRADE BADGE (VISUAL SYNC) --- */}
                                     {getGradeInfo(getAverageScore(form.attributes)).label !== 'Fail' && (
                                         <div className={`px-2 py-0.5 rounded-lg text-xs font-black uppercase flex items-center gap-1 border ${getGradeInfo(getAverageScore(form.attributes)).color} bg-opacity-100 shadow-lg`}>
                                             {React.createElement(getGradeInfo(getAverageScore(form.attributes)).icon, { size: 12 })}
@@ -610,11 +596,10 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                         </div>
 
                         <div className="px-4 md:px-8 -mt-16 pb-20 space-y-6 relative z-10 max-w-6xl mx-auto w-full">
-                            {/* ... (Keep existing archived banner and left column content) ... */}
                             {form.isArchived && (<div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-r-xl shadow-sm flex items-start gap-4 animate-in slide-in-from-top-4"><div className="p-2 bg-red-100 rounded-full text-red-600"><Ban size={24}/></div><div><h4 className="text-red-800 font-black text-lg">此员工已离职</h4><p className="text-red-600 text-sm font-bold mt-1">离职日期: {form.terminationDate || '未知'}</p><div className="mt-2 text-red-700 text-xs bg-white/50 p-3 rounded-lg border border-red-100 italic">"{form.terminationReason || '无记录原因'}"</div></div></div>)}
 
                             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-                                {/* LEFT COLUMN: AVATAR / STATUS / SALARY (Unchanged) */}
+                                {/* LEFT COLUMN */}
                                 <div className="xl:col-span-4 flex flex-col gap-6">
                                     <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-200 flex flex-col items-center justify-center relative overflow-hidden group">
                                         <div className="relative w-40 h-40 mb-4 cursor-pointer" onClick={() => isEditing && fileInputRef.current?.click()}>
@@ -759,10 +744,7 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                                                     )}
                                                     {isEditing && <button onClick={addSalaryRecord} className="text-[10px] bg-[#FFD700] text-black px-2 py-1 rounded font-bold">+ Increment</button>}
                                                 </div>
-                                                <div className="space-y-3 pt-4 border-t border-white/10 mb-4">
-                                                    <div className="flex justify-between items-center text-xs"><span className="text-white/60">Bank</span>{isEditing ? <select value={form.bankName} onChange={e => setForm({...form, bankName: e.target.value})} className="bg-white/10 text-white text-[10px] rounded p-1 outline-none"><option value="">Select</option>{BANK_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}</select> : <span className="font-bold">{form.bankName || '-'}</span>}</div>
-                                                    <div className="flex justify-between items-center text-xs"><span className="text-white/60">Account</span>{isEditing ? <input value={form.bankAccount || ''} onChange={e => setForm({...form, bankAccount: e.target.value})} className="bg-white/10 text-white text-[10px] rounded p-1 outline-none w-24 text-right" /> : <span className="font-mono font-bold">{form.bankAccount || '-'}</span>}</div>
-                                                </div>
+                                                
                                                 <div className="pt-2 border-t border-white/10">
                                                     <p className="text-[9px] font-bold text-white/40 uppercase mb-2">History</p>
                                                     <div className="space-y-2 max-h-32 overflow-y-auto pr-1">{form.salaryHistory?.length === 0 && <p className="text-[10px] text-white/30 italic">No records</p>}{form.salaryHistory?.map((rec, idx) => (<div key={idx} className="flex justify-between items-center text-[10px] bg-white/5 p-2 rounded"><div><div className="font-bold text-white/80">{rec.date}</div><div className="text-white/50">{rec.reason}</div></div><div className="text-right"><div className="font-mono font-bold text-[#FFD700]">RM {rec.amount}</div><div className={`${rec.adjustment >= 0 ? 'text-green-400' : 'text-red-400'}`}>{rec.adjustment >= 0 ? '+' : ''}{rec.adjustment}</div></div>{isEditing && <button onClick={() => deleteSalaryRecord(idx)} className="text-red-400 ml-2"><Trash2 size={10}/></button>}</div>))}</div>
@@ -772,6 +754,7 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                                     </div>
                                 </div>
 
+                                {/* RIGHT COLUMN */}
                                 <div className="xl:col-span-8 flex flex-col gap-6">
                                     <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-200">
                                         <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6 flex items-center gap-2"><User size={14}/> 个人档案 (Personal)</h4>
@@ -782,7 +765,6 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                                             <SelectField label="性别 (Gender)" value={form.gender} onChange={(e: any) => setForm({...form, gender: e.target.value})} options={['Male', 'Female']} isEditing={isEditing} />
                                             <SelectField label="国籍 (Nationality)" value={form.nationality} onChange={(e: any) => setForm({...form, nationality: e.target.value})} options={NATIONALITY_OPTS} isEditing={isEditing} />
                                             
-                                            {/* UPDATED STATUS SELECT */}
                                             <SelectField 
                                                 label="雇佣状态 (Employment Status)" 
                                                 value={form.status} 
@@ -795,7 +777,6 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                                                 isEditing={isEditing} 
                                             />
 
-                                            {/* NEW RANK SELECT */}
                                             <SelectField 
                                                 label="组织职级 (Org Rank)" 
                                                 value={form.rank || 'CREW'} 
@@ -810,30 +791,51 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                                                 isEditing={isEditing} 
                                             />
                                             
-                                            <div className="grid grid-cols-2 gap-2"><InputField label="身高 (cm)" type="number" value={form.height} onChange={(e: any) => setForm({...form, height: parseInt(e.target.value)})} placeholder="cm" isEditing={isEditing} /><InputField label="体重 (kg)" type="number" value={form.weight} onChange={(e: any) => setForm({...form, weight: parseInt(e.target.value)})} placeholder="kg" isEditing={isEditing} /></div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <InputField label="身高 (cm)" type="number" value={form.height} onChange={(e: any) => setForm({...form, height: parseInt(e.target.value)})} placeholder="cm" isEditing={isEditing} />
+                                                <InputField label="体重 (kg)" type="number" value={form.weight} onChange={(e: any) => setForm({...form, weight: parseInt(e.target.value)})} placeholder="kg" isEditing={isEditing} />
+                                            </div>
                                             <SelectField label="制服尺寸 (Size)" value={form.shirtSize} onChange={(e: any) => setForm({...form, shirtSize: e.target.value})} options={SHIRT_SIZES} isEditing={isEditing} />
                                             <InputField label="入职日期 (Join Date)" value={form.joinDate} onChange={(e: any) => setForm({...form, joinDate: e.target.value})} type="date" isEditing={isEditing} />
                                         </div>
                                         <div className="mt-4 pt-4 border-t border-gray-50"><InputField label="住址 (Address)" value={form.address} onChange={(e: any) => setForm({...form, address: e.target.value})} placeholder="Full Address" isEditing={isEditing} /></div>
                                     </div>
 
+                                    {/* 🟢 NEW: Govt & Health Info Block */}
                                     <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-200">
                                         <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6 flex items-center gap-2"><Briefcase size={14}/> 政府与卫生 (Govt & Health)</h4>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {/* Statutory & Bank */}
                                             <div className="space-y-4">
-                                                <div className="flex items-center gap-2 mb-2"><div className="p-1.5 bg-blue-50 rounded text-blue-600"><Shield size={14}/></div><span className="text-xs font-bold text-gray-700">法定缴纳 (Statutory)</span></div>
-                                                <div className="grid grid-cols-2 gap-4"><InputField label="EPF No" value={form.epfNo} onChange={(e: any) => setForm({...form, epfNo: e.target.value})} placeholder="KWSP" isEditing={isEditing} /><InputField label="SOCSO No" value={form.socsoNo} onChange={(e: any) => setForm({...form, socsoNo: e.target.value})} placeholder="PERKESO" isEditing={isEditing} /></div>
+                                                <div className="flex items-center gap-2 mb-2"><div className="p-1.5 bg-blue-50 rounded text-blue-600"><Shield size={14}/></div><span className="text-xs font-bold text-gray-700">法定与银行 (Statutory & Bank)</span></div>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <InputField label="EPF No" value={form.epfNo} onChange={(e: any) => setForm({...form, epfNo: e.target.value})} placeholder="KWSP" isEditing={isEditing} />
+                                                    <InputField label="SOCSO No" value={form.socsoNo} onChange={(e: any) => setForm({...form, socsoNo: e.target.value})} placeholder="PERKESO" isEditing={isEditing} />
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <SelectField label="发薪银行 (Bank)" value={form.bankName} onChange={(e: any) => setForm({...form, bankName: e.target.value})} options={BANK_OPTIONS} isEditing={isEditing} />
+                                                    <InputField label="银行账号 (Acc No)" value={form.bankAccount} onChange={(e: any) => setForm({...form, bankAccount: e.target.value})} placeholder="Account No" isEditing={isEditing} />
+                                                </div>
                                             </div>
+                                            
+                                            {/* Health & Course */}
                                             <div className="space-y-4">
-                                                <div className="flex items-center gap-2 mb-2"><div className="p-1.5 bg-green-50 rounded text-green-600"><Stethoscope size={14}/></div><span className="text-xs font-bold text-gray-700">卫生认证 (Health)</span></div>
-                                                <div className="grid grid-cols-2 gap-4"><InputField label="打针有效期 (Typhoid)" value={form.typhoidExpiry} onChange={(e: any) => setForm({...form, typhoidExpiry: e.target.value})} type="date" isEditing={isEditing} /><InputField label="餐馆课程 (Course Date)" value={form.foodHandlingDate} onChange={(e: any) => setForm({...form, foodHandlingDate: e.target.value})} type="date" isEditing={isEditing} /></div>
+                                                <div className="flex items-center gap-2 mb-2"><div className="p-1.5 bg-green-50 rounded text-green-600"><Stethoscope size={14}/></div><span className="text-xs font-bold text-gray-700">卫生认证 (Health Certification)</span></div>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <InputField label="打针过期日 (Typhoid Expiry)" value={form.typhoidExpiry} onChange={(e: any) => setForm({...form, typhoidExpiry: e.target.value})} type="date" isEditing={isEditing} />
+                                                    <InputField label="食品课程日 (Course Date)" value={form.foodHandlingDate} onChange={(e: any) => setForm({...form, foodHandlingDate: e.target.value})} type="date" isEditing={isEditing} />
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
 
+                                    {/* 🟢 NEW: Emergency Contact Block */}
                                     <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-200">
                                         <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6 flex items-center gap-2"><Phone size={14}/> 紧急联系人 (Emergency Contact)</h4>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><InputField label="联系人姓名 (Name)" value={form.emergencyName} onChange={(e: any) => setForm({...form, emergencyName: e.target.value})} placeholder="Relative Name" isEditing={isEditing} /><InputField label="联系电话 (Phone)" value={form.emergencyPhone} onChange={(e: any) => setForm({...form, emergencyPhone: e.target.value})} placeholder="Emergency Phone" isEditing={isEditing} /></div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <InputField label="联系人姓名 / 关系 (Name & Rel)" value={form.emergencyName} onChange={(e: any) => setForm({...form, emergencyName: e.target.value})} placeholder="e.g. Ali (Father)" isEditing={isEditing} />
+                                            <InputField label="联系电话 (Phone)" value={form.emergencyPhone} onChange={(e: any) => setForm({...form, emergencyPhone: e.target.value})} placeholder="Emergency Phone" isEditing={isEditing} />
+                                        </div>
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -871,9 +873,6 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                 )}
             </div>
             
-            {/* ... (Keep existing Review Modal, Ability Modal, Access Modal, etc.) ... */}
-            {/* The rest of the file content remains unchanged, including the Review Modal, Access Modal, Ability Modal, and PDF printing logic */}
-            {/* Just ensuring closing brackets are present */}
             {showReviewModal && (
                 <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                     <div className="bg-white w-full max-w-lg rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
@@ -989,8 +988,126 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
 
             {showTerminateModal && (<div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95"><div className="text-center mb-6"><div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-100"><LogOut size={32}/></div><h3 className="font-black text-xl text-[#1A1A1A] mb-1">办理离职手续</h3><p className="text-xs text-gray-500 font-bold">Terminate Employee Account</p></div><div className="space-y-4 mb-6"><div><label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Last Working Day (离职日期)</label><input type="date" value={terminationData.date} onChange={e => setTerminationData({...terminationData, date: e.target.value})} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none"/></div><div><label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Reason (离职原因)</label><textarea value={terminationData.reason} onChange={e => setTerminationData({...terminationData, reason: e.target.value})} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none h-24 resize-none focus:border-red-300 transition-colors" placeholder="请输入原因 (e.g. Resigned, Fired...)"/></div></div><div className="grid grid-cols-2 gap-3"><button onClick={() => setShowTerminateModal(false)} className="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-xs hover:bg-gray-200">取消</button><button onClick={confirmTermination} className="py-3 bg-red-600 text-white font-bold rounded-xl text-xs hover:bg-red-700 shadow-lg">确认离职</button></div></div></div>)}
             {showDeleteModal && (<div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 text-center border-t-8 border-red-600"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><Trash2 size={32} className="text-red-600"/></div><h3 className="font-black text-2xl text-[#1A1A1A] mb-2">确认永久删除?</h3><p className="text-sm text-gray-500 font-bold mb-6">此操作将永久移除该员工的所有资料、薪资记录且<span className="text-red-600 underline">无法恢复</span>。</p><div className="grid grid-cols-2 gap-4"><button onClick={() => setShowDeleteModal(false)} className="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-sm hover:bg-gray-200">取消 (Cancel)</button><button onClick={confirmDelete} className="py-3 bg-red-600 text-white font-bold rounded-xl text-sm hover:bg-red-700 shadow-xl">确认删除 (Delete)</button></div></div></div>)}
+            
+            {/* 🟢 HIDDEN PRINT SECTION (ALL LIST) */}
             <div style={{ position: 'absolute', top: 0, left: '-9999px' }}><div ref={printRef} className="w-[794px] bg-white p-10 font-sans text-black min-h-[1123px] relative"><div className="border-b-2 border-black pb-4 mb-6 flex justify-between items-end"><div><h1 className="text-3xl font-black uppercase tracking-widest mb-1">Kim Lian Kee</h1><p className="text-xs font-bold text-gray-500 uppercase tracking-[0.3em]">Employee Directory</p></div><div className="text-right"><p className="text-xs font-bold text-gray-400">{new Date().toLocaleDateString()}</p><p className="text-sm font-black">Total Staff: {filteredEmployees.length}</p></div></div><table className="w-full text-left text-xs"><thead><tr className="border-b-2 border-black"><th className="py-2 uppercase font-black">ID</th><th className="py-2 uppercase font-black">Name</th><th className="py-2 uppercase font-black">Role</th><th className="py-2 uppercase font-black">Phone</th><th className="py-2 uppercase font-black">Status</th><th className="py-2 uppercase font-black">Join Date</th></tr></thead><tbody>{filteredEmployees.map((emp, i) => (<tr key={emp.id} className="border-b border-gray-100"><td className="py-3 font-mono font-bold text-gray-500">{emp.id}</td><td className="py-3 font-bold">{emp.name}</td><td className="py-3 font-medium text-gray-700">{emp.role.split('(')[0]}</td><td className="py-3 font-mono">{emp.phone || '-'}</td><td className="py-3"><span className={`px-1 py-0.5 rounded text-[10px] font-bold uppercase ${emp.status === 'CONFIRMED' ? 'bg-green-100' : 'bg-gray-100'}`}>{emp.status}</span></td><td className="py-3 font-mono text-gray-500">{emp.joinDate}</td></tr>))}</tbody></table><div className="absolute bottom-10 left-0 w-full text-center"><p className="text-[9px] font-bold uppercase tracking-[0.5em] text-gray-300">Confidential • Internal Use Only</p></div></div></div>
-            <div style={{ position: 'absolute', top: 0, left: '-9999px' }}><div ref={singleProfileRef} className="w-[794px] bg-white p-12 font-sans text-black min-h-[1123px] relative flex flex-col"><div className="flex justify-between items-start border-b-4 border-[#8B0000] pb-6 mb-8"><div><h1 className="text-4xl font-black uppercase tracking-wider text-[#1A1A1A] mb-1">{form.name || 'EMPLOYEE NAME'}</h1><p className="text-sm font-bold text-gray-500 uppercase tracking-widest">{form.role || 'ROLE'}</p><div className="mt-4 flex gap-4 text-xs font-mono text-gray-600"><span className="bg-gray-100 px-2 py-1 rounded">ID: {form.id}</span><span className="bg-gray-100 px-2 py-1 rounded">JOINED: {form.joinDate}</span><span className="bg-gray-100 px-2 py-1 rounded">STATUS: {form.status}</span></div></div><div className="w-24 h-24 bg-gray-200 border-2 border-gray-300 flex items-center justify-center overflow-hidden">{form.avatar ? <img src={form.avatar} className="w-full h-full object-cover" /> : <span className="text-4xl text-gray-400 font-black">{form.name?.charAt(0)}</span>}</div></div><div className="grid grid-cols-2 gap-x-12 gap-y-8"><div className="col-span-2"><h3 className="text-sm font-black uppercase border-b border-gray-300 pb-2 mb-4">Personal Information</h3><div className="grid grid-cols-3 gap-y-4 text-xs"><div><span className="block text-gray-400 font-bold uppercase text-[10px]">IC / Passport</span><span className="font-mono font-bold text-sm">{form.icNumber || '-'}</span></div><div><span className="block text-gray-400 font-bold uppercase text-[10px]">Phone</span><span className="font-mono font-bold text-sm">{form.phone || '-'}</span></div><div><span className="block text-gray-400 font-bold uppercase text-[10px]">Nationality</span><span className="font-bold text-sm">{form.nationality || '-'}</span></div><div><span className="block text-gray-400 font-bold uppercase text-[10px]">Gender</span><span className="font-bold text-sm">{form.gender || '-'}</span></div><div><span className="block text-gray-400 font-bold uppercase text-[10px]">Shirt Size</span><span className="font-bold text-sm">{form.shirtSize || '-'}</span></div><div><span className="block text-gray-400 font-bold uppercase text-[10px]">Tenure</span><span className="font-bold text-sm">{getTenure(form.joinDate || '')}</span></div><div className="col-span-3"><span className="block text-gray-400 font-bold uppercase text-[10px]">Address</span><span className="font-bold text-sm">{form.address || '-'}</span></div></div></div><div><h3 className="text-sm font-black uppercase border-b border-gray-300 pb-2 mb-4">Employment Details</h3><div className="space-y-3 text-xs"><div className="flex justify-between border-b border-gray-100 pb-1"><span>Basic Salary</span><span className="font-mono font-bold">RM {form.basicSalary?.toLocaleString() || '0'}</span></div><div className="flex justify-between border-b border-gray-100 pb-1"><span>Salary Mode</span><span className="font-bold">{form.salaryMode}</span></div><div className="flex justify-between border-b border-gray-100 pb-1"><span>Rest Days</span><span className="font-bold">{form.monthlyRestDays || '-'} Days</span></div><div className="flex justify-between border-b border-gray-100 pb-1"><span>Bank Name</span><span className="font-bold">{form.bankName || '-'}</span></div><div className="flex justify-between border-b border-gray-100 pb-1"><span>Bank Account</span><span className="font-mono font-bold">{form.bankAccount || '-'}</span></div><div className="flex justify-between border-b border-gray-100 pb-1"><span>EPF No</span><span className="font-mono font-bold">{form.epfNo || '-'}</span></div><div className="flex justify-between border-b border-gray-100 pb-1"><span>SOCSO No</span><span className="font-mono font-bold">{form.socsoNo || '-'}</span></div></div></div><div><h3 className="text-sm font-black uppercase border-b border-gray-300 pb-2 mb-4">Health & Emergency</h3><div className="space-y-3 text-xs"><div><span className="block text-gray-400 font-bold uppercase text-[10px]">Emergency Contact</span><span className="font-bold text-sm">{form.emergencyName || '-'}</span></div><div><span className="block text-gray-400 font-bold uppercase text-[10px]">Emergency Phone</span><span className="font-mono font-bold text-sm">{form.emergencyPhone || '-'}</span></div><div><span className="block text-gray-400 font-bold uppercase text-[10px]">Typhoid Injection</span><span className="font-mono font-bold text-sm">{form.typhoidExpiry || '-'}</span></div><div><span className="block text-gray-400 font-bold uppercase text-[10px]">Food Course Date</span><span className="font-mono font-bold text-sm">{form.foodHandlingDate || '-'}</span></div></div></div><div className="col-span-2"><h3 className="text-sm font-black uppercase border-b border-gray-300 pb-2 mb-4">Performance Assessment</h3><div className="grid grid-cols-5 gap-2 text-center">{Object.entries(form.attributes || { efficiency:0, service:0, culinary:0, leadership:0, discipline:0 }).map(([key, val]) => (<div key={key} className="border border-gray-200 p-2 rounded"><div className="text-[10px] text-gray-500 uppercase font-bold mb-1">{key}</div><div className="text-lg font-black">{getGradeInfo(val as number).label} <span className="text-xs font-normal text-gray-400">({val as number})</span></div></div>))}</div></div><div className="col-span-2"><h3 className="text-sm font-black uppercase border-b border-gray-300 pb-2 mb-4">Disciplinary Record</h3>{(!form.warningHistory || form.warningHistory.length === 0) ? (<p className="text-xs text-gray-400 italic">No disciplinary records found.</p>) : (<table className="w-full text-left text-xs"><thead><tr className="bg-gray-100"><th className="p-2">Date</th><th className="p-2">Type</th><th className="p-2">Reason</th><th className="p-2">Issuer</th></tr></thead><tbody>{form.warningHistory.map((w, i) => (<tr key={i} className="border-b border-gray-100"><td className="p-2 font-mono">{w.date}</td><td className="p-2 font-bold uppercase">{w.type}</td><td className="p-2">{w.reason}</td><td className="p-2">{w.issuer}</td></tr>))}</tbody></table>)}</div></div><div className="mt-auto pt-8 border-t-2 border-black flex justify-between items-end"><div><p className="text-lg font-black uppercase tracking-widest">Kim Lian Kee</p><p className="text-[10px] text-gray-500 font-bold uppercase">Human Resources Department</p></div><div className="text-right"><p className="text-[10px] text-gray-400 uppercase">Generated on {new Date().toLocaleDateString()}</p><p className="text-[10px] text-gray-400 uppercase">Confidential Document</p></div></div></div></div>
+            
+            {/* 🟢 HIDDEN PRINT SECTION (SINGLE PROFILE PDF UPDATED WITH NEW FIELDS) */}
+            <div style={{ position: 'absolute', top: 0, left: '-9999px' }}>
+                <div ref={singleProfileRef} className="w-[794px] bg-white p-12 font-sans text-black min-h-[1123px] relative flex flex-col">
+                    <div className="flex justify-between items-start border-b-4 border-[#8B0000] pb-6 mb-8">
+                        <div>
+                            <h1 className="text-4xl font-black uppercase tracking-wider text-[#1A1A1A] mb-1">{form.name || 'EMPLOYEE NAME'}</h1>
+                            <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">{form.role || 'ROLE'}</p>
+                            <div className="mt-4 flex gap-4 text-xs font-mono text-gray-600">
+                                <span className="bg-gray-100 px-2 py-1 rounded border border-gray-200">ID: {form.id}</span>
+                                <span className="bg-gray-100 px-2 py-1 rounded border border-gray-200">JOINED: {form.joinDate}</span>
+                                <span className="bg-gray-100 px-2 py-1 rounded border border-gray-200">STATUS: {form.status}</span>
+                            </div>
+                        </div>
+                        <div className="w-24 h-24 bg-gray-100 border-2 border-gray-300 flex items-center justify-center overflow-hidden rounded-xl shadow-sm">
+                            {form.avatar ? <img src={form.avatar} className="w-full h-full object-cover" /> : <span className="text-4xl text-gray-400 font-black">{form.name?.charAt(0)}</span>}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-x-12 gap-y-8">
+                        <div className="col-span-2">
+                            <h3 className="text-sm font-black uppercase border-b-2 border-gray-200 pb-2 mb-4 text-[#8B0000]">Personal Information (基本资料)</h3>
+                            <div className="grid grid-cols-3 gap-y-4 text-xs">
+                                <div><span className="block text-gray-400 font-bold uppercase text-[10px] mb-0.5">IC / Passport</span><span className="font-mono font-bold text-sm">{form.icNumber || '-'}</span></div>
+                                <div><span className="block text-gray-400 font-bold uppercase text-[10px] mb-0.5">Phone</span><span className="font-mono font-bold text-sm">{form.phone || '-'}</span></div>
+                                <div><span className="block text-gray-400 font-bold uppercase text-[10px] mb-0.5">Nationality</span><span className="font-bold text-sm">{form.nationality || '-'}</span></div>
+                                <div><span className="block text-gray-400 font-bold uppercase text-[10px] mb-0.5">Gender</span><span className="font-bold text-sm">{form.gender || '-'}</span></div>
+                                <div><span className="block text-gray-400 font-bold uppercase text-[10px] mb-0.5">Shirt Size</span><span className="font-bold text-sm">{form.shirtSize || '-'}</span></div>
+                                <div><span className="block text-gray-400 font-bold uppercase text-[10px] mb-0.5">Tenure</span><span className="font-bold text-sm">{getTenure(form.joinDate || '')}</span></div>
+                                <div className="col-span-3"><span className="block text-gray-400 font-bold uppercase text-[10px] mb-0.5">Address</span><span className="font-bold text-sm">{form.address || '-'}</span></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 className="text-sm font-black uppercase border-b-2 border-gray-200 pb-2 mb-4 text-[#8B0000]">Statutory & Salary (薪资与法定)</h3>
+                            <div className="space-y-3 text-xs bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                <div className="flex justify-between border-b border-gray-200 pb-1"><span>Basic Salary</span><span className="font-mono font-black text-sm">RM {form.basicSalary?.toLocaleString() || '0'}</span></div>
+                                <div className="flex justify-between border-b border-gray-200 pb-1"><span>Salary Mode</span><span className="font-bold">{form.salaryMode}</span></div>
+                                <div className="flex justify-between border-b border-gray-200 pb-1"><span>Rest Days</span><span className="font-bold">{form.monthlyRestDays || '-'} Days</span></div>
+                                <div className="flex justify-between border-b border-gray-200 pb-1"><span>Bank Name</span><span className="font-bold">{form.bankName || '-'}</span></div>
+                                <div className="flex justify-between border-b border-gray-200 pb-1"><span>Bank Account</span><span className="font-mono font-bold">{form.bankAccount || '-'}</span></div>
+                                <div className="flex justify-between border-b border-gray-200 pb-1"><span>EPF No</span><span className="font-mono font-bold">{form.epfNo || '-'}</span></div>
+                                <div className="flex justify-between border-gray-200"><span>SOCSO No</span><span className="font-mono font-bold">{form.socsoNo || '-'}</span></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 className="text-sm font-black uppercase border-b-2 border-gray-200 pb-2 mb-4 text-[#8B0000]">Health & Emergency (卫生与紧急)</h3>
+                            <div className="space-y-4 text-xs">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-red-50 p-3 rounded-xl border border-red-100">
+                                        <span className="block text-red-400 font-bold uppercase text-[10px] mb-1">Emergency Contact</span>
+                                        <span className="font-black text-sm text-red-900 block">{form.emergencyName || '-'}</span>
+                                        <span className="font-mono font-bold text-red-700 block mt-1">{form.emergencyPhone || '-'}</span>
+                                    </div>
+                                    <div className="bg-green-50 p-3 rounded-xl border border-green-100">
+                                        <span className="block text-green-600 font-bold uppercase text-[10px] mb-1">Health Validations</span>
+                                        <div className="flex justify-between items-center mb-1"><span className="text-green-800">Typhoid:</span> <span className="font-mono font-bold text-green-900">{form.typhoidExpiry || '-'}</span></div>
+                                        <div className="flex justify-between items-center"><span className="text-green-800">Course:</span> <span className="font-mono font-bold text-green-900">{form.foodHandlingDate || '-'}</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="col-span-2">
+                            <h3 className="text-sm font-black uppercase border-b-2 border-gray-200 pb-2 mb-4 text-[#8B0000]">Performance Assessment (能力评估)</h3>
+                            <div className="grid grid-cols-5 gap-3 text-center">
+                                {Object.entries(form.attributes || { efficiency:0, service:0, culinary:0, leadership:0, discipline:0 }).map(([key, val]) => (
+                                    <div key={key} className="border-2 border-gray-100 p-3 rounded-xl bg-gray-50">
+                                        <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">{key}</div>
+                                        <div className="text-xl font-black">{getGradeInfo(val as number).label} <span className="text-xs font-normal text-gray-400">({val as number})</span></div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="col-span-2">
+                            <h3 className="text-sm font-black uppercase border-b-2 border-gray-200 pb-2 mb-4 text-[#8B0000]">Disciplinary Record (纪律记录)</h3>
+                            {(!form.warningHistory || form.warningHistory.length === 0) ? (
+                                <p className="text-xs text-gray-400 italic bg-gray-50 p-4 rounded-xl text-center border border-dashed border-gray-200">无违规记录 (Clean Record)</p>
+                            ) : (
+                                <table className="w-full text-left text-xs border border-gray-200 rounded-xl overflow-hidden">
+                                    <thead className="bg-gray-100">
+                                        <tr>
+                                            <th className="p-3 border-b border-gray-200">Date</th>
+                                            <th className="p-3 border-b border-gray-200">Type</th>
+                                            <th className="p-3 border-b border-gray-200">Reason</th>
+                                            <th className="p-3 border-b border-gray-200">Issuer</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {form.warningHistory.map((w, i) => (
+                                            <tr key={i} className="border-b border-gray-100 last:border-0">
+                                                <td className="p-3 font-mono text-gray-600">{w.date}</td>
+                                                <td className="p-3 font-bold uppercase">{w.type}</td>
+                                                <td className="p-3 font-medium">{w.reason}</td>
+                                                <td className="p-3 text-gray-500">{w.issuer}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </div>
+                    
+                    <div className="mt-auto pt-8 border-t-2 border-black flex justify-between items-end">
+                        <div>
+                            <p className="text-lg font-black uppercase tracking-widest text-[#8B0000]">Kim Lian Kee</p>
+                            <p className="text-[10px] text-gray-500 font-bold uppercase mt-1">Human Resources Department</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-[10px] text-gray-400 uppercase mb-1">Generated on {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
+                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Confidential Document</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };

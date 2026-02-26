@@ -200,58 +200,86 @@ const HistoryDetailModal = ({ record, onClose, onDelete }: { record: SettlementR
     
     return (
         <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col">
-                <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-3xl">
+            <div className="bg-white w-full max-w-lg rounded-[2rem] shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col custom-scrollbar">
+                {/* Header */}
+                <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-[#1A1A1A] rounded-t-[2rem]">
                     <div>
-                        <h3 className="font-black text-xl text-[#1A1A1A]">结算详情 (Details)</h3>
-                        <p className="text-xs text-gray-500 font-mono mt-1 font-bold">{record.date} • {new Date(record.timestamp).toLocaleTimeString()}</p>
+                        <h3 className="font-black text-xl text-[#FFD700]">结算单详情 (Receipt Details)</h3>
+                        <p className="text-xs text-gray-400 font-mono mt-1 font-bold tracking-widest">{record.date} • {new Date(record.timestamp).toLocaleTimeString()}</p>
                     </div>
-                    <button onClick={onClose} className="p-2 bg-white rounded-full hover:bg-gray-200 shadow-sm transition-colors"><X size={20}/></button>
+                    <button onClick={onClose} className="p-2 bg-white/10 text-white rounded-full hover:bg-white/20 hover:text-[#FFD700] transition-colors"><X size={20}/></button>
                 </div>
+                
+                {/* Content */}
                 <div className="p-6 space-y-6 bg-[#F8F9FA] flex-grow">
                     <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-                        <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                        <div className="flex justify-between items-center pb-3 border-b border-gray-100">
                             <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Total Sales (总营业额)</span>
-                            <span className="text-xl font-black font-mono text-blue-600">RM {record.sales.total.toFixed(2)}</span>
+                            <span className="text-2xl font-black font-mono text-[#1A1A1A]">RM {record.sales.total.toFixed(2)}</span>
                         </div>
                         
                         {record.sales.refundTotal && record.sales.refundTotal > 0 ? (
-                            <div className="flex justify-between items-center text-xs bg-red-50 p-2 rounded-lg border border-red-100 mb-2">
+                            <div className="flex justify-between items-center text-xs bg-red-50 p-3 rounded-xl border border-red-100 mb-2">
                                 <span className="flex items-center gap-2 text-red-600 font-bold"><RotateCcw size={14}/> Refunds (退款)</span>
                                 <span className="font-mono font-bold text-red-700">- RM {record.sales.refundTotal.toFixed(2)}</span>
                             </div>
                         ) : null}
 
-                        <div className="flex justify-between items-center text-sm">
+                        <div className="flex justify-between items-center text-sm p-2">
                             <span className="flex items-center gap-2 text-gray-600 font-bold"><Banknote size={16}/> Cash (现金)</span>
-                            <span className="font-mono font-bold text-[#1A1A1A]">RM {record.sales.cash.toFixed(2)}</span>
+                            <span className="font-mono font-bold text-[#1A1A1A] text-lg">RM {record.sales.cash.toFixed(2)}</span>
                         </div>
-                        <div className="bg-blue-50/50 p-3 rounded-xl space-y-2 border border-blue-100">
-                            <p className="text-[10px] font-black text-blue-400 uppercase mb-1">POS Payments (系统支付)</p>
+                        
+                        <div className="bg-gray-50 p-4 rounded-xl space-y-3 border border-gray-100">
+                            <p className="text-[10px] font-black text-gray-400 uppercase mb-2">POS Payments (系统支付)</p>
                             <div className="flex justify-between text-xs text-gray-600">
                                 <span className="flex items-center gap-1"><Wallet size={12}/> TNG eWallet</span>
-                                <span className="font-mono font-bold">RM {(record.sales.tng || 0).toFixed(2)}</span>
+                                <span className="font-mono font-bold text-gray-800">RM {(record.sales.tng || 0).toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between text-xs text-gray-600">
                                 <span className="flex items-center gap-1"><CreditCard size={12}/> Debit Card</span>
-                                <span className="font-mono font-bold">RM {totalDebit.toFixed(2)}</span>
+                                <span className="font-mono font-bold text-gray-800">RM {totalDebit.toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between text-xs text-gray-600">
                                 <span className="flex items-center gap-1"><CreditCard size={12}/> Credit Card</span>
-                                <span className="font-mono font-bold">RM {totalCard.toFixed(2)}</span>
+                                <span className="font-mono font-bold text-gray-800">RM {totalCard.toFixed(2)}</span>
                             </div>
                         </div>
+
+                        {/* 精美的外卖数据 UI (Delivery Breakdown) */}
                         {totalDelivery > 0 && (
-                            <div className="bg-orange-50/50 p-3 rounded-xl space-y-2 border border-orange-100">
-                                <div className="flex justify-between text-xs text-orange-800 font-bold mb-1">
-                                    <span className="flex items-center gap-1"><Truck size={12}/> Delivery (额外收入)</span>
-                                    <span>RM {totalDelivery.toFixed(2)}</span>
+                            <div className="bg-white p-4 rounded-xl space-y-3 border-2 border-orange-100 shadow-[0_4px_20px_rgba(251,146,60,0.05)] relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-bl from-orange-100 to-transparent opacity-50 rounded-bl-[100px] pointer-events-none"></div>
+                                <div className="flex justify-between items-center text-sm font-black text-orange-800 border-b border-orange-100 pb-2">
+                                    <span className="flex items-center gap-1"><Truck size={14} className="text-orange-500"/> Delivery (外卖收入)</span>
+                                    <span className="font-mono">RM {totalDelivery.toFixed(2)}</span>
                                 </div>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-4">
-                                    {deliveryBreakdown.grab > 0 && <div className="flex justify-between text-[10px] text-gray-500"><span>Grab</span><span className="font-mono">RM{deliveryBreakdown.grab}</span></div>}
-                                    {deliveryBreakdown.panda > 0 && <div className="flex justify-between text-[10px] text-gray-500"><span>Panda</span><span className="font-mono">RM{deliveryBreakdown.panda}</span></div>}
-                                    {deliveryBreakdown.shopee > 0 && <div className="flex justify-between text-[10px] text-gray-500"><span>Shopee</span><span className="font-mono">RM{deliveryBreakdown.shopee}</span></div>}
-                                    {deliveryBreakdown.lalamove > 0 && <div className="flex justify-between text-[10px] text-gray-500"><span>Lala</span><span className="font-mono">RM{deliveryBreakdown.lalamove}</span></div>}
+                                
+                                <div className="grid grid-cols-2 gap-3 pt-1">
+                                    {deliveryBreakdown.grab > 0 && (
+                                        <div className="bg-white p-2.5 rounded-xl border border-green-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
+                                            <span className="text-[10px] font-black text-green-700 bg-green-50 px-2.5 py-1 rounded-md">Grab</span>
+                                            <span className="font-mono font-bold text-green-800 text-xs">RM {deliveryBreakdown.grab.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    {deliveryBreakdown.panda > 0 && (
+                                        <div className="bg-white p-2.5 rounded-xl border border-pink-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
+                                            <span className="text-[10px] font-black text-pink-700 bg-pink-50 px-2.5 py-1 rounded-md">Panda</span>
+                                            <span className="font-mono font-bold text-pink-800 text-xs">RM {deliveryBreakdown.panda.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    {deliveryBreakdown.shopee > 0 && (
+                                        <div className="bg-white p-2.5 rounded-xl border border-orange-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
+                                            <span className="text-[10px] font-black text-orange-700 bg-orange-50 px-2.5 py-1 rounded-md">Shopee</span>
+                                            <span className="font-mono font-bold text-orange-800 text-xs">RM {deliveryBreakdown.shopee.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    {deliveryBreakdown.lalamove > 0 && (
+                                        <div className="bg-white p-2.5 rounded-xl border border-blue-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
+                                            <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md">Lala</span>
+                                            <span className="font-mono font-bold text-blue-800 text-xs">RM {deliveryBreakdown.lalamove.toFixed(2)}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -262,12 +290,12 @@ const HistoryDetailModal = ({ record, onClose, onDelete }: { record: SettlementR
                             <h4 className="text-xs font-black text-red-600 uppercase tracking-widest mb-3 flex items-center gap-2"><MinusCircle size={14}/> 现金支出 (Cash Payouts)</h4>
                             <div className="space-y-2">
                                 {record.expenses.map((exp, idx) => (
-                                    <div key={idx} className="flex justify-between items-center text-xs border-b border-red-100 pb-1 last:border-0">
-                                        <span className="font-bold text-red-800">{exp.company} <span className="text-[9px] font-normal text-red-400">({exp.category})</span></span>
+                                    <div key={idx} className="flex justify-between items-center text-xs border-b border-red-100 pb-2 last:border-0 pt-1">
+                                        <span className="font-bold text-red-800">{exp.company} <span className="text-[9px] font-normal text-red-500 bg-red-100 px-1 py-0.5 rounded ml-1">({exp.category})</span></span>
                                         <span className="font-mono font-bold text-red-700">- RM {exp.amount.toFixed(2)}</span>
                                     </div>
                                 ))}
-                                <div className="pt-2 flex justify-between items-center font-black text-sm text-red-900 border-t border-red-200">
+                                <div className="pt-2 flex justify-between items-center font-black text-sm text-red-900 border-t border-red-200 mt-2">
                                     <span>Total Payout</span>
                                     <span>- RM {totalCashOut.toFixed(2)}</span>
                                 </div>
@@ -283,7 +311,7 @@ const HistoryDetailModal = ({ record, onClose, onDelete }: { record: SettlementR
                             <div className="flex justify-between"><span className="text-white/60">Cash Payouts</span><span className="font-mono text-red-400">- RM {totalCashOut.toFixed(2)}</span></div>
                             <div className="h-px bg-white/20 my-2"></div>
                             <div className="flex justify-between text-base font-bold"><span className="text-white">Actual Closing</span><span className="font-mono">RM {record.closingCash.toFixed(2)}</span></div>
-                            <div className="flex justify-between text-base font-bold"><span className="text-white">Variance</span><span className={`font-mono px-2 rounded ${record.variance >= 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{record.variance > 0 ? '+' : ''}{record.variance.toFixed(2)}</span></div>
+                            <div className="flex justify-between text-base font-bold"><span className="text-white">Variance</span><span className={`font-mono px-2 py-0.5 rounded ${record.variance >= 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{record.variance > 0 ? '+' : ''}{record.variance.toFixed(2)}</span></div>
                         </div>
                         {record.varianceReason && (
                             <div className="mt-4 p-3 bg-white/10 rounded-xl text-xs text-white/80 italic border border-white/10">
@@ -291,6 +319,7 @@ const HistoryDetailModal = ({ record, onClose, onDelete }: { record: SettlementR
                             </div>
                         )}
                     </div>
+                    
                     <button onClick={() => onDelete(record.id)} className="w-full py-4 bg-white border-2 border-red-100 text-red-600 rounded-2xl font-black text-sm hover:bg-red-50 transition-all flex items-center justify-center gap-2 shadow-sm">
                         <Trash2 size={18}/> 删除此结算记录 (Delete Record)
                     </button>
@@ -753,45 +782,79 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                         </div>
                                     ) : (
                                         historyRecords.map(record => {
-                                            const debit = record.sales.duitnow || 0;
-                                            const credit = record.sales.card || 0;
-                                            const tng = record.sales.tng || 0;
+    const debit = record.sales.duitnow || 0;
+    const credit = record.sales.card || 0;
+    const tng = record.sales.tng || 0;
+    const cash = record.sales.cash || 0; // 提取 Cash
+    // 计算外卖总额
+    const deliveryBreakdown = record.sales.deliveryBreakdown || {};
+    const totalDelivery = (deliveryBreakdown.grab || 0) + (deliveryBreakdown.panda || 0) + (deliveryBreakdown.shopee || 0) + (deliveryBreakdown.lalamove || 0);
 
-                                            return (
-                                                <div key={record.id} onClick={() => setSelectedRecord(record)} className="bg-white p-5 rounded-[2rem] border border-gray-100 hover:border-[#FFD700] hover:shadow-xl transition-all cursor-pointer group flex flex-col md:flex-row items-center justify-between gap-4">
-                                                    <div className="flex items-center gap-4 w-full md:w-auto">
-                                                        <div className="w-14 h-14 bg-[#1A1A1A] rounded-2xl flex flex-col items-center justify-center text-[#FFD700] group-hover:scale-110 transition-transform shadow-lg shrink-0">
-                                                            <span className="text-[10px] font-black leading-none opacity-60 uppercase">{new Date(record.date).toLocaleString('default', { month: 'short' })}</span>
-                                                            <span className="text-xl font-black leading-none mt-1">{record.date.split('-')[2]}</span>
-                                                        </div>
-                                                        <div>
-                                                            <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total Sales</div>
-                                                            <div className="text-xl font-black text-[#1A1A1A]">RM {record.sales.total.toFixed(2)}</div>
-                                                        </div>
-                                                    </div>
+    return (
+        <div key={record.id} onClick={() => setSelectedRecord(record)} className="bg-white p-5 rounded-[2rem] border border-gray-100 hover:border-[#FFD700] hover:shadow-xl transition-all cursor-pointer group flex flex-col md:flex-row items-center justify-between gap-4">
+            
+            {/* 左侧：日期与总额 */}
+            <div className="flex items-center justify-between md:justify-start gap-4 w-full md:w-48 shrink-0">
+                <div className="w-14 h-14 bg-[#1A1A1A] rounded-2xl flex flex-col items-center justify-center text-[#FFD700] group-hover:scale-110 transition-transform shadow-lg shrink-0">
+                    <span className="text-[10px] font-black leading-none opacity-60 uppercase">{new Date(record.date).toLocaleString('default', { month: 'short' })}</span>
+                    <span className="text-xl font-black leading-none mt-1">{record.date.split('-')[2]}</span>
+                </div>
+                <div className="text-right md:text-left">
+                    <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total Sales</div>
+                    <div className="text-xl font-black text-[#1A1A1A] whitespace-nowrap">RM {record.sales.total.toFixed(2)}</div>
+                </div>
+            </div>
 
-                                                    <div className="flex flex-1 items-center justify-center gap-3 md:gap-6 w-full md:w-auto px-4 py-2 bg-gray-50 rounded-2xl border border-gray-100">
-                                                        <div className="flex flex-col items-center"><span className="text-[9px] font-black text-gray-400 uppercase">Debit</span><span className="font-mono text-xs font-bold text-blue-600">RM {debit.toFixed(2)}</span></div>
-                                                        <div className="w-px h-6 bg-gray-200"></div>
-                                                        <div className="flex flex-col items-center"><span className="text-[9px] font-black text-gray-400 uppercase">Credit</span><span className="font-mono text-xs font-bold text-purple-600">RM {credit.toFixed(2)}</span></div>
-                                                        <div className="w-px h-6 bg-gray-200"></div>
-                                                        <div className="flex flex-col items-center"><span className="text-[9px] font-black text-gray-400 uppercase">TNG</span><span className="font-mono text-xs font-bold text-cyan-600">RM {tng.toFixed(2)}</span></div>
-                                                    </div>
+            {/* 中间：5个支付渠道明细 (手机端网格，PC端一排) */}
+            <div className="grid grid-cols-3 gap-y-3 gap-x-2 md:flex md:flex-1 md:items-center md:justify-center md:gap-4 w-full px-4 py-3 bg-gray-50 rounded-2xl border border-gray-100">
+                <div className="flex flex-col items-center">
+                    <span className="text-[9px] font-black text-gray-400 uppercase">Cash</span>
+                    <span className="font-mono text-xs font-bold text-green-700">RM {cash.toFixed(2)}</span>
+                </div>
+                <div className="hidden md:block w-px h-6 bg-gray-200"></div>
+                
+                <div className="flex flex-col items-center">
+                    <span className="text-[9px] font-black text-gray-400 uppercase">Debit</span>
+                    <span className="font-mono text-xs font-bold text-blue-600">RM {debit.toFixed(2)}</span>
+                </div>
+                <div className="hidden md:block w-px h-6 bg-gray-200"></div>
+                
+                <div className="flex flex-col items-center">
+                    <span className="text-[9px] font-black text-gray-400 uppercase">Credit</span>
+                    <span className="font-mono text-xs font-bold text-purple-600">RM {credit.toFixed(2)}</span>
+                </div>
+                
+                {/* 手机端换行时的分隔线隐藏 */}
+                <div className="hidden md:block w-px h-6 bg-gray-200"></div>
+                
+                <div className="flex flex-col items-center">
+                    <span className="text-[9px] font-black text-gray-400 uppercase">TNG</span>
+                    <span className="font-mono text-xs font-bold text-cyan-600">RM {tng.toFixed(2)}</span>
+                </div>
+                <div className="hidden md:block w-px h-6 bg-gray-200"></div>
+                
+                {/* Delivery 占满手机端网格剩下的位置 */}
+                <div className="flex flex-col items-center col-span-2 md:col-span-1">
+                    <span className="text-[9px] font-black text-gray-400 uppercase flex items-center gap-1">Delivery</span>
+                    <span className="font-mono text-xs font-bold text-orange-600">RM {totalDelivery.toFixed(2)}</span>
+                </div>
+            </div>
 
-                                                    <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
-                                                        <div className="text-right border-l md:border-l-0 md:pl-0 pl-6 border-gray-100">
-                                                            <div className="text-[9px] font-black text-gray-400 uppercase">Variance</div>
-                                                            <div className={`font-mono font-black ${record.variance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                                                {record.variance > 0 ? '+' : ''}{record.variance.toFixed(2)}
-                                                            </div>
-                                                        </div>
-                                                        <div className="p-3 bg-gray-50 rounded-2xl group-hover:bg-[#1A1A1A] group-hover:text-[#FFD700] transition-all shadow-sm">
-                                                            <ChevronRight size={24}/>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })
+            {/* 右侧：Variance 与箭头 */}
+            <div className="flex items-center justify-between md:justify-end gap-6 w-full md:w-32 shrink-0 border-t pt-3 md:border-t-0 md:pt-0 border-gray-100">
+                <div className="text-left md:text-right w-full">
+                    <div className="text-[9px] font-black text-gray-400 uppercase">Variance</div>
+                    <div className={`font-mono font-black ${record.variance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {record.variance > 0 ? '+' : ''}{record.variance.toFixed(2)}
+                    </div>
+                </div>
+                <div className="p-3 bg-gray-50 rounded-2xl group-hover:bg-[#1A1A1A] group-hover:text-[#FFD700] transition-all shadow-sm shrink-0">
+                    <ChevronRight size={20}/>
+                </div>
+            </div>
+        </div>
+    );
+})
                                     )}
                                 </div>
                             </div>

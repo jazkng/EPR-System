@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Crown, Layout, Cloud, Lock, Save, X, Download, AlertTriangle, FileJson, Info, History, Database, RotateCcw, CheckCircle2, Loader2, Calendar, Upload } from 'lucide-react';
 import { StoreConfig, Employee, SystemBackup } from '../../types';
@@ -83,7 +82,7 @@ export const StoreConfigModal: React.FC<StoreConfigModalProps> = ({ isOpen, onCl
     };
 
     const handleExportData = async () => {
-        if (!confirm("确定要导出全系统数据吗？(Export All Data)")) return;
+        if (!confirm("确定要导出全系统数据并下载到本地吗？(Export All Data)")) return;
         setIsExporting(true);
         try {
             const data = await DataManager.exportSystemData();
@@ -98,7 +97,7 @@ export const StoreConfigModal: React.FC<StoreConfigModalProps> = ({ isOpen, onCl
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
-            alert("✅ 导出成功！");
+            alert("✅ 备份文件下载成功！请妥善保管。");
         } catch (e) {
             console.error(e);
             alert("❌ 导出失败 (Export Failed)");
@@ -150,7 +149,7 @@ export const StoreConfigModal: React.FC<StoreConfigModalProps> = ({ isOpen, onCl
 
     return (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-0 md:p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white w-full md:max-w-2xl rounded-t-3xl md:rounded-2xl p-4 md:p-6 shadow-2xl h-[90vh] md:max-h-[90vh] overflow-y-auto mt-auto md:mt-0 flex flex-col relative">
+            <div className="bg-white w-full md:max-w-3xl rounded-t-3xl md:rounded-2xl p-4 md:p-6 shadow-2xl h-[90vh] md:max-h-[90vh] overflow-y-auto mt-auto md:mt-0 flex flex-col relative">
                 <div className="flex justify-between items-center mb-4 md:mb-6">
                     <h3 className="font-black text-lg md:text-xl flex items-center gap-2"><Settings size={20} className="md:w-6 md:h-6"/> 系统设置 (System Config)</h3>
                     <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
@@ -159,26 +158,21 @@ export const StoreConfigModal: React.FC<StoreConfigModalProps> = ({ isOpen, onCl
                 {/* Tab Switcher */}
                 <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
                     <button onClick={() => setActiveTab('GENERAL')} className={`flex-1 py-2.5 rounded-lg text-xs font-black transition-all ${activeTab === 'GENERAL' ? 'bg-white shadow text-[#1A1A1A]' : 'text-gray-400'}`}>常规设置 (General)</button>
-                    <button onClick={() => setActiveTab('RECOVERY')} className={`flex-1 py-2.5 rounded-lg text-xs font-black transition-all ${activeTab === 'RECOVERY' ? 'bg-[#1A1A1A] shadow text-[#FFD700]' : 'text-gray-400'}`}>数据恢复 (Recovery)</button>
+                    <button onClick={() => setActiveTab('RECOVERY')} className={`flex-1 py-2.5 rounded-lg text-xs font-black transition-all ${activeTab === 'RECOVERY' ? 'bg-[#1A1A1A] shadow text-[#FFD700]' : 'text-gray-400'}`}>数据与恢复 (Data & Recovery)</button>
                 </div>
                 
                 {/* --- TAB 1: GENERAL --- */}
                 {activeTab === 'GENERAL' && (
                     <div className="space-y-6 flex-grow overflow-y-auto pb-20">
-                        {/* 0. SYSTEM INFO & BACKUP */}
-                        <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200">
-                            <div className="flex justify-between items-center mb-3">
-                                <h4 className="text-xs font-bold text-indigo-700 uppercase flex items-center gap-2"><Info size={14}/> 系统版本 (Version)</h4>
-                                <span className="bg-indigo-100 text-indigo-800 text-xs font-black px-2 py-1 rounded">v{APP_VERSION}</span>
+                        {/* 0. SYSTEM INFO */}
+                        <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 flex justify-between items-center">
+                            <div>
+                                <h4 className="text-xs font-bold text-indigo-700 uppercase flex items-center gap-2 mb-1"><Info size={14}/> 系统版本 (Version)</h4>
+                                <span className="bg-indigo-100 text-indigo-800 text-xs font-black px-2 py-0.5 rounded">v{APP_VERSION}</span>
                             </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => setShowChangelog(true)} className="flex-1 py-2 bg-white border border-indigo-200 text-indigo-600 text-xs font-bold rounded-lg hover:bg-indigo-50 flex items-center justify-center gap-2">
-                                    <History size={14}/> 更新日志
-                                </button>
-                                <button onClick={handleExportData} disabled={isExporting} className="flex-[2] py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 shadow-sm flex items-center justify-center gap-2 transition-all">
-                                    {isExporting ? 'Exporting...' : <><Download size={14}/> 下载当前数据 (Local Backup)</>}
-                                </button>
-                            </div>
+                            <button onClick={() => setShowChangelog(true)} className="px-4 py-2 bg-white border border-indigo-200 text-indigo-600 text-xs font-bold rounded-lg hover:bg-indigo-100 flex items-center gap-2 transition-colors">
+                                <History size={14}/> 更新日志
+                            </button>
                         </div>
 
                         {/* 1. BOSS ACCOUNTS */}
@@ -234,21 +228,45 @@ export const StoreConfigModal: React.FC<StoreConfigModalProps> = ({ isOpen, onCl
                             <h4 className="text-sm font-black text-blue-800 flex items-center gap-2 mb-2"><Database size={16}/> 数据安全与备份机制 (Data Security)</h4>
                             <p className="text-xs text-blue-600 leading-relaxed font-medium">
                                 为了保护您的账单免受高额读取费用，<strong>系统已关闭每日自动云备份</strong>。<br/>
-                                建议您<strong>每周</strong>在[常规设置]中点击【下载当前数据】，将系统完整数据保存到您的本地电脑或 U 盘中。
+                                建议您<strong>每周</strong>手动点击下方【下载系统备份】，将完整数据保存到本地电脑或 U 盘中。
                             </p>
                         </div>
 
-                        {/* FILE IMPORT AREA */}
-                        <div className="bg-gray-50 border-2 border-dashed border-gray-300 p-6 rounded-xl flex flex-col items-center justify-center text-center hover:bg-gray-100 transition-colors cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                            <div className="bg-white p-3 rounded-full shadow-sm mb-2"><Upload size={24} className="text-gray-400"/></div>
-                            <p className="text-sm font-bold text-gray-600">点击上传本地备份文件 (.json)</p>
-                            <p className="text-xs text-gray-400 mt-1">Manual Import (恢复本地数据)</p>
-                            <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileUpload} />
+                        {/* 🟢 LOCAL BACKUP & RESTORE ACTIONS (NEW LAYOUT) */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                            {/* EXPORT BUTTON */}
+                            <div className="bg-white border-2 border-indigo-100 p-5 rounded-2xl flex flex-col items-center justify-center text-center shadow-sm">
+                                <div className="bg-indigo-50 p-3 rounded-full shadow-inner mb-3 text-indigo-600">
+                                    <Download size={24} />
+                                </div>
+                                <h4 className="text-sm font-black text-[#1A1A1A] mb-1">导出系统数据</h4>
+                                <p className="text-[10px] text-gray-500 mb-4 h-8">打包全店所有数据并下载为 .json 文件，建议每周操作一次。</p>
+                                <button onClick={handleExportData} disabled={isExporting} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] text-xs font-black rounded-xl hover:bg-black transition-all flex justify-center items-center gap-2 shadow-lg active:scale-95 disabled:opacity-70">
+                                    {isExporting ? <Loader2 size={16} className="animate-spin"/> : <Download size={16}/>} 
+                                    {isExporting ? '打包中...' : '下载备份 (Export)'}
+                                </button>
+                            </div>
+
+                            {/* IMPORT BUTTON */}
+                            <div 
+                                className="bg-gray-50 border-2 border-dashed border-gray-300 p-5 rounded-2xl flex flex-col items-center justify-center text-center hover:bg-gray-100 hover:border-gray-400 transition-colors cursor-pointer" 
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                <div className="bg-white p-3 rounded-full shadow-sm mb-3 text-gray-500">
+                                    <Upload size={24}/>
+                                </div>
+                                <h4 className="text-sm font-black text-[#1A1A1A] mb-1">恢复本地数据</h4>
+                                <p className="text-[10px] text-gray-500 mb-4 h-8">上传之前下载的 .json 备份文件，系统将回滚到该文件状态。</p>
+                                <div className="w-full py-3 bg-white border border-gray-200 text-gray-600 text-xs font-black rounded-xl transition-all flex justify-center items-center gap-2 shadow-sm">
+                                    <Upload size={16}/> 点击选择文件
+                                </div>
+                                <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileUpload} />
+                            </div>
                         </div>
 
-                        <div className="h-px bg-gray-200 my-4"></div>
-                        <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-2"><Cloud size={14}/> 云端手动快照 (Cloud Snapshots)</h4>
-
+                        <div className="h-px bg-gray-200 my-6"></div>
+                        
+                        <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-2"><Cloud size={14}/> 云端历史快照 (Cloud Snapshots)</h4>
                         {loadingBackups ? (
                             <div className="py-10 text-center text-gray-400 font-bold flex flex-col items-center">
                                 <Loader2 size={24} className="animate-spin mb-2"/> 加载快照列表...
@@ -273,7 +291,7 @@ export const StoreConfigModal: React.FC<StoreConfigModalProps> = ({ isOpen, onCl
                                                 </h4>
                                                 <div className="flex gap-2 mt-1">
                                                     <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold border border-blue-100">v{bk.version}</span>
-                                                    <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold border border-gray-200">Manual</span>
+                                                    <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold border border-gray-200">Snapshot</span>
                                                 </div>
                                             </div>
                                         </div>

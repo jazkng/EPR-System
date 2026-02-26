@@ -183,12 +183,13 @@ export interface Employee {
     name: string;
     role: string;
     pin?: string;
-    status: 'CONFIRMED' | 'PROBATION' | 'TERMINATED'; // Removed PIC from here
-    rank?: EmployeeRank; // NEW: Controls Org Chart Position
-    level: string; // Legacy string, keep for backward compat if needed
+    status: 'CONFIRMED' | 'PROBATION' | 'TERMINATED';
+    rank?: EmployeeRank; 
+    level: string; 
     basicSalary: number;
     salaryMode?: 'MONTHLY' | 'DAILY' | 'HOURLY';
     phone: string;
+    icNumber?: string; 
     joinDate: string;
     absentDays: number;
     gender: 'Male' | 'Female';
@@ -216,21 +217,17 @@ export interface Employee {
     typhoidExpiry?: string;
     foodHandlingDate?: string;
     attributes?: EmployeeAttributes;
-    assessmentHistory?: AssessmentRecord[]; // NEW: Stores all individual ratings
-    assessmentYearlyLimit?: number; // NEW: Max times per year (Default 3)
-    assessmentTargets?: string[]; // NEW: List of IDs this employee can assess
+    assessmentHistory?: AssessmentRecord[]; 
+    assessmentYearlyLimit?: number; 
+    assessmentTargets?: string[]; 
     shirtSize?: string;
     height?: number;
     weight?: number;
     isQualityStaff?: boolean;
     hasEPF?: boolean;
     customAllowances?: CustomAllowance[];
-    
-    // NEW: Individualized Standards
     customGuide?: RoleGuide; 
     customSop?: { start: { title: string, tasks: SOPItem[] }, end: { title: string, tasks: SOPItem[] } };
-    
-    // NEW: Misconduct Logic
     misconductStats?: MisconductStats;
 }
 
