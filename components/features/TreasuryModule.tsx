@@ -33,7 +33,7 @@ interface LedgerItem {
     type: 'IN' | 'OUT';
     category: string;
     tag?: string;
-    balance?: number; // New Balance Field
+    balance?: number;
 }
 
 const LedgerModal = ({ isOpen, type, onClose, items }: { isOpen: boolean; type: 'CASH' | 'BANK'; onClose: () => void; items: LedgerItem[] | undefined }) => {
@@ -109,21 +109,17 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
     const [config, setConfig] = useState<TreasuryConfig>({ initialDate: new Date().toISOString().split('T')[0], initialCash: 0, initialBank: 0, shareholders: [] });
     const [transfers, setTransfers] = useState<FundTransfer[]>([]);
     
-    // Ledger Data
     const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
     const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
     const [billPayments, setBillPayments] = useState<BillPaymentRecord[]>([]);
     const [loading, setLoading] = useState(true);
 
-    // Ledger View State
     const [viewLedger, setViewLedger] = useState<'CASH' | 'BANK' | null>(null);
 
-    // PDF State
     const printRef = useRef<HTMLDivElement>(null);
     const [printingRecord, setPrintingRecord] = useState<FundTransfer | null>(null);
     const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
-    // Transfer Form
     const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
     const [transferForm, setTransferForm] = useState<Partial<FundTransfer>>({
         amount: 0,
@@ -133,11 +129,9 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         date: new Date().toISOString().split('T')[0]
     });
 
-    // Shareholder Form
     const [isShareholderFormOpen, setIsShareholderFormOpen] = useState(false);
     const [shareholderForm, setShareholderForm] = useState<Partial<Shareholder>>({ name: '', investmentAmount: 0, equityPercentage: 0 });
 
-    // Injection Form
     const [isInjectionModalOpen, setIsInjectionModalOpen] = useState(false);
     const [injectionForm, setInjectionForm] = useState({
         shareholderName: '',
@@ -147,17 +141,15 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         note: ''
     });
 
-    // Dividend Form (NEW)
     const [isDividendModalOpen, setIsDividendModalOpen] = useState(false);
     const [dividendForm, setDividendForm] = useState({
         shareholderId: '',
         amount: '',
-        paymentMethod: 'BANK_TRANSFER', // BANK or CASH
+        paymentMethod: 'BANK_TRANSFER',
         date: new Date().toISOString().split('T')[0],
         note: ''
     });
 
-    // Income Form (New)
     const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
     const [incomeForm, setIncomeForm] = useState({
         source: '',
@@ -168,7 +160,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         note: ''
     });
 
-    // CAPEX / General Expense Form (For Backdating)
     const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
     const [expenseForm, setExpenseForm] = useState<Partial<ExpenseItem>>({
         category: 'RENOVATION',
@@ -184,7 +175,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         loadData();
     }, []);
 
-    // 🟢 1. 替换 loadData 和 loadExpenses：专为资金盘定制的全量拉取，补回丢失的几十万收入
     const loadData = async () => {
         setLoading(true);
         try {
@@ -198,8 +188,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                 DataManager.getBillPayments()
             ]);
 
-            // 🌟 核心修复点：绕过 dataManager 的 limit(100) 限制
-            // 精准抓取生效日期后的所有结算单，保证资金盘基数不缩水
             const qSettlements = query(collection(db, 'settlements'), where('date', '>=', startDateStr));
             const stlSnap = await getDocs(qSettlements);
             const stl = stlSnap.docs.map(d => d.data() as SettlementRecord);
@@ -208,7 +196,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
             setSettlements(stl);
             setBillPayments(bills);
 
-            // 将取到的全量结算单传过去，防止结算单里的支出对不上
             loadExpenses(stl);
 
         } catch (e) {
@@ -221,7 +208,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
     const loadExpenses = async (fullSettlements: SettlementRecord[] = settlements) => {
         try {
             const allExp: ExpenseItem[] = [];
-            // 🌟 使用传入的全量结算单提取支出
             fullSettlements.forEach(s => {
                 if (s.expenses) allExp.push(...s.expenses);
             });
@@ -252,7 +238,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         }
     };
 
-    // --- CALCULATION LOGIC ---
     const totalCapital = useMemo(() => {
         return (config.shareholders || []).reduce((acc, s) => acc + s.investmentAmount, 0);
     }, [config.shareholders]);
@@ -267,7 +252,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         return expenses.filter(e => e.category === 'DIVIDEND');
     }, [expenses]);
 
-    // ... (incomeSourceHistory, extraIncomeStats, balances, getLedgerData remain same)
     const incomeSourceHistory = useMemo(() => {
         const historySet = new Set(DEFAULT_INCOME_SOURCES);
         transfers.forEach(t => {
@@ -295,7 +279,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         return { total, thisMonthTotal, breakdown, records };
     }, [transfers]);
 
-    // 🟢 2. 替换 balances：全面阻断字符串加法带来的金额异常
     const balances = useMemo(() => {
         let cash = Number(config.initialCash) || 0;
         let bank = Number(config.initialBank) || 0;
@@ -303,7 +286,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         
         settlements.forEach(s => {
             if (new Date(s.date) >= startDate) {
-                // 强制转 Number，防止 "100" + "50" 变成 "10050"
                 const actualCashIncome = Number(s.sales.cash || 0) + Number(s.variance || 0);
                 cash += actualCashIncome;
                 
@@ -319,7 +301,7 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         expenses.forEach(e => {
             if (e.expenseType === 'RECURRING') return;
             if (e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL') {
-                const payDate = new Date(e.time.split('T')[0]); // 修复时区偏差漏算支出
+                const payDate = new Date(e.time.split('T')[0]);
                 if (payDate >= startDate) {
                     const amt = Number(e.amount) || 0;
                     const method = e.paymentMethod ? e.paymentMethod.toUpperCase() : 'BANK_TRANSFER';
@@ -385,8 +367,10 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
             if (!isPaid) return;
             const amt = e.amount || 0; 
             if (amt > 0) {
-                if (type === 'CASH' && isCashExp) items.push({ id: e.id, date: dateStr, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: amt, type: 'OUT', category: e.category, tag: 'EXPENSE' });
-                else if (type === 'BANK' && !isCashExp) items.push({ id: e.id, date: dateStr, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: amt, type: 'OUT', category: e.category, tag: 'EXPENSE' });
+                // FIX: 给 DIVIDEND 专属 tag，区分普通支出
+                const tag = e.category === 'DIVIDEND' ? 'DIVIDEND' : 'EXPENSE';
+                if (type === 'CASH' && isCashExp) items.push({ id: e.id, date: dateStr, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: amt, type: 'OUT', category: e.category, tag });
+                else if (type === 'BANK' && !isCashExp) items.push({ id: e.id, date: dateStr, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: amt, type: 'OUT', category: e.category, tag });
             }
         });
         billPayments.forEach(b => {
@@ -441,6 +425,7 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
 
     // --- HANDLERS ---
     const handleSaveConfig = async () => { await DataManager.saveTreasuryConfig(config); alert("✅ 设置已保存 (Settings Saved)"); loadData(); };
+    
     const handleSaveShareholder = async () => {
         if (!shareholderForm.name || !shareholderForm.investmentAmount) return alert("Name & Investment Required");
         const newShareholder: Shareholder = { id: shareholderForm.id || `sh_${Date.now()}`, name: shareholderForm.name, investmentAmount: Number(shareholderForm.investmentAmount), equityPercentage: Number(shareholderForm.equityPercentage), role: shareholderForm.role };
@@ -449,15 +434,45 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         const newConfig = { ...config, shareholders: updatedList };
         setConfig(newConfig); await DataManager.saveTreasuryConfig(newConfig); setIsShareholderFormOpen(false); setShareholderForm({ name: '', investmentAmount: 0, equityPercentage: 0 });
     };
-    const handleDeleteShareholder = async (id: string) => { if(!confirm("Delete Shareholder?")) return; const newConfig = { ...config, shareholders: config.shareholders?.filter(s => s.id !== id) }; setConfig(newConfig); await DataManager.saveTreasuryConfig(newConfig); };
-    const handleSaveExpense = async () => { if (!expenseForm.amount || !expenseForm.company) return alert("Please fill amount and details"); const newExpense: ExpenseItem = { id: `exp_${Date.now()}`, category: expenseForm.category || 'OTHER', expenseType: 'GENERAL', company: expenseForm.company, amount: Number(expenseForm.amount), note: expenseForm.note || 'Manual Entry', time: expenseForm.time || new Date().toISOString(), paymentMethod: expenseForm.paymentMethod || 'BANK_TRANSFER', paymentStatus: 'PAID', totalBillAmount: Number(expenseForm.amount), outstandingAmount: 0 }; await DataManager.saveStandaloneExpense(newExpense); setIsExpenseModalOpen(false); setExpenseForm({ category: 'RENOVATION', amount: 0, company: '', note: '', paymentMethod: 'BANK_TRANSFER', time: new Date().toISOString().split('T')[0] }); alert("✅ 支出已补录 (Expense Recorded)"); loadExpenses(); };
-    const handleSaveTransfer = async () => { if (!transferForm.amount || transferForm.amount <= 0) return alert("Enter valid amount"); const newTransfer: FundTransfer = { id: `trf_${Date.now()}`, date: transferForm.date || new Date().toISOString(), amount: Number(transferForm.amount), fromAccount: transferForm.fromAccount as any, toAccount: transferForm.toAccount as any, type: transferForm.type as any, note: transferForm.note }; await DataManager.saveFundTransfer(newTransfer); setTransfers([newTransfer, ...transfers]); setIsTransferModalOpen(false); alert("✅ 转账记录已保存"); loadData(); };
-    const handleSaveInjection = async () => { if (!injectionForm.shareholderName || !injectionForm.amount) return alert("请填写完整信息"); const newTransfer: FundTransfer = { id: `inj_${Date.now()}`, date: injectionForm.date, amount: parseFloat(injectionForm.amount), fromAccount: 'SHAREHOLDER' as any, toAccount: injectionForm.toAccount as any, type: 'DEPOSIT', note: `[股东注资] ${injectionForm.shareholderName}: ${injectionForm.note || '额外资金'}` }; await DataManager.saveFundTransfer(newTransfer); setTransfers([newTransfer, ...transfers]); setIsInjectionModalOpen(false); setInjectionForm({ shareholderName: '', amount: '', toAccount: 'BANK', date: new Date().toISOString().split('T')[0], note: '' }); alert("✅ 资金注入已记录 (Injection Recorded)"); loadData(); };
-    const handleSaveIncome = async () => { if (!incomeForm.amount) return alert("请输入金额"); const newTransfer: FundTransfer = { id: `inc_${Date.now()}`, date: incomeForm.date, amount: parseFloat(incomeForm.amount), fromAccount: 'OTHER' as any, toAccount: incomeForm.toAccount as any, type: 'DEPOSIT', note: `[代收] ${incomeForm.source} - ${incomeForm.category}${incomeForm.note ? ` (${incomeForm.note})` : ''}` }; await DataManager.saveFundTransfer(newTransfer); setTransfers([newTransfer, ...transfers]); setIsIncomeModalOpen(false); setIncomeForm({ source: '', category: 'ELECTRICITY', amount: '', toAccount: 'CASH', date: new Date().toISOString().split('T')[0], note: '' }); alert("✅ 代收收入已记录 (Income Recorded)"); loadData(); };
-    const handleDeleteTransfer = async (id: string) => { if(!confirm("Delete record?")) return; await DataManager.deleteFundTransfer(id); setTransfers(transfers.filter(t => t.id !== id)); loadData(); };
-    const handleGenerateReceipt = async (record: FundTransfer) => { setPrintingRecord(record); setIsGeneratingPdf(true); setTimeout(async () => { if (!printRef.current) return; try { const canvas = await html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff' }); const imgData = canvas.toDataURL('image/jpeg', 1.0); const pdf = new jsPDF('p', 'mm', 'a5'); const pdfWidth = pdf.internal.pageSize.getWidth(); const pdfHeight = (canvas.height * pdfWidth) / canvas.width; pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight); pdf.save(`Receipt_${record.date}_${record.id.slice(-4)}.pdf`); } catch (err) { console.error("PDF Gen Error:", err); alert("生成收据失败 (Failed to generate PDF)"); } finally { setIsGeneratingPdf(false); setPrintingRecord(null); } }, 800); };
     
-    // NEW: Handle Dividend Save
+    const handleDeleteShareholder = async (id: string) => { if(!confirm("Delete Shareholder?")) return; const newConfig = { ...config, shareholders: config.shareholders?.filter(s => s.id !== id) }; setConfig(newConfig); await DataManager.saveTreasuryConfig(newConfig); };
+    
+    const handleSaveExpense = async () => { if (!expenseForm.amount || !expenseForm.company) return alert("Please fill amount and details"); const newExpense: ExpenseItem = { id: `exp_${Date.now()}`, category: expenseForm.category || 'OTHER', expenseType: 'GENERAL', company: expenseForm.company, amount: Number(expenseForm.amount), note: expenseForm.note || 'Manual Entry', time: expenseForm.time ? `${expenseForm.time}T12:00:00` : new Date().toISOString(), paymentMethod: expenseForm.paymentMethod || 'BANK_TRANSFER', paymentStatus: 'PAID', totalBillAmount: Number(expenseForm.amount), outstandingAmount: 0 }; await DataManager.saveStandaloneExpense(newExpense); setIsExpenseModalOpen(false); setExpenseForm({ category: 'RENOVATION', amount: 0, company: '', note: '', paymentMethod: 'BANK_TRANSFER', time: new Date().toISOString().split('T')[0] }); alert("✅ 支出已补录 (Expense Recorded)"); loadExpenses(); };
+    
+    const handleSaveTransfer = async () => { if (!transferForm.amount || transferForm.amount <= 0) return alert("Enter valid amount"); const newTransfer: FundTransfer = { id: `trf_${Date.now()}`, date: transferForm.date || new Date().toISOString(), amount: Number(transferForm.amount), fromAccount: transferForm.fromAccount as any, toAccount: transferForm.toAccount as any, type: transferForm.type as any, note: transferForm.note }; await DataManager.saveFundTransfer(newTransfer); setTransfers([newTransfer, ...transfers]); setIsTransferModalOpen(false); alert("✅ 转账记录已保存"); loadData(); };
+    
+    const handleSaveInjection = async () => { if (!injectionForm.shareholderName || !injectionForm.amount) return alert("请填写完整信息"); const newTransfer: FundTransfer = { id: `inj_${Date.now()}`, date: injectionForm.date, amount: parseFloat(injectionForm.amount), fromAccount: 'SHAREHOLDER' as any, toAccount: injectionForm.toAccount as any, type: 'DEPOSIT', note: `[股东注资] ${injectionForm.shareholderName}: ${injectionForm.note || '额外资金'}` }; await DataManager.saveFundTransfer(newTransfer); setTransfers([newTransfer, ...transfers]); setIsInjectionModalOpen(false); setInjectionForm({ shareholderName: '', amount: '', toAccount: 'BANK', date: new Date().toISOString().split('T')[0], note: '' }); alert("✅ 资金注入已记录 (Injection Recorded)"); loadData(); };
+    
+    const handleSaveIncome = async () => { if (!incomeForm.amount) return alert("请输入金额"); const newTransfer: FundTransfer = { id: `inc_${Date.now()}`, date: incomeForm.date, amount: parseFloat(incomeForm.amount), fromAccount: 'OTHER' as any, toAccount: incomeForm.toAccount as any, type: 'DEPOSIT', note: `[代收] ${incomeForm.source} - ${incomeForm.category}${incomeForm.note ? ` (${incomeForm.note})` : ''}` }; await DataManager.saveFundTransfer(newTransfer); setTransfers([newTransfer, ...transfers]); setIsIncomeModalOpen(false); setIncomeForm({ source: '', category: 'ELECTRICITY', amount: '', toAccount: 'CASH', date: new Date().toISOString().split('T')[0], note: '' }); alert("✅ 代收收入已记录 (Income Recorded)"); loadData(); };
+    
+    const handleDeleteTransfer = async (id: string) => { if(!confirm("Delete record?")) return; await DataManager.deleteFundTransfer(id); setTransfers(transfers.filter(t => t.id !== id)); loadData(); };
+    
+    const handleGenerateReceipt = async (record: FundTransfer) => {
+        // FIX: 防止并发，已在生成中则直接返回
+        if (isGeneratingPdf) return;
+        setPrintingRecord(record);
+        setIsGeneratingPdf(true);
+        setTimeout(async () => {
+            if (!printRef.current) return;
+            try {
+                const canvas = await html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+                const imgData = canvas.toDataURL('image/jpeg', 1.0);
+                const pdf = new jsPDF('p', 'mm', 'a5');
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+                pdf.save(`Receipt_${record.date}_${record.id.slice(-4)}.pdf`);
+            } catch (err) {
+                console.error("PDF Gen Error:", err);
+                alert("生成收据失败 (Failed to generate PDF)");
+            } finally {
+                setIsGeneratingPdf(false);
+                setPrintingRecord(null);
+            }
+        }, 800);
+    };
+    
+    // FIX: Dividend time 字段改为完整 ISO 格式，确保 split('T')[0] 能正确解析
     const handleSaveDividend = async () => {
         if (!dividendForm.shareholderId || !dividendForm.amount) return alert("Please fill all fields");
         const sh = config.shareholders?.find(s => s.id === dividendForm.shareholderId);
@@ -465,13 +480,14 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
 
         const newExpense: ExpenseItem = {
             id: `div_${Date.now()}`,
-            category: 'DIVIDEND', // Distinct category
+            category: 'DIVIDEND',
             expenseType: 'GENERAL',
-            company: companyName, // Shareholder Name
+            company: companyName,
             amount: parseFloat(dividendForm.amount),
             paymentStatus: 'PAID',
             paymentMethod: dividendForm.paymentMethod as any,
-            time: dividendForm.date,
+            // FIX: 统一使用带时间的 ISO 格式，防止 split('T')[0] 解析失败
+            time: `${dividendForm.date}T12:00:00`,
             note: `[股东分红] ${dividendForm.note || 'Dividend Payout'}`,
             paidBy: 'COMPANY'
         };
@@ -480,7 +496,7 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         setIsDividendModalOpen(false);
         setDividendForm({ shareholderId: '', amount: '', paymentMethod: 'BANK_TRANSFER', date: new Date().toISOString().split('T')[0], note: '' });
         alert("✅ 分红已记录并扣除 (Dividend Recorded)");
-        loadExpenses(); // Refresh expense list to show in history
+        loadExpenses();
     };
 
     const handleDeleteExpense = async (id: string) => {
@@ -531,7 +547,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                 <div className="flex-grow overflow-y-auto p-4 md:p-8 pb-32 md:pb-8">
                     {activeTab === 'OVERVIEW' && (
                         <div className="space-y-4 md:space-y-6 max-w-4xl mx-auto">
-                            {/* Total Card */}
                             <div className="bg-[#1A1A1A] rounded-3xl p-5 md:p-8 text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-center gap-4 md:gap-6">
                                 <div className="absolute top-0 right-0 w-64 h-64 bg-[#FFD700] opacity-10 rounded-full blur-3xl pointer-events-none"></div>
                                 <div className="relative z-10 text-center md:text-left"><p className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-[0.2em] mb-1 md:mb-2">Total Assets (总资金)</p><h2 className="text-3xl md:text-6xl font-black text-[#FFD700] font-mono tracking-tight">{formatMoney(balances.total)}</h2><p className="text-[9px] md:text-[10px] text-gray-500 mt-1 md:mt-2 italic">Calculated from {config.initialDate}</p></div>
@@ -545,7 +560,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                     )}
                     {activeTab === 'EXTRA_INCOME' && (
                         <div className="max-w-5xl mx-auto space-y-6 md:space-y-8 animate-in fade-in slide-in-from-right-4">
-                            {/* ... (Income View Content - Keep as is) ... */}
                             <div className="bg-gradient-to-br from-emerald-600 to-teal-800 rounded-[2.5rem] p-6 md:p-10 text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-center gap-8 border border-emerald-500/30"><div className="absolute -top-24 -right-24 w-64 h-64 bg-white/10 rounded-full blur-3xl pointer-events-none"></div><div className="absolute -bottom-24 -left-24 w-64 h-64 bg-emerald-400/20 rounded-full blur-3xl pointer-events-none"></div><div className="relative z-10 text-center md:text-left space-y-2"><div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-emerald-100 text-[10px] font-black uppercase tracking-widest border border-white/10"><TrendingUp size={12}/> Non-Business Revenue</div><h2 className="text-4xl md:text-6xl font-black text-white font-mono tracking-tighter drop-shadow-sm">{formatMoney(extraIncomeStats.total)}</h2><div className="flex items-center justify-center md:justify-start gap-4 text-emerald-100 text-xs font-bold"><span className="flex items-center gap-1"><Calendar size={14}/> 本月收入 (This Month): {formatMoney(extraIncomeStats.thisMonthTotal)}</span></div></div><button onClick={() => setIsIncomeModalOpen(true)} className="relative z-10 bg-white text-emerald-800 px-8 py-4 rounded-2xl shadow-[0_10px_20px_rgba(0,0,0,0.2)] flex items-center gap-3 font-black text-sm transition-all hover:scale-105 active:scale-95 hover:bg-emerald-50"><div className="bg-emerald-100 p-1.5 rounded-full"><Plus size={16} className="text-emerald-700"/></div><span>记录新收入 (Record)</span></button></div>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{[{l:'Electricity',v:extraIncomeStats.breakdown.electricity,c:'text-yellow-600',b:'bg-yellow-50',i:Zap},{l:'Water',v:extraIncomeStats.breakdown.water,c:'text-cyan-600',b:'bg-cyan-50',i:Droplets},{l:'Rent',v:extraIncomeStats.breakdown.rent,c:'text-indigo-600',b:'bg-indigo-50',i:Home},{l:'Other',v:extraIncomeStats.breakdown.other,c:'text-emerald-600',b:'bg-emerald-50',i:Coins}].map(c => (<div key={c.l} className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col justify-between h-32 relative group overflow-hidden"><div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><c.i size={64}/></div><div className="relative z-10"><div className={`w-10 h-10 rounded-2xl ${c.b} ${c.c} flex items-center justify-center mb-3 shadow-inner`}><c.i size={20} fill="currentColor"/></div><p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{c.l}</p><p className="text-lg md:text-xl font-black text-[#1A1A1A]">{formatMoney(c.v)}</p></div></div>))}</div>
                             <div className="bg-white rounded-[2.5rem] border border-gray-200 shadow-sm overflow-hidden"><div className="p-6 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center"><h3 className="font-black text-lg text-[#1A1A1A] flex items-center gap-2"><History size={20} className="text-gray-400"/> 收入记录 (History)</h3><span className="text-xs font-bold text-gray-400 bg-white px-3 py-1 rounded-full border border-gray-100">{extraIncomeStats.records.length} Records</span></div><div className="divide-y divide-gray-100">{extraIncomeStats.records.length === 0 ? (<div className="p-12 text-center text-gray-400 text-sm font-bold flex flex-col items-center"><div className="bg-gray-100 p-4 rounded-full mb-3"><Archive size={24} className="opacity-50"/></div>暂无收入记录</div>) : (extraIncomeStats.records.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(t => (<div key={t.id} className="p-5 flex items-center justify-between hover:bg-gray-50 transition-colors group"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-gray-100 text-gray-600"><Recycle size={20} fill="currentColor" className="opacity-80"/></div><div><div className="font-bold text-sm text-[#1A1A1A]">{t.note?.replace('[代收] ', '') || 'Income'}</div><div className="text-[10px] text-gray-400 font-bold mt-0.5 flex items-center gap-2"><span className="bg-gray-100 px-1.5 py-0.5 rounded">{t.date}</span><span>•</span><span className="uppercase">{t.toAccount}</span></div></div></div><div className="flex items-center gap-4"><span className="font-mono font-black text-base text-emerald-600 bg-emerald-50 px-3 py-1 rounded-lg">+{formatMoney(t.amount)}</span><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleGenerateReceipt(t)} disabled={isGeneratingPdf} className="p-2 bg-white border border-gray-200 text-gray-400 rounded-lg hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm" title="打印收据 (Print Receipt)">{isGeneratingPdf && printingRecord?.id === t.id ? <Loader2 size={14} className="animate-spin"/> : <Printer size={14}/>}</button><button onClick={() => handleDeleteTransfer(t.id)} className="p-2 bg-white border border-gray-200 text-gray-400 rounded-lg hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all shadow-sm"><Trash2 size={14}/></button></div></div></div>)))}</div></div>
@@ -553,7 +567,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                     )}
                     {activeTab === 'EQUITY' && (
                         <div className="max-w-4xl mx-auto space-y-6 md:space-y-8 animate-in fade-in slide-in-from-right-4">
-                            {/* Shareholders */}
                             <div className="bg-white rounded-3xl p-5 md:p-6 shadow-sm border border-gray-200">
                                 <div className="flex justify-between items-center mb-4 md:mb-6">
                                     <div><h3 className="font-black text-base md:text-lg text-[#1A1A1A] flex items-center gap-2"><Users size={18} className="md:w-5 md:h-5"/> 股东与股本</h3><p className="text-[10px] md:text-xs text-gray-400 font-bold mt-1">Paid-up Capital: {formatMoney(totalCapital)}</p></div>
@@ -572,7 +585,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                                 </div>
                             </div>
                             
-                            {/* Injections */}
                             <div className="bg-white rounded-3xl p-5 md:p-6 shadow-sm border border-gray-200">
                                 <div className="flex justify-between items-center mb-4">
                                     <div><h3 className="font-black text-base md:text-lg text-[#1A1A1A] flex items-center gap-2"><PiggyBank size={18} className="md:w-5 md:h-5"/> 股东注资/垫资</h3><p className="text-[10px] md:text-xs text-gray-400 font-bold mt-1">Capital Injection</p></div>
@@ -583,7 +595,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                                 </div>
                             </div>
 
-                            {/* NEW: Dividends Payout */}
                             <div className="bg-white rounded-3xl p-5 md:p-6 shadow-sm border border-gray-200">
                                 <div className="flex justify-between items-center mb-4">
                                     <div><h3 className="font-black text-base md:text-lg text-[#1A1A1A] flex items-center gap-2"><Gem size={18} className="md:w-5 md:h-5"/> 股东分红 / 提款</h3><p className="text-[10px] md:text-xs text-gray-400 font-bold mt-1">Dividend Payouts (Wages)</p></div>
@@ -611,20 +622,17 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                 </div>
 
                 {/* MODALS */}
-                {/* ... existing modals ... */}
                 {isTransferModalOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-6">新增资金记录</h3><div className="space-y-4"><div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-xl"><button onClick={() => setTransferForm({...transferForm, type: 'DEPOSIT', fromAccount: 'CASH', toAccount: 'BANK'})} className={`py-2 rounded-lg text-xs font-bold transition-all ${transferForm.type === 'DEPOSIT' ? 'bg-white shadow-sm text-green-700' : 'text-gray-400'}`}>存入 (Bank In)</button><button onClick={() => setTransferForm({...transferForm, type: 'WITHDRAWAL', fromAccount: 'BANK', toAccount: 'CASH'})} className={`py-2 rounded-lg text-xs font-bold transition-all ${transferForm.type === 'WITHDRAWAL' ? 'bg-white shadow-sm text-blue-700' : 'text-gray-400'}`}>提款 (Withdraw)</button></div><div><label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Date</label><input type="date" value={transferForm.date} onChange={e => setTransferForm({...transferForm, date: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold outline-none" /></div><div><label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Amount (RM)</label><input type="number" value={transferForm.amount} onChange={e => setTransferForm({...transferForm, amount: parseFloat(e.target.value)})} className="w-full p-4 bg-gray-50 rounded-xl font-mono font-black text-xl outline-none focus:border-[#FFD700] border-2 border-transparent" /></div><div><label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Note</label><input type="text" value={transferForm.note || ''} onChange={e => setTransferForm({...transferForm, note: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold outline-none" placeholder="e.g. ATM Deposit" /></div><div className="flex gap-3 mt-4"><button onClick={() => setIsTransferModalOpen(false)} className="flex-1 py-3 bg-white border border-gray-200 text-gray-500 font-bold rounded-xl text-sm">Cancel</button><button onClick={handleSaveTransfer} className="flex-[2] py-3 bg-[#1A1A1A] text-[#FFD700] font-bold rounded-xl text-sm shadow-lg hover:bg-black">Confirm</button></div></div></div></div>)}
                 {isShareholderFormOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-4">股东资料 (Shareholder)</h3><div className="space-y-3"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Name</label><input className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={shareholderForm.name} onChange={e => setShareholderForm({...shareholderForm, name: e.target.value})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Role (Title)</label><input className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={shareholderForm.role || ''} onChange={e => setShareholderForm({...shareholderForm, role: e.target.value})} /></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Capital (RM)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={shareholderForm.investmentAmount} onChange={e => setShareholderForm({...shareholderForm, investmentAmount: parseFloat(e.target.value)})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Equity (%)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={shareholderForm.equityPercentage} onChange={e => setShareholderForm({...shareholderForm, equityPercentage: parseFloat(e.target.value)})} /></div></div><button onClick={handleSaveShareholder} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-bold mt-2">Save</button><button onClick={() => setIsShareholderFormOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button></div></div></div>)}
                 {isInjectionModalOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-4">股东注资 (Injection)</h3><div className="space-y-4"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Shareholder (股东)</label><select className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={injectionForm.shareholderName} onChange={e => setInjectionForm({...injectionForm, shareholderName: e.target.value})}><option value="">Select Shareholder...</option>{config.shareholders?.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Amount (金额)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-black text-lg outline-none border-2 border-transparent focus:border-[#FFD700]" value={injectionForm.amount} onChange={e => setInjectionForm({...injectionForm, amount: e.target.value})} placeholder="0.00" /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Into Account (存入账户)</label><div className="flex gap-2"><button onClick={() => setInjectionForm({...injectionForm, toAccount: 'BANK'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${injectionForm.toAccount === 'BANK' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-200 text-gray-500'}`}>BANK</button><button onClick={() => setInjectionForm({...injectionForm, toAccount: 'CASH'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${injectionForm.toAccount === 'CASH' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-gray-200 text-gray-500'}`}>CASH</button></div></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Date (日期)</label><input type="date" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={injectionForm.date} onChange={e => setInjectionForm({...injectionForm, date: e.target.value})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Note (备注)</label><input type="text" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={injectionForm.note} onChange={e => setInjectionForm({...injectionForm, note: e.target.value})} placeholder="e.g. Working Capital" /></div><button onClick={handleSaveInjection} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-bold mt-2 shadow-lg">确认注资 (Confirm)</button><button onClick={() => setIsInjectionModalOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button></div></div></div>)}
                 {isIncomeModalOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-4">代收/杂项收入 (Extra Income)</h3><div className="space-y-4"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Source (来源)</label><input list="income_sources" type="text" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={incomeForm.source} onChange={e => setIncomeForm({...incomeForm, source: e.target.value})} placeholder="e.g. 隔壁店铺" /><datalist id="income_sources">{incomeSourceHistory.map((src, idx) => (<option key={idx} value={src} />))}</datalist></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Category (类别)</label><select className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={incomeForm.category} onChange={e => setIncomeForm({...incomeForm, category: e.target.value})}><option value="ELECTRICITY">电费 (Electricity)</option><option value="WATER">水费 (Water)</option><option value="RENT">租金 (Rent)</option><option value="OTHER">其他 (Other)</option></select></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Amount (金额)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-black text-lg outline-none border-2 border-transparent focus:border-[#FFD700]" value={incomeForm.amount} onChange={e => setIncomeForm({...incomeForm, amount: e.target.value})} placeholder="0.00" /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Into Account (存入账户)</label><div className="flex gap-2"><button onClick={() => setIncomeForm({...incomeForm, toAccount: 'CASH'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${incomeForm.toAccount === 'CASH' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-gray-200 text-gray-500'}`}>CASH</button><button onClick={() => setIncomeForm({...incomeForm, toAccount: 'BANK'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${incomeForm.toAccount === 'BANK' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-200 text-gray-500'}`}>BANK</button></div></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Date (日期)</label><input type="date" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={incomeForm.date} onChange={e => setIncomeForm({...incomeForm, date: e.target.value})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Note (备注)</label><input type="text" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={incomeForm.note} onChange={e => setIncomeForm({...incomeForm, note: e.target.value})} placeholder="Optional..." /></div><button onClick={handleSaveIncome} className="w-full py-3 bg-green-600 text-white rounded-xl font-bold mt-2 shadow-lg hover:bg-green-700">确认收入 (Confirm)</button><button onClick={() => setIsIncomeModalOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button></div></div></div>)}
                 {isExpenseModalOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-2">补录/记录支出</h3><div className="space-y-3"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Category</label><select className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.category} onChange={e => setExpenseForm({...expenseForm, category: e.target.value})}><option value="RENOVATION">装修工程 (Renovation)</option><option value="EQUIPMENT">设备采购 (Equipment)</option><option value="RENT">租金 (Rent)</option><option value="UTILITIES">水电 (Utilities)</option><option value="SALARY">薪资 (Salary)</option><option value="SUPPLIES">杂项 (Supplies)</option><option value="LICENSE">执照 (License)</option><option value="OTHER">其他 (Other)</option></select></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Description / Item</label><input className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.company} onChange={e => setExpenseForm({...expenseForm, company: e.target.value})} placeholder="e.g. Renovation Contractor" /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Amount (RM)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: parseFloat(e.target.value)})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Payment Source</label><div className="flex gap-2"><button onClick={() => setExpenseForm({...expenseForm, paymentMethod: 'BANK_TRANSFER'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${expenseForm.paymentMethod === 'BANK_TRANSFER' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-200 text-gray-500'}`}>BANK</button><button onClick={() => setExpenseForm({...expenseForm, paymentMethod: 'CASH'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${expenseForm.paymentMethod === 'CASH' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-gray-200 text-gray-500'}`}>CASH</button></div></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Date (Backdate Allowed)</label><input type="date" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.time?.split('T')[0]} onChange={e => setExpenseForm({...expenseForm, time: e.target.value})} /></div><button onClick={handleSaveExpense} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-bold mt-2 shadow-lg">确认支出 (Confirm)</button><button onClick={() => setIsExpenseModalOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button></div></div></div>)}
 
-                {/* --- NEW: DIVIDEND MODAL --- */}
                 {isDividendModalOpen && (
                     <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
                         <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 border-t-8 border-red-500">
                             <h3 className="font-black text-xl text-[#1A1A1A] mb-4">分发分红 (Payout)</h3>
                             <p className="text-xs text-gray-500 mb-4 font-bold">当作工钱发放，将从公司资金中扣除。</p>
-                            
                             <div className="space-y-4">
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Shareholder (股东)</label>
@@ -633,18 +641,10 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                                         {config.shareholders?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                                     </select>
                                 </div>
-                                
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Amount (金额)</label>
-                                    <input 
-                                        type="number" 
-                                        className="w-full p-3 bg-gray-50 rounded-xl font-black text-lg outline-none border-2 border-transparent focus:border-[#FFD700]" 
-                                        value={dividendForm.amount} 
-                                        onChange={e => setDividendForm({...dividendForm, amount: e.target.value})} 
-                                        placeholder="0.00" 
-                                    />
+                                    <input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-black text-lg outline-none border-2 border-transparent focus:border-[#FFD700]" value={dividendForm.amount} onChange={e => setDividendForm({...dividendForm, amount: e.target.value})} placeholder="0.00" />
                                 </div>
-                                
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Payment Method (资金来源)</label>
                                     <div className="flex gap-2">
@@ -652,17 +652,14 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                                         <button onClick={() => setDividendForm({...dividendForm, paymentMethod: 'CASH'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${dividendForm.paymentMethod === 'CASH' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-gray-200 text-gray-500'}`}>CASH</button>
                                     </div>
                                 </div>
-                                
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Date (日期)</label>
                                     <input type="date" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={dividendForm.date} onChange={e => setDividendForm({...dividendForm, date: e.target.value})} />
                                 </div>
-                                
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Note (备注)</label>
                                     <input type="text" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={dividendForm.note} onChange={e => setDividendForm({...dividendForm, note: e.target.value})} placeholder="e.g. June Dividend" />
                                 </div>
-                                
                                 <button onClick={handleSaveDividend} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-bold mt-2 shadow-lg hover:bg-black">确认分发 (Confirm)</button>
                                 <button onClick={() => setIsDividendModalOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button>
                             </div>
@@ -673,15 +670,16 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                 {/* HIDDEN PRINT */}
                 <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
                     <div ref={printRef} className="w-[148mm] min-h-[210mm] bg-white p-8 font-sans text-black relative border">
-                        {/* A5 Size Header */}
                         <div className="flex justify-between items-start border-b-4 border-black pb-4 mb-6">
                             <div><h1 className="text-3xl font-black uppercase tracking-widest mb-1">OFFICIAL RECEIPT</h1><p className="text-xs font-bold text-gray-500">KIM LIAN KEE (KEPONG)</p><p className="text-[10px] text-gray-400 mt-1">No. 52, Jalan Metro Perdana Barat 13<br/>Kepong, 52100 Kuala Lumpur</p></div>
                             <div className="text-right"><p className="text-xl font-mono font-black">{printingRecord?.id.slice(-6)}</p><p className="text-sm font-bold text-gray-500">{printingRecord?.date}</p></div>
                         </div>
                         {printingRecord && (() => {
                             const cleanNote = printingRecord.note?.replace('[代收] ', '') || '';
-                            const sourceName = cleanNote.split('-')[0].trim();
-                            const description = cleanNote.substring(sourceName.length + 1).replace(/^-/, '').trim() || 'Payment';
+                            const dashIndex = cleanNote.indexOf(' - ');
+                            // FIX: 更安全的 note 解析，有 fallback
+                            const sourceName = dashIndex > -1 ? cleanNote.substring(0, dashIndex) : cleanNote || 'N/A';
+                            const description = dashIndex > -1 ? cleanNote.substring(dashIndex + 3) : 'Payment';
                             return (<div className="space-y-6"><div className="bg-gray-50 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Received From (收到):</p><h2 className="text-xl font-bold">{sourceName}</h2></div><div className="bg-gray-50 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Payment For (款项用途):</p><h2 className="text-lg font-bold">{description}</h2></div><div className="flex justify-between items-center bg-black text-white p-6 rounded-xl"><p className="text-sm font-bold uppercase tracking-widest">Amount Received</p><p className="text-3xl font-mono font-black">RM {printingRecord.amount.toFixed(2)}</p></div><div className="flex justify-between text-xs font-bold text-gray-500 mt-4 px-2"><span>Payment Mode: {printingRecord.toAccount}</span><span>Status: PAID</span></div></div>);
                         })()}
                         <div className="absolute bottom-8 left-8 right-8"><div className="grid grid-cols-2 gap-12"><div className="border-t border-black pt-2"><p className="text-[10px] font-bold uppercase">Received By</p><p className="text-xs">Kim Lian Kee</p></div><div className="border-t border-black pt-2"><p className="text-[10px] font-bold uppercase">Authorized Signature</p></div></div><p className="text-[8px] text-center text-gray-400 mt-8 uppercase tracking-widest">System Generated Receipt • No Signature Required</p></div>

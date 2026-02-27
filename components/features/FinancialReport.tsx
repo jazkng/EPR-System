@@ -62,7 +62,8 @@ const CATEGORY_LABELS: Record<string, string> = {
     'MAINTENANCE': '维修 (Maintenance)',
     'MARKETING': '营销 (Marketing)',
     'LICENSE': '执照 (License)',
-    'MBB_COMM': '银行手续费 (Maybank)'
+    'MBB_COMM': '银行手续费 (Maybank)',
+    'DIVIDEND': '股东分红 (Dividend)'
 };
 
 const categorizeExpense = (category: string) => {
@@ -155,6 +156,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         loadData();
     }, []);
 
+    // FIX: WEEK 日期计算 bug — end 必须基于修改前的 start 计算
     const setQuickDate = (type: 'TODAY' | 'YESTERDAY' | 'WEEK' | 'MONTH' | 'LAST_MONTH') => {
         const now = new Date();
         let start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -166,9 +168,14 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             start.setDate(start.getDate() - 1);
             end.setDate(end.getDate() - 1);
         } else if (type === 'WEEK') {
-            const day = start.getDay() || 7; 
-            start.setDate(start.getDate() - day + 1);
-            end.setDate(start.getDate() + 6);
+            const day = start.getDay() || 7;
+            // FIX: 先算好本周一，再基于本周一算本周日，避免 start 被修改后影响 end 的计算
+            const monday = new Date(start);
+            monday.setDate(start.getDate() - day + 1);
+            const sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+            start = monday;
+            end = sunday;
         } else if (type === 'MONTH') {
             start.setDate(1); 
         } else if (type === 'LAST_MONTH') {
@@ -199,14 +206,12 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         };
 
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
-            // 🛡️ 御膳智控：加上可选链 s.sales?. 防止远古脏数据崩溃，并确保全部强转 Number
             const cashAmt = Number(s.sales?.cash || 0);
             const tngAmt = Number(s.sales?.tng || 0);
             const duitnowAmt = Number(s.sales?.duitnow || 0);
             const cardAmt = Number(s.sales?.card || 0);
             const varianceAmt = Number(s.variance || 0);
 
-            // 🛡️ 御膳智控：修改 reduce 入参为 any，防爆红
             const del = s.sales?.deliveryBreakdown 
                 ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0)
                 : 0;
@@ -283,7 +288,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const creditFee = revenueDetails.creditCard * 0.01;
         const totalCommission = debitFee + creditFee;
         
-        if (totalCommission > 0) addCost(totalCommission, 'MBB_COMM');
+        // FIX: MBB_COMM 只在 groups 里不存在时才加，防止重复计算
+        if (totalCommission > 0 && !groups['MBB_COMM']) {
+            addCost(totalCommission, 'MBB_COMM');
+        }
 
         const totalExpenses = totalCOGS + totalLabor + totalOPEX;
         const grossProfit = revenueDetails.totalRevenue - totalCOGS;
@@ -361,8 +369,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
              }
         });
 
-        if (criteria.categoryId === 'MBB_COMM') {
-             rawItems.push({ id: 'MBB_FEE_CALC', date: endDate, category: 'MBB_COMM', desc: `Maybank Transaction Fees`, amount: analytics.fees.totalCommission, source: 'System Auto-Calc', type: 'OPEX' });
+        // FIX: MBB_COMM 钻取时不再手动 push（因为 standalone_expenses 里不会有这条）
+        // 改为从 analytics.fees 读取，避免重复
+        if (criteria.categoryId === 'MBB_COMM' && rawItems.length === 0) {
+            rawItems.push({ id: 'MBB_FEE_CALC', date: endDate, category: 'MBB_COMM', desc: `Maybank Transaction Fees (Auto-Calculated)`, amount: analytics.fees.totalCommission, source: 'System Auto-Calc', type: 'OPEX' });
         }
 
         return rawItems.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -380,15 +390,12 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
         settlementRecords.forEach(s => {
             if (s.date >= configStart) {
-                // 🛡️ 御膳智控：强制转换，防止空指针或字符串拼接
                 const actualCash = Number(s.sales?.cash || 0) + Number(s.variance || 0);
                 if (actualCash !== 0) {
                     allTransactions.push({ id: `cash_${s.id}`, date: s.date, time: s.timestamp, type: 'IN', category: 'SALES', description: 'Cash Sales (Net)', amount: actualCash, account: 'CASH' });
                 }
 
                 const bankIncome = Number(s.sales?.tng || 0) + Number(s.sales?.duitnow || 0) + Number(s.sales?.card || 0);
-                
-                // 🛡️ 御膳智控：修改 reduce 入参以通过 TS5.8 严格校验
                 const delivery = s.sales?.deliveryBreakdown ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0) : 0;
                 
                 if (bankIncome + delivery > 0) {
@@ -415,11 +422,35 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             if (b.date >= configStart) allTransactions.push({ id: b.id, date: b.date, time: `${b.date}T12:00:00`, type: 'OUT', category: b.category, description: b.name, amount: Number(b.amount || 0), account: b.method || 'BANK' });
         });
 
+        // FIX: 补上所有类型的 transfers，包括日常 CASH ↔ BANK 互转
         transfers.forEach(t => {
-            if (t.date.split('T')[0] >= configStart) {
-                if (t.fromAccount === 'SHAREHOLDER' as any || t.fromAccount === 'OTHER' as any) {
-                    allTransactions.push({ id: t.id, date: t.date.split('T')[0], time: t.date, type: 'IN', category: 'FUND', description: t.note || 'Injection', amount: Number(t.amount || 0), account: t.toAccount });
-                }
+            const dateStr = t.date.split('T')[0];
+            if (dateStr < configStart) return;
+
+            if (t.fromAccount === 'SHAREHOLDER' as any || t.fromAccount === 'OTHER' as any) {
+                // 注资/额外收入：净 IN
+                allTransactions.push({ 
+                    id: t.id, 
+                    date: dateStr, 
+                    time: t.date, 
+                    type: 'IN', 
+                    category: 'FUND', 
+                    description: t.note || 'Injection / Extra Income', 
+                    amount: Number(t.amount || 0), 
+                    account: t.toAccount 
+                });
+            } else {
+                // 日常 CASH ↔ BANK 互转：记为 TRANSFER（余额不变，但显示流水）
+                allTransactions.push({ 
+                    id: `trf_out_${t.id}`, 
+                    date: dateStr, 
+                    time: t.date, 
+                    type: 'TRANSFER', 
+                    category: 'TRANSFER', 
+                    description: `${t.fromAccount} → ${t.toAccount}${t.note ? ` (${t.note})` : ''}`, 
+                    amount: Number(t.amount || 0), 
+                    account: t.fromAccount 
+                });
             }
         });
 
@@ -429,8 +460,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         let balanceAtStartOfRange = runningBalance; 
 
         allTransactions.forEach(t => {
+            // FIX: TRANSFER 类型不影响总余额（只是账户间移动）
             if (t.type === 'IN') runningBalance += t.amount; 
-            else runningBalance -= t.amount;
+            else if (t.type === 'OUT') runningBalance -= t.amount;
+            // TRANSFER: runningBalance 不变
             
             if (t.date < startDate) balanceAtStartOfRange = runningBalance;
             else if (t.date <= endDate) displayItems.push({ ...t, balance: runningBalance });
@@ -776,7 +809,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                     </div>
                                                     <div className="text-right shrink-0">
                                                         <div className={`font-mono font-black text-sm md:text-base ${log.type === 'IN' ? 'text-green-600' : log.type === 'OUT' ? 'text-red-600' : 'text-blue-600'}`}>
-                                                            {log.type === 'IN' ? '+' : '-'}{formatMoney(log.amount).replace('RM ','')}
+                                                            {log.type === 'IN' ? '+' : log.type === 'OUT' ? '-' : '⇄'}{formatMoney(log.amount).replace('RM ','')}
                                                         </div>
                                                         <div className="text-[10px] font-mono font-bold text-gray-400 mt-1">
                                                             Bal: {formatMoney(log.balance).replace('RM ','')}
@@ -942,7 +975,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                     <td className="p-2 font-mono">{row?.date}</td>
                                                     <td className="p-2 font-bold">{CATEGORY_LABELS[row?.category] || row?.category}</td>
                                                     <td className="p-2 truncate max-w-[200px]">{row?.description}</td>
-                                                    <td className={`p-2 text-right font-mono ${row?.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>{row?.type==='IN'?'+':'-'}{Number(row?.amount || 0).toFixed(2)}</td>
+                                                    <td className={`p-2 text-right font-mono ${row?.type === 'IN' ? 'text-green-600' : row?.type === 'OUT' ? 'text-red-600' : 'text-blue-600'}`}>{row?.type==='IN'?'+':row?.type==='OUT'?'-':'⇄'}{Number(row?.amount || 0).toFixed(2)}</td>
                                                     <td className="p-2 text-right font-mono text-gray-500">{Number(row?.balance || 0).toFixed(2)}</td>
                                                 </tr>
                                             ))}
