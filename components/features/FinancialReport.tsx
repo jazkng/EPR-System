@@ -30,11 +30,10 @@ interface DetailedExpenseItem {
     category: string;
     desc: string;
     amount: number;
-    source: string; // 'Settlement', 'AP', 'Bill', 'Payroll'
-    type: string; // COGS, LABOR, OPEX
+    source: string; 
+    type: string; 
 }
 
-// Category Mapping
 const CATEGORY_LABELS: Record<string, string> = {
     'INGREDIENT_MEAT': '食材-肉类 (Meat)',
     'INGREDIENT_SEAFOOD': '食材-海鲜 (Seafood)',
@@ -73,13 +72,12 @@ const categorizeExpense = (category: string) => {
     return 'OPEX'; 
 };
 
-// Define explicit type for cost groups to avoid implicit 'any' issues
 interface CostGroup {
     id: string;
     label: string;
     amount: number;
     type: string;
-    isPending?: boolean; // NEW: Track if it's a draft item
+    isPending?: boolean;
 }
 
 export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => {
@@ -94,7 +92,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
     
     const printRef = useRef<HTMLDivElement>(null);
 
-    // --- UI STATES ---
     const getMonthStartStr = () => {
         const date = new Date();
         const year = date.getFullYear();
@@ -113,23 +110,15 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
     const [startDate, setStartDate] = useState(getMonthStartStr()); 
     const [endDate, setEndDate] = useState(getTodayStr());
     
-    // Updated Tabs
     const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'SALES' | 'COST' | 'AUDIT' | 'DIVIDEND'>('OVERVIEW');
-    
     const [includeUnpaid, setIncludeUnpaid] = useState(false);
-
-    // Dividend State
-    const [retentionRate, setRetentionRate] = useState(20); // Default 20% retained earnings
-
-    // Drill Down State
+    const [retentionRate, setRetentionRate] = useState(20); 
     const [detailView, setDetailView] = useState<{ title: string, type: 'COGS' | 'LABOR' | 'OPEX', items: DetailedExpenseItem[] } | null>(null);
 
-    // 🛡️ 御膳智控防线：包含时间过滤的拉取逻辑
     useEffect(() => {
         const loadData = async () => {
             setLoading(true);
             try {
-                // 1. 先拉取不需大范围分页的配置和账单
                 const [bills, funds, config, payrolls] = await Promise.all([
                     DataManager.getBillPayments(),
                     DataManager.getFundTransfers(),
@@ -139,8 +128,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
                 const configStart = config?.initialDate || '2000-01-01';
 
-                // 2. 🛡️ 御膳智控直连：绕过 DataManager 的分页限制，强行拉取金库生效以来的所有结算和支出！
-                // 假设您的结算集合名称为 'settlements' (如果叫 'daily_settlements' 请自行修改)
                 const settlementsRef = collection(db, 'settlements'); 
                 const expensesRef = collection(db, 'standalone_expenses');
 
@@ -170,7 +157,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
     const setQuickDate = (type: 'TODAY' | 'YESTERDAY' | 'WEEK' | 'MONTH' | 'LAST_MONTH') => {
         const now = new Date();
-        // 🛡️ 御膳智控防线：直接初始化为本地当天的 00:00:00，绝不跨天
         let start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         let end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -186,12 +172,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         } else if (type === 'MONTH') {
             start.setDate(1); 
         } else if (type === 'LAST_MONTH') {
-            // 🛡️ 御膳智控防线：绝对安全的获取上月第一天与最后一天（无视任何 28/30/31 溢出问题）
             start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
             end = new Date(now.getFullYear(), now.getMonth(), 0);
         }
 
-        // 🛡️ 御膳智控防线：彻底弃用 .toISOString()，锁定本地时间输出 YYYY-MM-DD
         const formatLocal = (d: Date) => {
             const y = d.getFullYear();
             const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -203,7 +187,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         setEndDate(formatLocal(end));
     };
 
-    // --- ANALYTICS ENGINE ---
     const analytics = useMemo(() => {
         const isInRange = (dateStr: string) => {
             if (!dateStr) return false;
@@ -211,32 +194,28 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             return d >= startDate && d <= endDate;
         };
 
-        // 1. REVENUE
         const revenueDetails = {
             cash: 0, ewallet: 0, debitCard: 0, creditCard: 0, delivery: 0, totalRevenue: 0, variance: 0 
         };
 
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
-            // 🛡️ 御膳智控防线：强制转换为 Number，粉碎一切 undefined 和 字符串拼接 导致的 NaN 漏洞
-            const cashAmt = Number(s.sales.cash || 0);
-            const tngAmt = Number(s.sales.tng || 0);
-            const duitnowAmt = Number(s.sales.duitnow || 0);
-            const cardAmt = Number(s.sales.card || 0);
+            // 🛡️ 御膳智控：加上可选链 s.sales?. 防止远古脏数据崩溃，并确保全部强转 Number
+            const cashAmt = Number(s.sales?.cash || 0);
+            const tngAmt = Number(s.sales?.tng || 0);
+            const duitnowAmt = Number(s.sales?.duitnow || 0);
+            const cardAmt = Number(s.sales?.card || 0);
             const varianceAmt = Number(s.variance || 0);
 
-            // 外卖平台收入总和
-            const del = s.sales.deliveryBreakdown 
+            // 🛡️ 御膳智控：修改 reduce 入参为 any，防爆红
+            const del = s.sales?.deliveryBreakdown 
                 ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0)
                 : 0;
             const deliveryAmt = Number(del);
 
-            // 🛡️ 核心修复：防止 s.sales.total 录入缺失或未含外卖，直接用底层加法计算绝对总营业额！
-            const rawTotal = Number(s.sales.total || 0);
+            const rawTotal = Number(s.sales?.total || 0);
             const calculatedTotal = cashAmt + tngAmt + duitnowAmt + cardAmt + deliveryAmt;
             
-            // 取两者最高值，防止有任何漏算
             revenueDetails.totalRevenue += Math.max(rawTotal, calculatedTotal);
-            
             revenueDetails.cash += cashAmt;
             revenueDetails.ewallet += tngAmt; 
             revenueDetails.debitCard += duitnowAmt;
@@ -249,7 +228,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const cashPercentage = totalPaymentMethodVolume > 0 ? (revenueDetails.cash / totalPaymentMethodVolume) * 100 : 0;
         const ewalletPercentage = totalPaymentMethodVolume > 0 ? ((revenueDetails.ewallet + revenueDetails.debitCard + revenueDetails.creditCard) / totalPaymentMethodVolume) * 100 : 0;
 
-        // 2. EXPENSES (Detailed)
         let totalCOGS = 0, totalLabor = 0, totalOPEX = 0;
         const groups: Record<string, CostGroup> = {};
 
@@ -270,7 +248,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         };
 
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
-            s.expenses?.forEach(e => addCost(e.amount, e.category));
+            s.expenses?.forEach(e => addCost(Number(e.amount || 0), e.category));
         });
 
         standaloneExpenses.filter(e => isInRange(e.time)).forEach(e => {
@@ -280,30 +258,22 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             const isPaid = e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL';
             if (includeUnpaid || isPaid) {
                 const amt = includeUnpaid ? (e.totalBillAmount || e.amount) : e.amount;
-                addCost(amt - (e.creditNote || 0), e.category);
+                addCost(Number(amt || 0) - Number(e.creditNote || 0), e.category);
             }
         });
 
-        billPayments.filter(b => isInRange(b.date)).forEach(b => addCost(b.amount, b.category));
+        billPayments.filter(b => isInRange(b.date)).forEach(b => addCost(Number(b.amount || 0), b.category));
 
         payrollRecords.forEach(p => {
              const effectiveDate = `${p.month}-28`;
-             
              if (effectiveDate >= startDate && effectiveDate <= endDate && p.status === 'POSTED') {
-                 addCost(p.totalNetPay, 'PAYROLL', `Staff Payroll (Net - ${p.month})`);
-                 
+                 addCost(Number(p.totalNetPay || 0), 'PAYROLL', `Staff Payroll (Net - ${p.month})`);
                  if (p.isStatutoryPaid) {
-                     addCost(p.totalGovtPay, 'EPF_SOCSO', `Statutory Paid (${p.month})`);
+                     addCost(Number(p.totalGovtPay || 0), 'EPF_SOCSO', `Statutory Paid (${p.month})`);
                  } else {
                      const pendingKey = `STAT_PENDING_${p.month}`;
                      if (!groups[pendingKey]) {
-                         groups[pendingKey] = { 
-                             id: pendingKey, 
-                             label: `Statutory (${p.month}) - Draft`, 
-                             amount: p.totalGovtPay, 
-                             type: 'LABOR', 
-                             isPending: true 
-                         };
+                         groups[pendingKey] = { id: pendingKey, label: `Statutory (${p.month}) - Draft`, amount: Number(p.totalGovtPay || 0), type: 'LABOR', isPending: true };
                      }
                  }
              }
@@ -313,9 +283,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const creditFee = revenueDetails.creditCard * 0.01;
         const totalCommission = debitFee + creditFee;
         
-        if (totalCommission > 0) {
-            addCost(totalCommission, 'MBB_COMM');
-        }
+        if (totalCommission > 0) addCost(totalCommission, 'MBB_COMM');
 
         const totalExpenses = totalCOGS + totalLabor + totalOPEX;
         const grossProfit = revenueDetails.totalRevenue - totalCOGS;
@@ -327,11 +295,8 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const netMargin = revenueDetails.totalRevenue > 0 ? (netProfit / revenueDetails.totalRevenue) * 100 : 0;
 
         return {
-            revenueDetails,
-            percentages: { cash: cashPercentage, ewallet: ewalletPercentage },
-            grossProfit, 
-            netProfit,
-            netMargin,
+            revenueDetails, percentages: { cash: cashPercentage, ewallet: ewalletPercentage },
+            grossProfit, netProfit, netMargin,
             costs: { totalCOGS, totalLabor, totalOPEX, totalExpenses },
             margins: { cogs: cogsMargin, labor: laborMargin, opex: opexMargin },
             lists: {
@@ -343,7 +308,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         };
     }, [settlementRecords, standaloneExpenses, billPayments, payrollRecords, startDate, endDate, includeUnpaid]);
 
-    // --- DRILL DOWN DATA COLLECTOR ---
     const getDrillDownData = (criteria: { type?: 'COGS'|'LABOR'|'OPEX', categoryId?: string }) => {
         const rawItems: DetailedExpenseItem[] = [];
         const isInRange = (dateStr: string) => {
@@ -354,13 +318,9 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
         const addItem = (item: DetailedExpenseItem) => {
             const itemType = categorizeExpense(item.category);
-            
             if (criteria.type && itemType !== criteria.type) return;
             if (criteria.categoryId && item.category.toUpperCase() !== criteria.categoryId && !criteria.categoryId.startsWith('STAT_PENDING')) return;
-            
-            if (criteria.categoryId?.startsWith('STAT_PENDING')) {
-                 if (item.id !== criteria.categoryId) return; 
-            }
+            if (criteria.categoryId?.startsWith('STAT_PENDING') && item.id !== criteria.categoryId) return; 
 
             item.type = itemType;
             rawItems.push(item);
@@ -368,15 +328,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
             s.expenses?.forEach((e, idx) => {
-                addItem({
-                    id: `${s.id}_${idx}`,
-                    date: s.date,
-                    category: e.category,
-                    desc: `${e.company || 'Petty Cash'} (from Daily Settlement)`,
-                    amount: e.amount,
-                    source: 'Settlement',
-                    type: ''
-                });
+                addItem({ id: `${s.id}_${idx}`, date: s.date, category: e.category, desc: `${e.company || 'Petty Cash'} (from Daily Settlement)`, amount: Number(e.amount || 0), source: 'Settlement', type: '' });
             });
         });
 
@@ -386,81 +338,31 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             const isPaid = e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL';
             if (includeUnpaid || isPaid) {
                 const amt = includeUnpaid ? (e.totalBillAmount || e.amount) : e.amount;
-                addItem({
-                    id: e.id,
-                    date: e.time.split('T')[0],
-                    category: e.category,
-                    desc: e.company + (e.note ? ` - ${e.note}` : ''),
-                    amount: amt - (e.creditNote || 0),
-                    source: 'AP/Voucher',
-                    type: ''
-                });
+                addItem({ id: e.id, date: e.time.split('T')[0], category: e.category, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: Number(amt || 0) - Number(e.creditNote || 0), source: 'AP/Voucher', type: '' });
             }
         });
 
         billPayments.filter(b => isInRange(b.date)).forEach(b => {
-            addItem({
-                id: b.id,
-                date: b.date,
-                category: b.category,
-                desc: b.name,
-                amount: b.amount,
-                source: 'Bill Payment',
-                type: ''
-            });
+            addItem({ id: b.id, date: b.date, category: b.category, desc: b.name, amount: Number(b.amount || 0), source: 'Bill Payment', type: '' });
         });
 
         payrollRecords.forEach(p => {
              const effectiveDate = `${p.month}-28`;
              if (effectiveDate >= startDate && effectiveDate <= endDate && p.status === 'POSTED') {
                  if (!criteria.categoryId || criteria.categoryId === 'PAYROLL') {
-                    addItem({
-                        id: p.id,
-                        date: effectiveDate,
-                        category: 'PAYROLL',
-                        desc: `Net Pay for ${p.month} (Staff Count: ${p.staffCount})`,
-                        amount: p.totalNetPay, 
-                        source: 'Payroll (Net)',
-                        type: 'LABOR'
-                    });
+                    addItem({ id: p.id, date: effectiveDate, category: 'PAYROLL', desc: `Net Pay for ${p.month} (Staff Count: ${p.staffCount})`, amount: Number(p.totalNetPay || 0), source: 'Payroll (Net)', type: 'LABOR' });
                  }
-                 
                  if (p.isStatutoryPaid && (!criteria.categoryId || criteria.categoryId === 'EPF_SOCSO')) {
-                     addItem({
-                         id: `${p.id}_STAT`,
-                         date: effectiveDate,
-                         category: 'EPF_SOCSO',
-                         desc: `EPF/SOCSO/EIS for ${p.month}`,
-                         amount: p.totalGovtPay,
-                         source: 'Payroll (Statutory)',
-                         type: 'LABOR'
-                     });
+                     addItem({ id: `${p.id}_STAT`, date: effectiveDate, category: 'EPF_SOCSO', desc: `EPF/SOCSO/EIS for ${p.month}`, amount: Number(p.totalGovtPay || 0), source: 'Payroll (Statutory)', type: 'LABOR' });
                  }
-
                  if (!p.isStatutoryPaid && criteria.categoryId === `STAT_PENDING_${p.month}`) {
-                     addItem({
-                        id: `STAT_PENDING_${p.month}`,
-                        date: effectiveDate,
-                        category: 'EPF_SOCSO',
-                        desc: `[DRAFT] Statutory for ${p.month} (Not yet paid)`,
-                        amount: p.totalGovtPay,
-                        source: 'Payroll (Pending)',
-                        type: 'LABOR'
-                     });
+                     addItem({ id: `STAT_PENDING_${p.month}`, date: effectiveDate, category: 'EPF_SOCSO', desc: `[DRAFT] Statutory for ${p.month} (Not yet paid)`, amount: Number(p.totalGovtPay || 0), source: 'Payroll (Pending)', type: 'LABOR' });
                  }
              }
         });
 
         if (criteria.categoryId === 'MBB_COMM') {
-             rawItems.push({
-                 id: 'MBB_FEE_CALC',
-                 date: endDate,
-                 category: 'MBB_COMM',
-                 desc: `Maybank Transaction Fees (Calculated based on Debit/Credit Sales)`,
-                 amount: analytics.fees.totalCommission,
-                 source: 'System Auto-Calc',
-                 type: 'OPEX'
-             });
+             rawItems.push({ id: 'MBB_FEE_CALC', date: endDate, category: 'MBB_COMM', desc: `Maybank Transaction Fees`, amount: analytics.fees.totalCommission, source: 'System Auto-Calc', type: 'OPEX' });
         }
 
         return rawItems.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -468,60 +370,55 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
     const handleDrillDown = (criteria: { type?: 'COGS'|'LABOR'|'OPEX', categoryId?: string }, title: string) => {
         const items = getDrillDownData(criteria);
-        setDetailView({
-            title: title,
-            type: criteria.type || 'OPEX',
-            items: items || []
-        });
+        setDetailView({ title: title, type: criteria.type || 'OPEX', items: items || [] });
     };
 
-    // --- AUDIT TRAIL ENGINE (REFACTORED TO MATCH TREASURY BALANCE) ---
     const { auditTrail, openingBalance } = useMemo(() => {
         const allTransactions: any[] = [];
         const configStart = treasuryConfig?.initialDate || '2000-01-01';
-        let runningBalance = (treasuryConfig?.initialCash || 0) + (treasuryConfig?.initialBank || 0);
+        let runningBalance = Number(treasuryConfig?.initialCash || 0) + Number(treasuryConfig?.initialBank || 0);
 
         settlementRecords.forEach(s => {
             if (s.date >= configStart) {
-                if ((s.sales.cash || 0) + (s.variance || 0) !== 0) {
-                    const actualCash = (s.sales.cash || 0) + (s.variance || 0);
+                // 🛡️ 御膳智控：强制转换，防止空指针或字符串拼接
+                const actualCash = Number(s.sales?.cash || 0) + Number(s.variance || 0);
+                if (actualCash !== 0) {
                     allTransactions.push({ id: `cash_${s.id}`, date: s.date, time: s.timestamp, type: 'IN', category: 'SALES', description: 'Cash Sales (Net)', amount: actualCash, account: 'CASH' });
                 }
+
+                const bankIncome = Number(s.sales?.tng || 0) + Number(s.sales?.duitnow || 0) + Number(s.sales?.card || 0);
                 
-                const bankIncome = (s.sales.tng || 0) + (s.sales.duitnow || 0) + (s.sales.card || 0);
-                const delivery = s.sales.deliveryBreakdown 
-                    ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b:number)=>a+b,0) 
-                    : 0;
+                // 🛡️ 御膳智控：修改 reduce 入参以通过 TS5.8 严格校验
+                const delivery = s.sales?.deliveryBreakdown ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0) : 0;
+                
                 if (bankIncome + delivery > 0) {
                     allTransactions.push({ id: `bank_${s.id}`, date: s.date, time: s.timestamp, type: 'IN', category: 'SALES', description: 'Digital/Delivery Sales', amount: bankIncome + delivery, account: 'BANK' });
                 }
-
+                
                 s.expenses?.forEach((e, idx) => { 
-                    allTransactions.push({ id: `${s.id}_e_${idx}`, date: s.date, time: s.timestamp, type: 'OUT', category: e.category, description: `Petty: ${e.company || ''}`, amount: e.amount, account: 'CASH' }); 
+                    allTransactions.push({ id: `${s.id}_e_${idx}`, date: s.date, time: s.timestamp, type: 'OUT', category: e.category, description: `Petty: ${e.company || ''}`, amount: Number(e.amount || 0), account: 'CASH' }); 
                 });
             }
         });
 
         standaloneExpenses.forEach(e => {
-            if (e.settlementId) return; 
-            if (e.expenseType === 'RECURRING') return; 
-            
-            if ((e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL') && e.amount > 0) {
+            if (e.settlementId || e.expenseType === 'RECURRING') return; 
+            if ((e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL') && Number(e.amount || 0) > 0) {
                 const transactionTime = e.paymentDate || e.time;
                 if (transactionTime.split('T')[0] >= configStart) {
-                    allTransactions.push({ id: e.id, date: transactionTime.split('T')[0], time: transactionTime, type: 'OUT', category: e.category, description: e.company, amount: e.amount, account: e.paymentMethod || 'BANK' });
+                    allTransactions.push({ id: e.id, date: transactionTime.split('T')[0], time: transactionTime, type: 'OUT', category: e.category, description: e.company, amount: Number(e.amount || 0), account: e.paymentMethod || 'BANK' });
                 }
             }
         });
 
         billPayments.forEach(b => {
-            if (b.date >= configStart) allTransactions.push({ id: b.id, date: b.date, time: `${b.date}T12:00:00`, type: 'OUT', category: b.category, description: b.name, amount: b.amount, account: b.method || 'BANK' });
+            if (b.date >= configStart) allTransactions.push({ id: b.id, date: b.date, time: `${b.date}T12:00:00`, type: 'OUT', category: b.category, description: b.name, amount: Number(b.amount || 0), account: b.method || 'BANK' });
         });
 
         transfers.forEach(t => {
             if (t.date.split('T')[0] >= configStart) {
                 if (t.fromAccount === 'SHAREHOLDER' as any || t.fromAccount === 'OTHER' as any) {
-                    allTransactions.push({ id: t.id, date: t.date.split('T')[0], time: t.date, type: 'IN', category: 'FUND', description: t.note || 'Injection', amount: t.amount, account: t.toAccount });
+                    allTransactions.push({ id: t.id, date: t.date.split('T')[0], time: t.date, type: 'IN', category: 'FUND', description: t.note || 'Injection', amount: Number(t.amount || 0), account: t.toAccount });
                 }
             }
         });
@@ -535,17 +432,14 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             if (t.type === 'IN') runningBalance += t.amount; 
             else runningBalance -= t.amount;
             
-            if (t.date < startDate) {
-                balanceAtStartOfRange = runningBalance;
-            } else if (t.date <= endDate) {
-                displayItems.push({ ...t, balance: runningBalance });
-            }
+            if (t.date < startDate) balanceAtStartOfRange = runningBalance;
+            else if (t.date <= endDate) displayItems.push({ ...t, balance: runningBalance });
         });
 
         return { auditTrail: displayItems.reverse(), openingBalance: balanceAtStartOfRange };
     }, [settlementRecords, standaloneExpenses, billPayments, transfers, treasuryConfig, startDate, endDate]);
 
-    const formatMoney = (amount: number) => `RM ${amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    const formatMoney = (amount: number) => `RM ${Number(amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 
     const handleExport = async () => {
         if (!printRef.current) return;
@@ -604,15 +498,18 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                             { id: 'COST', label: '成本分析 (Cost)', icon: PieChart },
                             { id: 'AUDIT', label: '资金流水 (Audit)', icon: ListChecks },
                             { id: 'DIVIDEND', label: '分红计算 (Dividend)', icon: Percent }
-                        ].map(tab => (
-                            <button 
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id as any)} 
-                                className={`px-4 md:px-5 py-2.5 rounded-lg text-xs md:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap active:scale-95 ${activeTab === tab.id ? 'bg-white shadow text-[#1A1A1A] ring-1 ring-black/5' : 'text-gray-500 hover:text-gray-700'}`}
-                            >
-                                <tab.icon size={16}/> {tab.label}
-                            </button>
-                        ))}
+                        ].map(tab => {
+                            const Icon = tab.icon;
+                            return (
+                                <button 
+                                    key={tab.id}
+                                    onClick={() => setActiveTab(tab.id as any)} 
+                                    className={`px-4 md:px-5 py-2.5 rounded-lg text-xs md:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap active:scale-95 ${activeTab === tab.id ? 'bg-white shadow text-[#1A1A1A] ring-1 ring-black/5' : 'text-gray-500 hover:text-gray-700'}`}
+                                >
+                                    <Icon size={16}/> {tab.label}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
@@ -661,12 +558,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
                                     <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm">
                                         <h4 className="font-black text-sm text-[#1A1A1A] mb-6 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> 支付方式占比 (Payment Methods)</h4>
-                                        
                                         <div className="flex h-4 rounded-full overflow-hidden mb-4 bg-gray-100">
                                             <div className="bg-green-500 transition-all duration-1000" style={{ width: `${analytics.percentages.cash}%` }}></div>
                                             <div className="bg-blue-500 transition-all duration-1000" style={{ width: `${analytics.percentages.ewallet}%` }}></div>
                                         </div>
-                                        
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="p-4 bg-green-50 rounded-2xl border border-green-100">
                                                 <div className="flex justify-between items-start mb-2">
@@ -1011,22 +906,22 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                     <div className="grid grid-cols-2 gap-8 mb-8 border-b border-gray-200 pb-8">
                                         <div>
                                             <p className="text-xs font-black uppercase mb-2">REVENUE</p>
-                                            <div className="flex justify-between text-sm mb-1"><span>Total Revenue</span><span className="font-mono font-bold">RM {analytics.revenueDetails.totalRevenue.toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-xs text-gray-500"><span>- Cash</span><span className="font-mono">RM {analytics.revenueDetails.cash.toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-xs text-gray-500"><span>- Digital/Card</span><span className="font-mono">RM {(analytics.revenueDetails.ewallet + analytics.revenueDetails.creditCard + analytics.revenueDetails.debitCard).toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-sm mb-1"><span>Total Revenue</span><span className="font-mono font-bold">RM {Number(analytics.revenueDetails.totalRevenue || 0).toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-xs text-gray-500"><span>- Cash</span><span className="font-mono">RM {Number(analytics.revenueDetails.cash || 0).toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-xs text-gray-500"><span>- Digital/Card</span><span className="font-mono">RM {Number((analytics.revenueDetails.ewallet || 0) + (analytics.revenueDetails.creditCard || 0) + (analytics.revenueDetails.debitCard || 0)).toFixed(2)}</span></div>
                                         </div>
                                         <div>
                                             <p className="text-xs font-black uppercase mb-2">EXPENSES</p>
-                                            <div className="flex justify-between text-sm mb-1"><span>Cost of Goods</span><span className="font-mono font-bold">RM {analytics.costs.totalCOGS.toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-sm mb-1"><span>Labor</span><span className="font-mono font-bold">RM {analytics.costs.totalLabor.toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-sm mb-1"><span>OPEX</span><span className="font-mono font-bold">RM {analytics.costs.totalOPEX.toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-sm mb-1"><span>Cost of Goods</span><span className="font-mono font-bold">RM {Number(analytics.costs.totalCOGS || 0).toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-sm mb-1"><span>Labor</span><span className="font-mono font-bold">RM {Number(analytics.costs.totalLabor || 0).toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-sm mb-1"><span>OPEX</span><span className="font-mono font-bold">RM {Number(analytics.costs.totalOPEX || 0).toFixed(2)}</span></div>
                                         </div>
                                     </div>
                                     
                                     <div className="bg-gray-100 p-4 rounded mb-8">
                                         <div className="flex justify-between items-center">
                                             <span className="text-lg font-black uppercase">Net Profit</span>
-                                            <span className="text-2xl font-mono font-black">RM {analytics.netProfit.toFixed(2)}</span>
+                                            <span className="text-2xl font-mono font-black">RM {Number(analytics.netProfit || 0).toFixed(2)}</span>
                                         </div>
                                     </div>
 
@@ -1044,11 +939,11 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         <tbody>
                                             {auditTrail.slice(0, 30).map((row, i) => (
                                                 <tr key={i} className="border-b border-gray-200">
-                                                    <td className="p-2 font-mono">{row.date}</td>
-                                                    <td className="p-2 font-bold">{CATEGORY_LABELS[row.category] || row.category}</td>
-                                                    <td className="p-2 truncate max-w-[200px]">{row.description}</td>
-                                                    <td className={`p-2 text-right font-mono ${row.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>{row.type==='IN'?'+':'-'}{row.amount.toFixed(2)}</td>
-                                                    <td className="p-2 text-right font-mono text-gray-500">{row.balance.toFixed(2)}</td>
+                                                    <td className="p-2 font-mono">{row?.date}</td>
+                                                    <td className="p-2 font-bold">{CATEGORY_LABELS[row?.category] || row?.category}</td>
+                                                    <td className="p-2 truncate max-w-[200px]">{row?.description}</td>
+                                                    <td className={`p-2 text-right font-mono ${row?.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>{row?.type==='IN'?'+':'-'}{Number(row?.amount || 0).toFixed(2)}</td>
+                                                    <td className="p-2 text-right font-mono text-gray-500">{Number(row?.balance || 0).toFixed(2)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -1060,7 +955,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                     )}
                 </div>
 
-                {/* 🛡️ 御膳智控防线：加上了所有的 ?. 防止在未完全渲染时解构崩溃 */}
                 {detailView && (
                     <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                         <div className="bg-white rounded-[2rem] w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
@@ -1107,7 +1001,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                         </span>
                                                     </td>
                                                     <td className="p-4 text-right font-mono font-black text-[#1A1A1A]">
-                                                        RM {item.amount.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                                        RM {Number(item.amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
                                                     </td>
                                                 </tr>
                                             ))
@@ -1119,7 +1013,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                             <div className="p-4 bg-gray-50 border-t border-gray-200 text-right">
                                 <span className="text-xs font-bold text-gray-500 uppercase mr-4">Total Selected</span>
                                 <span className="text-xl font-black font-mono text-[#1A1A1A]">
-                                    RM {detailView?.items?.reduce((sum, i) => sum + i.amount, 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                    RM {Number(detailView?.items?.reduce((sum, i) => sum + (i.amount || 0), 0) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
                                 </span>
                             </div>
                         </div>
