@@ -112,7 +112,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
     const [endDate, setEndDate] = useState(getTodayStr());
     
     const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'SALES' | 'COST' | 'AUDIT' | 'DIVIDEND'>('OVERVIEW');
-    const [includeUnpaid, setIncludeUnpaid] = useState(false);
+    const [accountingMode, setAccountingMode] = useState<'ACCRUAL' | 'CASH'>('ACCRUAL');
     const [retentionRate, setRetentionRate] = useState(20); 
     const [detailView, setDetailView] = useState<{ title: string, type: 'COGS' | 'LABOR' | 'OPEX', items: DetailedExpenseItem[] } | null>(null);
 
@@ -256,14 +256,23 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             s.expenses?.forEach(e => addCost(Number(e.amount || 0), e.category));
         });
 
-        standaloneExpenses.filter(e => isInRange(e.time)).forEach(e => {
+        standaloneExpenses.forEach(e => {
             if (e.id.startsWith('payroll_') || e.category === 'PAYROLL') return;
             if (e.settlementId) return; 
 
-            const isPaid = e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL';
-            if (includeUnpaid || isPaid) {
-                const amt = includeUnpaid ? (e.totalBillAmount || e.amount) : e.amount;
-                addCost(Number(amt || 0) - Number(e.creditNote || 0), e.category);
+            if (accountingMode === 'ACCRUAL') {
+                // ACCRUAL: 按入账日(time)归类，包含所有已记录的费用（不管有没有付款）
+                // 用 totalBillAmount 作为真实成本
+                if (!isInRange(e.time)) return;
+                const fullCost = Number(e.totalBillAmount || e.amount || 0) - Number(e.creditNote || 0);
+                if (fullCost > 0) addCost(fullCost, e.category);
+            } else {
+                // CASH: 按付款日(paymentDate)归类，只计算已付金额
+                if (e.paymentStatus !== 'PAID' && e.paymentStatus !== 'PARTIAL') return;
+                const effectiveDate = e.paymentDate || e.time;
+                if (!isInRange(effectiveDate)) return;
+                const paidAmt = Number(e.amount || 0) - Number(e.creditNote || 0);
+                if (paidAmt > 0) addCost(paidAmt, e.category);
             }
         });
 
@@ -302,6 +311,23 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const opexMargin = revenueDetails.totalRevenue > 0 ? (totalOPEX / revenueDetails.totalRevenue) * 100 : 0;
         const netMargin = revenueDetails.totalRevenue > 0 ? (netProfit / revenueDetails.totalRevenue) * 100 : 0;
 
+        // Daily Sales Trend Data
+        const dailySalesMap: Record<string, number> = {};
+        const dailyExpenseMap: Record<string, number> = {};
+        settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
+            const d = s.date.split('T')[0];
+            dailySalesMap[d] = (dailySalesMap[d] || 0) + Number(s.sales?.total || 0);
+            const dayExp = s.expenses?.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0) || 0;
+            dailyExpenseMap[d] = (dailyExpenseMap[d] || 0) + dayExp;
+        });
+        const dailySales = Object.entries(dailySalesMap)
+            .map(([date, sales]) => ({ date, sales, expenses: dailyExpenseMap[date] || 0 }))
+            .sort((a, b) => a.date.localeCompare(b.date));
+
+        // Settlement count for averages
+        const settlementCount = settlementRecords.filter(s => isInRange(s.date)).length;
+        const avgDailySales = settlementCount > 0 ? revenueDetails.totalRevenue / settlementCount : 0;
+
         return {
             revenueDetails, percentages: { cash: cashPercentage, ewallet: ewalletPercentage },
             grossProfit, netProfit, netMargin,
@@ -312,9 +338,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 laborList: Object.values(groups).filter(g => g.type === 'LABOR').sort((a,b) => b.amount - a.amount),
                 opexList: Object.values(groups).filter(g => g.type === 'OPEX').sort((a,b) => b.amount - a.amount)
             },
-            fees: { debitFee, creditFee, totalCommission }
+            fees: { debitFee, creditFee, totalCommission },
+            dailySales, avgDailySales, settlementCount
         };
-    }, [settlementRecords, standaloneExpenses, billPayments, payrollRecords, startDate, endDate, includeUnpaid]);
+    }, [settlementRecords, standaloneExpenses, billPayments, payrollRecords, startDate, endDate, accountingMode]);
 
     const getDrillDownData = (criteria: { type?: 'COGS'|'LABOR'|'OPEX', categoryId?: string }) => {
         const rawItems: DetailedExpenseItem[] = [];
@@ -340,13 +367,21 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             });
         });
 
-        standaloneExpenses.filter(e => isInRange(e.time)).forEach(e => {
+        standaloneExpenses.forEach(e => {
             if (e.id.startsWith('payroll_') || e.category === 'PAYROLL') return;
             if (e.settlementId) return;
-            const isPaid = e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL';
-            if (includeUnpaid || isPaid) {
-                const amt = includeUnpaid ? (e.totalBillAmount || e.amount) : e.amount;
-                addItem({ id: e.id, date: e.time.split('T')[0], category: e.category, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: Number(amt || 0) - Number(e.creditNote || 0), source: 'AP/Voucher', type: '' });
+
+            if (accountingMode === 'ACCRUAL') {
+                if (!isInRange(e.time)) return;
+                const fullCost = Number(e.totalBillAmount || e.amount || 0) - Number(e.creditNote || 0);
+                const statusTag = e.paymentStatus === 'PAID' ? '' : e.paymentStatus === 'PARTIAL' ? ' [部分付款]' : ' [未付款]';
+                addItem({ id: e.id, date: e.time.split('T')[0], category: e.category, desc: e.company + (e.note ? ` - ${e.note}` : '') + statusTag, amount: fullCost, source: 'AP/Voucher', type: '' });
+            } else {
+                if (e.paymentStatus !== 'PAID' && e.paymentStatus !== 'PARTIAL') return;
+                const effectiveDate = e.paymentDate || e.time;
+                if (!isInRange(effectiveDate)) return;
+                const paidAmt = Number(e.amount || 0) - Number(e.creditNote || 0);
+                addItem({ id: e.id, date: (effectiveDate).split('T')[0], category: e.category, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: paidAmt, source: 'AP/Voucher', type: '' });
             }
         });
 
@@ -509,22 +544,23 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                     </div>
                 </div>
 
-                <div className="bg-white border-b border-gray-200 p-4 flex flex-col lg:flex-row justify-between items-center gap-4 shrink-0 shadow-sm z-10 touch-manipulation">
-                    <div className="flex flex-col md:flex-row items-center gap-3 w-full lg:w-auto">
-                        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-1 px-3">
-                            <Calendar size={14} className="text-gray-400"/>
-                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-sm font-bold outline-none w-32 cursor-pointer"/>
-                            <ArrowRight size={14} className="text-gray-300"/>
-                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm font-bold outline-none w-32 cursor-pointer"/>
+                <div className="bg-white border-b border-gray-200 p-4 flex flex-col gap-4 shrink-0 shadow-sm z-10 touch-manipulation">
+                    <div className="flex flex-col lg:flex-row justify-between items-center gap-4">
+                        <div className="flex flex-col md:flex-row items-center gap-3 w-full lg:w-auto">
+                            <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-1 px-3">
+                                <Calendar size={14} className="text-gray-400"/>
+                                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-sm font-bold outline-none w-32 cursor-pointer"/>
+                                <ArrowRight size={14} className="text-gray-300"/>
+                                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm font-bold outline-none w-32 cursor-pointer"/>
+                            </div>
+                            <div className="flex gap-2 bg-gray-100 p-1 rounded-xl overflow-x-auto max-w-full scrollbar-hide">
+                                {['YESTERDAY', 'TODAY', 'WEEK', 'MONTH', 'LAST_MONTH'].map(t => (
+                                    <button key={t} onClick={() => setQuickDate(t as any)} className="px-3 py-2 bg-white shadow-sm rounded-lg text-[10px] md:text-xs font-bold hover:bg-gray-50 transition-colors whitespace-nowrap active:scale-95">{t.replace('_', ' ')}</button>
+                                ))}
+                            </div>
                         </div>
-                        <div className="flex gap-2 bg-gray-100 p-1 rounded-xl overflow-x-auto max-w-full scrollbar-hide">
-                            {['YESTERDAY', 'TODAY', 'WEEK', 'MONTH', 'LAST_MONTH'].map(t => (
-                                <button key={t} onClick={() => setQuickDate(t as any)} className="px-3 py-2 bg-white shadow-sm rounded-lg text-[10px] md:text-xs font-bold hover:bg-gray-50 transition-colors whitespace-nowrap active:scale-95">{t.replace('_', ' ')}</button>
-                            ))}
-                        </div>
-                    </div>
 
-                    <div className="flex bg-gray-100 p-1.5 rounded-xl overflow-x-auto w-full lg:w-auto scrollbar-hide">
+                        <div className="flex bg-gray-100 p-1.5 rounded-xl overflow-x-auto w-full lg:w-auto scrollbar-hide">
                         {[
                             { id: 'OVERVIEW', label: '总览 (Overview)', icon: LayoutList },
                             { id: 'SALES', label: '营收分析 (Sales)', icon: TrendingUp },
@@ -544,6 +580,35 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                             );
                         })}
                     </div>
+                    </div>
+                    
+                    {/* Accounting Mode Toggle - 会计模式切换 */}
+                    {(activeTab === 'OVERVIEW' || activeTab === 'COST' || activeTab === 'DIVIDEND') && (
+                        <div className="flex items-center justify-between bg-gray-50/80 border-t border-gray-100 px-4 py-2.5">
+                            <div className="flex items-center gap-2">
+                                <HelpCircle size={13} className="text-gray-400 shrink-0"/>
+                                <span className="text-[10px] text-gray-500 font-bold leading-tight">
+                                    {accountingMode === 'ACCRUAL' 
+                                        ? '权责发生制：按入账日归类，包含未付账单（反映真实经营成本）' 
+                                        : '收付实现制：按付款日归类，只计已付金额（与资金管理一致）'}
+                                </span>
+                            </div>
+                            <div className="flex bg-white border border-gray-200 rounded-lg p-0.5 shrink-0 ml-3">
+                                <button 
+                                    onClick={() => setAccountingMode('ACCRUAL')}
+                                    className={`px-3 py-1.5 rounded-md text-[10px] font-black transition-all whitespace-nowrap ${accountingMode === 'ACCRUAL' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                                >
+                                    权责发生制
+                                </button>
+                                <button 
+                                    onClick={() => setAccountingMode('CASH')}
+                                    className={`px-3 py-1.5 rounded-md text-[10px] font-black transition-all whitespace-nowrap ${accountingMode === 'CASH' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                                >
+                                    收付实现制
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex-grow overflow-y-auto p-4 md:p-6 bg-[#F5F7FA] touch-pan-y">
@@ -554,34 +619,199 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                             
                             {activeTab === 'OVERVIEW' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                                        <div className="bg-blue-50 p-6 rounded-[2rem] border border-blue-100 shadow-sm relative overflow-hidden group">
-                                            <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:scale-110 transition-transform"><DollarSign size={80}/></div>
-                                            <p className="text-xs font-bold text-blue-600 uppercase mb-2 tracking-widest relative z-10">Total Revenue (总营收)</p>
-                                            <p className="text-3xl font-black text-blue-900 font-mono relative z-10">{formatMoney(analytics.revenueDetails.totalRevenue)}</p>
+                                    {/* Accounting Mode Indicator */}
+                                    <div className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-bold ${accountingMode === 'ACCRUAL' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-sky-50 text-sky-700 border border-sky-200'}`}>
+                                        <Info size={12} className="shrink-0"/>
+                                        {accountingMode === 'ACCRUAL' 
+                                            ? '📋 权责发生制 (Accrual) — 成本按入账/收货日计算，包含未付款账单。利润反映真实经营状况。' 
+                                            : '💰 收付实现制 (Cash Basis) — 成本按实际付款日计算，仅含已付金额。数据与资金管理同步。'}
+                                    </div>
+
+                                    {/* KPI Cards Row */}
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                                        <div className="bg-blue-50 p-4 md:p-5 rounded-2xl border border-blue-100 shadow-sm relative overflow-hidden group">
+                                            <p className="text-[9px] md:text-[10px] font-bold text-blue-600 uppercase mb-1 tracking-wider relative z-10">总营收 (Revenue)</p>
+                                            <p className="text-xl md:text-2xl font-black text-blue-900 font-mono relative z-10">{formatMoney(analytics.revenueDetails.totalRevenue)}</p>
+                                            <p className="text-[9px] text-blue-500 font-bold mt-1 relative z-10">{analytics.settlementCount} 天 · 日均 {formatMoney(analytics.avgDailySales)}</p>
                                         </div>
-                                        <div className="bg-red-50 p-6 rounded-[2rem] border border-red-100 shadow-sm relative overflow-hidden group">
-                                            <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:scale-110 transition-transform"><ArrowDown size={80}/></div>
-                                            <p className="text-xs font-bold text-red-600 uppercase mb-2 tracking-widest relative z-10">Total Expenses (总支出)</p>
-                                            <p className="text-3xl font-black text-red-900 font-mono relative z-10">{formatMoney(analytics.costs.totalExpenses)}</p>
+                                        <div className="bg-red-50 p-4 md:p-5 rounded-2xl border border-red-100 shadow-sm relative overflow-hidden group">
+                                            <p className="text-[9px] md:text-[10px] font-bold text-red-600 uppercase mb-1 tracking-wider relative z-10">总支出 (Expenses)</p>
+                                            <p className="text-xl md:text-2xl font-black text-red-900 font-mono relative z-10">{formatMoney(analytics.costs.totalExpenses)}</p>
+                                            <p className="text-[9px] text-red-400 font-bold mt-1 relative z-10">占营收 {analytics.revenueDetails.totalRevenue > 0 ? ((analytics.costs.totalExpenses / analytics.revenueDetails.totalRevenue) * 100).toFixed(1) : '0'}%</p>
                                         </div>
-                                        <div className={`${analytics.netProfit >= 0 ? 'bg-[#1A1A1A]' : 'bg-red-900'} p-6 rounded-[2rem] shadow-xl relative overflow-hidden group md:col-span-2 lg:col-span-1`}>
-                                            <div className="absolute right-0 top-0 p-4 opacity-10 text-white group-hover:scale-110 transition-transform"><TrendingUp size={80}/></div>
-                                            <p className="text-xs font-bold text-[#FFD700] uppercase mb-2 tracking-widest relative z-10">Net Profit (净利润)</p>
-                                            <p className="text-3xl font-black text-white font-mono relative z-10">{formatMoney(analytics.netProfit)}</p>
-                                            <div className="mt-2 inline-block bg-white/20 px-2 py-0.5 rounded text-[10px] font-bold text-white relative z-10">
-                                                Margin: {analytics.netMargin.toFixed(1)}%
+                                        <div className={`${analytics.netProfit >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-200'} p-4 md:p-5 rounded-2xl border shadow-sm relative overflow-hidden group`}>
+                                            <p className="text-[9px] md:text-[10px] font-bold text-emerald-700 uppercase mb-1 tracking-wider relative z-10">毛利润 (Gross)</p>
+                                            <p className={`text-xl md:text-2xl font-black font-mono relative z-10 ${analytics.grossProfit >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>{formatMoney(analytics.grossProfit)}</p>
+                                            <p className="text-[9px] text-emerald-500 font-bold mt-1 relative z-10">毛利率 {analytics.revenueDetails.totalRevenue > 0 ? ((analytics.grossProfit / analytics.revenueDetails.totalRevenue) * 100).toFixed(1) : '0'}%</p>
+                                        </div>
+                                        <div className={`${analytics.netProfit >= 0 ? 'bg-[#1A1A1A]' : 'bg-red-900'} p-4 md:p-5 rounded-2xl shadow-xl relative overflow-hidden group`}>
+                                            <p className="text-[9px] md:text-[10px] font-bold text-[#FFD700] uppercase mb-1 tracking-wider relative z-10">净利润 (Net Profit)</p>
+                                            <p className="text-xl md:text-2xl font-black text-white font-mono relative z-10">{formatMoney(analytics.netProfit)}</p>
+                                            <p className="text-[9px] text-[#FFD700]/80 font-bold mt-1 relative z-10">净利率 {analytics.netMargin.toFixed(1)}%</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Daily Sales Trend Chart */}
+                                    {analytics.dailySales.length > 1 && (
+                                        <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
+                                            <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><BarChart3 size={16}/> 每日营收趋势 (Daily Revenue Trend)</h4>
+                                            <div className="w-full overflow-x-auto">
+                                                <div className="min-w-[400px]">
+                                                    {(() => {
+                                                        const data = analytics.dailySales;
+                                                        const maxVal = Math.max(...data.map(d => d.sales), 1);
+                                                        const chartH = 160;
+                                                        const barW = Math.max(16, Math.min(40, (600 / data.length) - 4));
+                                                        const totalW = data.length * (barW + 4);
+                                                        return (
+                                                            <div>
+                                                                <div className="flex items-end gap-1 justify-center" style={{ minWidth: totalW, height: chartH }}>
+                                                                    {data.map((d, i) => {
+                                                                        const h = Math.max(4, (d.sales / maxVal) * (chartH - 24));
+                                                                        const isHighest = d.sales === maxVal;
+                                                                        const isToday = d.date === getTodayStr();
+                                                                        return (
+                                                                            <div key={i} className="flex flex-col items-center gap-1" style={{ width: barW }}>
+                                                                                <span className={`text-[8px] font-mono font-bold ${isHighest ? 'text-blue-600' : 'text-gray-400'}`}>
+                                                                                    {d.sales >= 1000 ? `${(d.sales/1000).toFixed(1)}k` : d.sales.toFixed(0)}
+                                                                                </span>
+                                                                                <div 
+                                                                                    className={`w-full rounded-t-md transition-all ${isToday ? 'bg-blue-500' : isHighest ? 'bg-blue-400' : 'bg-blue-200 hover:bg-blue-300'}`}
+                                                                                    style={{ height: h }}
+                                                                                    title={`${d.date}: RM ${d.sales.toFixed(2)}`}
+                                                                                ></div>
+                                                                                <span className={`text-[7px] font-mono ${isToday ? 'text-blue-600 font-black' : 'text-gray-400'}`}>
+                                                                                    {d.date.slice(8)}
+                                                                                </span>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                                <div className="flex justify-between items-center mt-3 px-1">
+                                                                    <span className="text-[9px] text-gray-400 font-bold">📊 {data.length} 天 · 日均 {formatMoney(analytics.avgDailySales)}</span>
+                                                                    <div className="flex items-center gap-3">
+                                                                        <span className="text-[9px] text-gray-400 flex items-center gap-1"><span className="w-2 h-2 bg-blue-500 rounded-sm inline-block"></span> Today</span>
+                                                                        <span className="text-[9px] text-gray-400 flex items-center gap-1"><span className="w-2 h-2 bg-blue-400 rounded-sm inline-block"></span> Highest</span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </div>
                                             </div>
+                                        </div>
+                                    )}
+
+                                    {/* Cost Structure Visual */}
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                        {/* Donut-like proportional bar */}
+                                        <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
+                                            <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><PieChart size={16}/> 成本结构 (Cost Structure)</h4>
+                                            {analytics.costs.totalExpenses > 0 ? (
+                                                <div>
+                                                    {/* Stacked bar */}
+                                                    <div className="flex h-8 rounded-full overflow-hidden mb-4 bg-gray-100">
+                                                        <div className="bg-red-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCOGS / analytics.costs.totalExpenses) * 100}%` }} title={`COGS: ${formatMoney(analytics.costs.totalCOGS)}`}></div>
+                                                        <div className="bg-purple-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalLabor / analytics.costs.totalExpenses) * 100}%` }} title={`Labor: ${formatMoney(analytics.costs.totalLabor)}`}></div>
+                                                        <div className="bg-orange-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalOPEX / analytics.costs.totalExpenses) * 100}%` }} title={`OPEX: ${formatMoney(analytics.costs.totalOPEX)}`}></div>
+                                                    </div>
+                                                    {/* Legend */}
+                                                    <div className="space-y-2">
+                                                        <button onClick={() => handleDrillDown({ type: 'COGS' }, '销货成本 (COGS)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-red-50 transition-colors active:scale-[0.99] group">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-3 h-3 bg-red-400 rounded-sm shrink-0"></div>
+                                                                <span className="text-xs font-bold text-gray-600 group-hover:text-red-700">COGS 食材成本</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCOGS)}</span>
+                                                                <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{analytics.margins.cogs.toFixed(1)}%</span>
+                                                                <ChevronRight size={12} className="text-gray-300"/>
+                                                            </div>
+                                                        </button>
+                                                        <button onClick={() => handleDrillDown({ type: 'LABOR' }, '人工薪资 (Labor)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-purple-50 transition-colors active:scale-[0.99] group">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-3 h-3 bg-purple-400 rounded-sm shrink-0"></div>
+                                                                <span className="text-xs font-bold text-gray-600 group-hover:text-purple-700">Labor 人工成本</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalLabor)}</span>
+                                                                <span className="text-[10px] font-bold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">{analytics.margins.labor.toFixed(1)}%</span>
+                                                                <ChevronRight size={12} className="text-gray-300"/>
+                                                            </div>
+                                                        </button>
+                                                        <button onClick={() => handleDrillDown({ type: 'OPEX' }, '运营支出 (OPEX)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-orange-50 transition-colors active:scale-[0.99] group">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-3 h-3 bg-orange-400 rounded-sm shrink-0"></div>
+                                                                <span className="text-xs font-bold text-gray-600 group-hover:text-orange-700">OPEX 运营支出</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalOPEX)}</span>
+                                                                <span className="text-[10px] font-bold text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded">{analytics.margins.opex.toFixed(1)}%</span>
+                                                                <ChevronRight size={12} className="text-gray-300"/>
+                                                            </div>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="text-center py-10 text-gray-400 text-xs">暂无支出数据</div>
+                                            )}
+                                        </div>
+
+                                        {/* Profit Waterfall */}
+                                        <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
+                                            <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><TrendingUp size={16}/> 利润瀑布图 (Profit Waterfall)</h4>
+                                            {analytics.revenueDetails.totalRevenue > 0 ? (
+                                                <div className="space-y-3">
+                                                    {(() => {
+                                                        const rev = analytics.revenueDetails.totalRevenue;
+                                                        const items = [
+                                                            { label: '营收 Revenue', value: rev, color: 'bg-blue-400', pct: 100 },
+                                                            { label: '− COGS 食材', value: -analytics.costs.totalCOGS, color: 'bg-red-300', pct: (analytics.costs.totalCOGS / rev) * 100 },
+                                                            { label: '= 毛利 Gross', value: analytics.grossProfit, color: 'bg-emerald-400', pct: (analytics.grossProfit / rev) * 100 },
+                                                            { label: '− Labor 人工', value: -analytics.costs.totalLabor, color: 'bg-purple-300', pct: (analytics.costs.totalLabor / rev) * 100 },
+                                                            { label: '− OPEX 运营', value: -analytics.costs.totalOPEX, color: 'bg-orange-300', pct: (analytics.costs.totalOPEX / rev) * 100 },
+                                                            { label: '= 净利 Net', value: analytics.netProfit, color: analytics.netProfit >= 0 ? 'bg-emerald-500' : 'bg-red-500', pct: Math.abs(analytics.netMargin) },
+                                                        ];
+                                                        return items.map((item, i) => (
+                                                            <div key={i} className="flex items-center gap-3">
+                                                                <span className="text-[9px] font-bold text-gray-500 w-20 shrink-0 text-right">{item.label}</span>
+                                                                <div className="flex-1 h-5 bg-gray-50 rounded-full overflow-hidden relative">
+                                                                    <div className={`h-full ${item.color} rounded-full transition-all duration-700`} style={{ width: `${Math.min(100, Math.abs(item.pct))}%` }}></div>
+                                                                </div>
+                                                                <span className={`text-[10px] font-mono font-black w-24 text-right shrink-0 ${item.value >= 0 ? 'text-[#1A1A1A]' : 'text-red-600'}`}>
+                                                                    {formatMoney(Math.abs(item.value))}
+                                                                </span>
+                                                            </div>
+                                                        ));
+                                                    })()}
+                                                </div>
+                                            ) : (
+                                                <div className="text-center py-10 text-gray-400 text-xs">暂无数据</div>
+                                            )}
                                         </div>
                                     </div>
                                     
-                                    <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm flex items-center justify-between">
-                                        <div>
-                                            <h4 className="font-bold text-[#1A1A1A] flex items-center gap-2"><Calculator size={16} className="text-gray-400"/> 现金差异 (Cash Variance / Sot)</h4>
-                                            <p className="text-xs text-gray-500 mt-1">Total variance from daily settlements</p>
+                                    {/* Cash Variance + Payment Mix */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+                                            <div>
+                                                <h4 className="font-bold text-sm text-[#1A1A1A] flex items-center gap-2"><Calculator size={14} className="text-gray-400"/> 现金差异 (Variance)</h4>
+                                                <p className="text-[10px] text-gray-400 mt-0.5">Daily settlement variance total</p>
+                                            </div>
+                                            <div className={`text-xl font-black font-mono ${analytics.revenueDetails.variance >= 0 ? 'text-gray-400' : 'text-red-600'}`}>
+                                                {analytics.revenueDetails.variance > 0 ? '+' : ''}{formatMoney(analytics.revenueDetails.variance)}
+                                            </div>
                                         </div>
-                                        <div className={`text-xl font-black font-mono ${analytics.revenueDetails.variance >= 0 ? 'text-gray-400' : 'text-red-600'}`}>
-                                            {analytics.revenueDetails.variance > 0 ? '+' : ''}{formatMoney(analytics.revenueDetails.variance)}
+                                        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
+                                            <h4 className="font-bold text-sm text-[#1A1A1A] flex items-center gap-2 mb-3"><Wallet size={14} className="text-gray-400"/> 收款方式 (Payment Mix)</h4>
+                                            <div className="flex h-3 rounded-full overflow-hidden bg-gray-100 mb-2">
+                                                <div className="bg-green-500 transition-all duration-700" style={{ width: `${analytics.percentages.cash}%` }}></div>
+                                                <div className="bg-blue-500 transition-all duration-700" style={{ width: `${analytics.percentages.ewallet}%` }}></div>
+                                            </div>
+                                            <div className="flex justify-between text-[10px] font-bold">
+                                                <span className="text-green-600">💵 现金 {analytics.percentages.cash.toFixed(0)}%</span>
+                                                <span className="text-blue-600">💳 电子支付 {analytics.percentages.ewallet.toFixed(0)}%</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -589,6 +819,34 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
                             {activeTab === 'SALES' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+                                    {/* Daily Sales Breakdown - Horizontal Bars */}
+                                    {analytics.dailySales.length > 0 && (
+                                        <div className="bg-white p-5 md:p-6 rounded-[2rem] border border-gray-200 shadow-sm">
+                                            <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><BarChart3 size={16}/> 每日营收明细 (Daily Breakdown)</h4>
+                                            <div className="space-y-2 max-h-[400px] overflow-y-auto touch-pan-y pr-1">
+                                                {(() => {
+                                                    const data = analytics.dailySales;
+                                                    const maxVal = Math.max(...data.map(d => d.sales), 1);
+                                                    return data.map((d, i) => {
+                                                        const pct = (d.sales / maxVal) * 100;
+                                                        const dayName = new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+                                                        const isToday = d.date === getTodayStr();
+                                                        return (
+                                                            <div key={i} className={`flex items-center gap-2 p-2 rounded-xl ${isToday ? 'bg-blue-50' : 'hover:bg-gray-50'} transition-colors`}>
+                                                                <span className={`text-[10px] font-mono w-14 shrink-0 ${isToday ? 'font-black text-blue-600' : 'text-gray-400 font-bold'}`}>{d.date.slice(5)}</span>
+                                                                <span className="text-[9px] font-bold text-gray-400 w-8 shrink-0">{dayName}</span>
+                                                                <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
+                                                                    <div className={`h-full rounded-full transition-all duration-500 ${isToday ? 'bg-blue-500' : 'bg-blue-300'}`} style={{ width: `${pct}%` }}></div>
+                                                                </div>
+                                                                <span className={`text-[10px] font-mono font-black w-20 text-right shrink-0 ${isToday ? 'text-blue-600' : 'text-[#1A1A1A]'}`}>{formatMoney(d.sales)}</span>
+                                                            </div>
+                                                        );
+                                                    });
+                                                })()}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm">
                                         <h4 className="font-black text-sm text-[#1A1A1A] mb-6 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> 支付方式占比 (Payment Methods)</h4>
                                         <div className="flex h-4 rounded-full overflow-hidden mb-4 bg-gray-100">
@@ -642,6 +900,13 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
                             {activeTab === 'COST' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+                                    {/* Accounting Mode Indicator */}
+                                    <div className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-bold ${accountingMode === 'ACCRUAL' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-sky-50 text-sky-700 border border-sky-200'}`}>
+                                        <Info size={12} className="shrink-0"/>
+                                        {accountingMode === 'ACCRUAL' 
+                                            ? '📋 权责发生制 — 费用含未付账单，按收货日归入。点击行项可查看付款状态。' 
+                                            : '💰 收付实现制 — 仅显示已实际付款的费用。'}
+                                    </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                         <button onClick={() => handleDrillDown({ type: 'COGS' }, '销货成本 (COGS)')} className="bg-red-50 p-5 rounded-[2rem] border border-red-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[120px]">
                                             <div className="flex justify-between items-center mb-2">

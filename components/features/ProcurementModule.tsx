@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ShoppingCart, Package, Truck, AlertTriangle, Plus, FileText, Send, Printer, CheckCircle2, X, RefreshCw, ChevronRight, Search, ClipboardCheck, ArrowDownToLine, Loader2, Info, ChevronDown, Filter, Utensils, Coffee, Box, Wrench, Minus, ChevronUp, History, Clock, Zap, Trash2, Fish, Beef, Wheat, Carrot, Soup, PaintBucket, Users, ArrowLeft, Percent, Bus, Scale, Calculator } from 'lucide-react';
 import { StockItem, Supplier, PurchaseOrder, PurchaseOrderItem, ExpenseItem, CatalogItem, UomOption } from '../../types';
@@ -31,8 +30,8 @@ const KITCHEN_SUB_CATEGORIES = [
     { id: 'HQ', label: '总店 HQ' },
 ];
 
-// UPDATED: Reduced items per page to allow for larger fonts
-const ITEMS_PER_PAGE = 14;
+// UPDATED: Reduced items per page to fit comfortably on A4 with large fonts
+const ITEMS_PER_PAGE = 10;
 
 // --- INTERFACES ---
 interface OrderDraftItem {
@@ -849,90 +848,187 @@ export const ProcurementModule: React.FC<ProcurementModuleProps> = ({ onClose })
                                     </div>
 
                                     {/* ITEM GRID */}
-                                    <div className="flex-grow overflow-y-auto p-4 bg-[#F5F7FA] pb-40">
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                    <div className="flex-grow overflow-y-auto p-3 md:p-4 bg-[#F5F7FA] pb-40">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4">
                                             {filteredStock.map(item => {
                                                 const match = findSupplierForStock(item.id);
                                                 const isLow = item.currentQty <= item.minLevel;
                                                 const draft = orderDrafts[item.id] || { stockId: item.id, qty: 0, unit: item.unit, price: item.cost, ratio: 1 };
                                                 const unitOptions = [{ label: item.unit, value: item.unit, ratio: 1 }, ...(item.uomOptions || [])];
                                                 const hasDraft = draft.qty > 0;
-                                                
-                                                // Dynamic max ensures slider never gets stuck if user wants more
-                                                const sliderMax = Math.max(item.maxQty || 30, (draft.qty || 0) + 5);
 
                                                 return (
-                                                    <div key={item.id} className={`bg-white p-4 rounded-2xl shadow-sm border-2 transition-all flex flex-col justify-between relative group ${hasDraft ? 'border-[#1A1A1A] ring-1 ring-[#1A1A1A]' : isLow ? 'border-red-100' : 'border-transparent hover:border-gray-200'}`}>
-                                                        {/* Status Badge */}
-                                                        <div className="absolute top-4 right-4 flex flex-col items-end">
-                                                            <div className={`text-xs font-black px-2 py-1 rounded-lg mb-1 ${isLow ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
-                                                                Qty: {item.currentQty}
+                                                    <div key={item.id} className={`bg-white rounded-2xl shadow-sm border-2 transition-all relative group ${hasDraft ? 'border-[#1A1A1A] ring-1 ring-[#1A1A1A]' : isLow ? 'border-red-200' : 'border-transparent hover:border-gray-200'}`}>
+                                                        
+                                                        {/* === MOBILE LAYOUT (horizontal compact) === */}
+                                                        <div className="sm:hidden">
+                                                            {/* Top: Item Info Row */}
+                                                            <div className="flex items-start justify-between p-3 pb-2">
+                                                                <div className="flex-1 min-w-0 pr-3">
+                                                                    <h4 className="font-black text-sm text-[#1A1A1A] leading-tight truncate">{item.name}</h4>
+                                                                    <div className="flex items-center gap-1.5 mt-1">
+                                                                        <span className="text-[8px] font-mono bg-gray-100 px-1 py-0.5 rounded text-gray-400 font-bold">{item.id}</span>
+                                                                        {match ? 
+                                                                            <span className="text-[8px] font-bold bg-blue-50 text-blue-500 px-1 py-0.5 rounded truncate max-w-[80px]"><Truck size={8} className="inline mr-0.5"/> {match.supplier.name.slice(0, 8)}..</span> : 
+                                                                            <span className="text-[8px] font-bold bg-gray-50 text-gray-400 px-1 py-0.5 rounded">No Supplier</span>
+                                                                        }
+                                                                    </div>
+                                                                </div>
+                                                                {/* Stock Status */}
+                                                                <div className="flex flex-col items-end shrink-0">
+                                                                    <div className={`text-[10px] font-black px-2 py-0.5 rounded-md ${isLow ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                                                                        库存: {item.currentQty}
+                                                                    </div>
+                                                                    <span className="text-[8px] text-gray-400 font-bold mt-0.5">Min: {item.minLevel}</span>
+                                                                </div>
                                                             </div>
-                                                            <div className="text-[9px] text-gray-400 font-bold">Min: {item.minLevel}</div>
-                                                        </div>
 
-                                                        {/* Item Info */}
-                                                        <div className="mb-4 pr-16">
-                                                            <h4 className="font-black text-sm text-[#1A1A1A] line-clamp-2 leading-tight mb-1">{item.name}</h4>
-                                                            <div className="flex flex-wrap gap-1">
-                                                                <span className="text-[9px] font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-500 font-bold">{item.id}</span>
-                                                                {match ? 
-                                                                    <span className="text-[9px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Truck size={10}/> {match.supplier.name.slice(0, 10)}...</span> : 
-                                                                    <span className="text-[9px] font-bold bg-gray-50 text-gray-400 px-1.5 py-0.5 rounded">No Supplier</span>
-                                                                }
-                                                            </div>
-                                                        </div>
-
-                                                        {/* Controls - REDESIGNED */}
-                                                        <div className="mt-auto pt-2">
-                                                            {/* Top Row: Unit Selector & Price */}
-                                                            <div className="flex justify-between items-center mb-2 px-1">
-                                                                <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-2 py-1">
-                                                                     <span className="text-[10px] font-bold text-gray-400 uppercase">UNIT</span>
-                                                                     <select 
+                                                            {/* Bottom: Controls Row */}
+                                                            <div className="flex items-center gap-2 px-3 pb-3">
+                                                                {/* Unit + Price compact */}
+                                                                <div className="flex items-center gap-1 bg-gray-50 rounded-lg px-1.5 py-1 shrink-0">
+                                                                    <select 
                                                                         value={draft.unit} 
                                                                         onChange={e => updateDraft(item.id, 'unit', e.target.value, item)} 
-                                                                        className="bg-transparent text-xs font-black text-[#1A1A1A] outline-none cursor-pointer appearance-none pr-1"
-                                                                     >
-                                                                         {unitOptions.map((u, idx) => (
-                                                                             <option key={idx} value={u.value}>{u.value}</option>
-                                                                         ))}
-                                                                     </select>
+                                                                        className="bg-transparent text-[10px] font-black text-[#1A1A1A] outline-none cursor-pointer appearance-none w-auto max-w-[50px]"
+                                                                    >
+                                                                        {unitOptions.map((u, idx) => (
+                                                                            <option key={idx} value={u.value}>{u.value}</option>
+                                                                        ))}
+                                                                    </select>
                                                                 </div>
-                                                                <div className="text-[10px] font-mono text-gray-400">
-                                                                     RM {draft.price.toFixed(2)}
-                                                                </div>
-                                                            </div>
 
-                                                            {/* Stepper Control - Slider Based */}
-                                                            <div className="flex items-center gap-2 mt-3 select-none">
-                                                                <button onClick={() => handleQuickAdd(item, -1)} className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 active:scale-90 flex items-center justify-center transition-all shrink-0">
-                                                                    <Minus size={16} strokeWidth={2.5}/>
-                                                                </button>
-                                                                
-                                                                <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1 border border-gray-100">
-                                                                    <span className="font-black text-base text-[#1A1A1A] w-6 text-center">{draft.qty || 0}</span>
-                                                                    <input 
-                                                                        type="range" 
-                                                                        min="0" 
-                                                                        max={sliderMax}
-                                                                        value={draft.qty || 0} 
-                                                                        onChange={(e) => updateDraft(item.id, 'qty', parseInt(e.target.value), item)}
-                                                                        className="flex-grow h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#1A1A1A]"
+                                                                {/* Qty Controls - Inline */}
+                                                                <div className="flex items-center gap-1.5 flex-1 justify-center select-none">
+                                                                    <button onClick={() => handleQuickAdd(item, -1)} className="w-9 h-9 rounded-xl bg-gray-100 text-gray-500 hover:bg-gray-200 active:scale-90 flex items-center justify-center transition-all shrink-0">
+                                                                        <Minus size={16} strokeWidth={2.5}/>
+                                                                    </button>
+                                                                    <input
+                                                                        type="number"
+                                                                        inputMode="numeric"
+                                                                        min="0"
+                                                                        value={draft.qty || ''}
+                                                                        placeholder="0"
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                                                                            if (!isNaN(val)) updateDraft(item.id, 'qty', Math.max(0, val), item);
+                                                                        }}
+                                                                        className="w-14 h-9 text-center font-black text-base text-[#1A1A1A] bg-white border-2 border-gray-200 rounded-xl outline-none focus:border-[#1A1A1A] transition-colors appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                                                                     />
-                                                                    <span className="text-[10px] font-bold text-gray-400 w-5 text-right">{item.maxQty || 30}</span>
+                                                                    <button onClick={() => handleQuickAdd(item, 1)} className="w-9 h-9 rounded-xl bg-[#1A1A1A] text-[#FFD700] hover:bg-black active:scale-90 flex items-center justify-center transition-all shadow-md shrink-0">
+                                                                        <Plus size={16} strokeWidth={2.5}/>
+                                                                    </button>
                                                                 </div>
 
-                                                                <button onClick={() => handleQuickAdd(item, 1)} className="w-8 h-8 rounded-full bg-[#1A1A1A] text-[#FFD700] hover:bg-black active:scale-90 flex items-center justify-center transition-all shadow-md shrink-0">
-                                                                    <Plus size={16} strokeWidth={2.5}/>
-                                                                </button>
+                                                                {/* Quick buttons compact */}
+                                                                <div className="flex items-center gap-1 shrink-0">
+                                                                    <button onClick={() => handleQuickAdd(item, 5)} className="h-9 px-2.5 rounded-xl bg-gray-100 active:scale-95 text-[10px] font-bold text-gray-600 transition-all">
+                                                                        +5
+                                                                    </button>
+                                                                    <button onClick={() => {
+                                                                        const target = item.maxQty || 30;
+                                                                        const needed = Math.max(0, target - item.currentQty);
+                                                                        updateDraft(item.id, 'qty', needed, item);
+                                                                    }} className="h-9 px-2.5 rounded-xl bg-orange-50 active:scale-95 text-[10px] font-bold text-orange-600 border border-orange-100 transition-all">
+                                                                        补满
+                                                                    </button>
+                                                                </div>
                                                             </div>
-                                                            
-                                                            {/* Target Label - Simplified */}
-                                                            <div className="text-center mt-1">
-                                                                <span className="text-[9px] font-bold text-gray-400">
-                                                                    目标库存 (Target): {item.maxQty || 30}
-                                                                </span>
+                                                        </div>
+
+                                                        {/* === TABLET & DESKTOP LAYOUT (vertical card) === */}
+                                                        <div className="hidden sm:flex flex-col justify-between p-4 h-full">
+                                                            {/* Status Badge */}
+                                                            <div className="absolute top-3 right-3 flex flex-col items-end">
+                                                                <div className={`text-[10px] font-black px-2 py-0.5 rounded-md ${isLow ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                                                                    库存: {item.currentQty}
+                                                                </div>
+                                                                <div className="text-[8px] text-gray-400 font-bold mt-0.5">Min: {item.minLevel}</div>
+                                                            </div>
+
+                                                            {/* Item Info */}
+                                                            <div className="mb-3 pr-20">
+                                                                <h4 className="font-black text-sm text-[#1A1A1A] line-clamp-2 leading-tight mb-1">{item.name}</h4>
+                                                                <div className="flex flex-wrap gap-1">
+                                                                    <span className="text-[8px] font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-400 font-bold">{item.id}</span>
+                                                                    {match ? 
+                                                                        <span className="text-[8px] font-bold bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded flex items-center gap-0.5"><Truck size={8}/> {match.supplier.name.slice(0, 12)}..</span> : 
+                                                                        <span className="text-[8px] font-bold bg-gray-50 text-gray-400 px-1.5 py-0.5 rounded">No Supplier</span>
+                                                                    }
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Controls */}
+                                                            <div className="mt-auto pt-2">
+                                                                {/* Unit & Price Row */}
+                                                                <div className="flex justify-between items-center mb-2">
+                                                                    <div className="flex items-center gap-1.5 bg-gray-50 rounded-lg px-2 py-1">
+                                                                         <span className="text-[9px] font-bold text-gray-400 uppercase">UNIT</span>
+                                                                         <select 
+                                                                            value={draft.unit} 
+                                                                            onChange={e => updateDraft(item.id, 'unit', e.target.value, item)} 
+                                                                            className="bg-transparent text-xs font-black text-[#1A1A1A] outline-none cursor-pointer appearance-none pr-1"
+                                                                         >
+                                                                             {unitOptions.map((u, idx) => (
+                                                                                 <option key={idx} value={u.value}>{u.value}</option>
+                                                                             ))}
+                                                                         </select>
+                                                                    </div>
+                                                                    <div className="text-[10px] font-mono text-gray-400">
+                                                                         RM {draft.price.toFixed(2)}
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Qty Input Row */}
+                                                                <div className="select-none">
+                                                                    <div className="flex items-center justify-center gap-2 mb-2">
+                                                                        <button onClick={() => handleQuickAdd(item, -1)} className="w-10 h-10 rounded-xl bg-gray-100 text-gray-500 hover:bg-gray-200 active:scale-90 flex items-center justify-center transition-all shrink-0">
+                                                                            <Minus size={18} strokeWidth={2.5}/>
+                                                                        </button>
+                                                                        <input
+                                                                            type="number"
+                                                                            inputMode="numeric"
+                                                                            min="0"
+                                                                            value={draft.qty || ''}
+                                                                            placeholder="0"
+                                                                            onChange={(e) => {
+                                                                                const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                                                                                if (!isNaN(val)) updateDraft(item.id, 'qty', Math.max(0, val), item);
+                                                                            }}
+                                                                            className="w-16 h-10 text-center font-black text-lg text-[#1A1A1A] bg-white border-2 border-gray-200 rounded-xl outline-none focus:border-[#1A1A1A] transition-colors appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                                                        />
+                                                                        <button onClick={() => handleQuickAdd(item, 1)} className="w-10 h-10 rounded-xl bg-[#1A1A1A] text-[#FFD700] hover:bg-black active:scale-90 flex items-center justify-center transition-all shadow-md shrink-0">
+                                                                            <Plus size={18} strokeWidth={2.5}/>
+                                                                        </button>
+                                                                    </div>
+
+                                                                    {/* Quick Buttons */}
+                                                                    <div className="flex items-center justify-center gap-1.5">
+                                                                        <button onClick={() => handleQuickAdd(item, -5)} className="px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 active:scale-95 text-[10px] font-bold text-gray-400 border border-gray-100 transition-all">
+                                                                            −5
+                                                                        </button>
+                                                                        <button onClick={() => handleQuickAdd(item, 5)} className="px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 active:scale-95 text-[10px] font-bold text-gray-600 border border-gray-100 transition-all">
+                                                                            +5
+                                                                        </button>
+                                                                        <button onClick={() => handleQuickAdd(item, 10)} className="px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 active:scale-95 text-[10px] font-bold text-gray-600 border border-gray-100 transition-all">
+                                                                            +10
+                                                                        </button>
+                                                                        <button onClick={() => {
+                                                                            const target = item.maxQty || 30;
+                                                                            const needed = Math.max(0, target - item.currentQty);
+                                                                            updateDraft(item.id, 'qty', needed, item);
+                                                                        }} className="px-3 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 active:scale-95 text-[10px] font-bold text-orange-600 border border-orange-100 transition-all">
+                                                                            补满
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                                
+                                                                {/* Target Label */}
+                                                                <div className="text-center mt-1.5">
+                                                                    <span className="text-[8px] font-bold text-gray-400">
+                                                                        目标库存 (Target): {item.maxQty || 30}
+                                                                    </span>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1287,48 +1383,87 @@ export const ProcurementModule: React.FC<ProcurementModuleProps> = ({ onClose })
                              pages.push(printingPO.items.slice(i * itemsPerPage, (i + 1) * itemsPerPage));
                          }
                          return pages.map((pageItems, pageIndex) => (
-                             <div key={pageIndex} id={`po-page-${pageIndex}`} className="w-[794px] min-h-[1123px] bg-white p-10 text-black font-sans relative flex flex-col justify-between">
-                                 <div>
-                                    <div className="flex justify-between items-start border-b-4 border-black pb-6 mb-8">
+                             <div key={pageIndex} id={`po-page-${pageIndex}`} className="w-[794px] h-[1123px] bg-white text-black font-sans relative flex flex-col" style={{ fontFamily: 'sans-serif' }}>
+                                 {/* Red accent top bar */}
+                                 <div className="h-2 bg-gradient-to-r from-[#8B0000] via-[#C00000] to-[#8B0000]"></div>
+                                 
+                                 <div className="flex flex-col flex-1 px-12 pt-8 pb-6">
+                                    {/* Header */}
+                                    <div className="flex justify-between items-start mb-6">
                                         <div>
-                                            <h1 className="text-5xl font-black tracking-widest mb-2">PURCHASE ORDER</h1>
-                                            <p className="text-lg font-bold text-gray-500">KIM LIAN KEE (KEPONG)</p>
+                                            <h1 className="text-4xl font-black tracking-wider text-gray-800 leading-none">PURCHASE</h1>
+                                            <h1 className="text-4xl font-black tracking-wider text-gray-800 leading-none">ORDER</h1>
+                                            <p className="text-xs font-bold text-[#8B0000] mt-2 tracking-widest uppercase">Kim Lian Kee (Kepong)</p>
                                         </div>
                                         <div className="text-right">
-                                            <p className="text-3xl font-mono font-black">{printingPO?.id}</p>
-                                            <p className="text-lg font-bold text-gray-500">{printingPO?.date.split('T')[0]}</p>
-                                            {printingPO?.createdBy && <p className="text-sm font-bold text-gray-400 mt-1">Ordered By: {printingPO.createdBy}</p>}
+                                            <p className="text-2xl font-mono font-black text-gray-800 tracking-tight">{printingPO?.id}</p>
+                                            <p className="text-sm font-semibold text-gray-500 mt-1">{printingPO?.date.split('T')[0]}</p>
+                                            {printingPO?.createdBy && <p className="text-xs text-gray-400 mt-1">Ordered By: <span className="font-semibold text-gray-500">{printingPO.createdBy}</span></p>}
                                         </div>
                                     </div>
-                                    <div className="mb-8 p-6 bg-gray-50 rounded-xl border-2 border-gray-200">
-                                        <p className="text-sm font-bold text-gray-400 uppercase mb-1">To Supplier:</p>
-                                        <h2 className="text-3xl font-bold">{printingPO?.supplierName}</h2>
+
+                                    {/* Supplier Box */}
+                                    <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">To Supplier:</p>
+                                        <h2 className="text-xl font-bold text-gray-800">{printingPO?.supplierName}</h2>
                                     </div>
-                                    <table className="w-full text-left mb-8">
-                                        <thead>
-                                            <tr className="border-b-4 border-black">
-                                                <th className="py-3 text-sm font-black uppercase">Item Name</th>
-                                                <th className="py-3 text-sm font-black uppercase text-center">Qty</th>
-                                                <th className="py-3 text-sm font-black uppercase text-center">Unit</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {pageItems.map((item, i) => (
-                                                <tr key={i} className="border-b-2 border-gray-100">
-                                                    <td className="py-4 text-lg font-bold leading-tight">
-                                                        {item.name}
-                                                        {item.supplierCode && <span className="text-sm text-gray-400 block font-normal">{item.supplierCode}</span>}
-                                                    </td>
-                                                    <td className="py-4 text-lg font-mono text-center font-bold">{item.orderQty}</td>
-                                                    <td className="py-4 text-lg font-mono text-center uppercase text-gray-600">{item.unit}</td>
+
+                                    {/* Table */}
+                                    <div className="flex-1">
+                                        <table className="w-full text-left">
+                                            <thead>
+                                                <tr className="border-b-2 border-gray-800">
+                                                    <th className="py-2 text-[10px] font-black uppercase text-gray-500 tracking-wider w-8">#</th>
+                                                    <th className="py-2 text-[10px] font-black uppercase text-gray-500 tracking-wider">Item Name</th>
+                                                    <th className="py-2 text-[10px] font-black uppercase text-gray-500 tracking-wider text-center w-24">Qty</th>
+                                                    <th className="py-2 text-[10px] font-black uppercase text-gray-500 tracking-wider text-center w-24">Unit</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                 </div>
-                                 <div className="mt-12">
-                                    {pageIndex === pages.length - 1 && <div className="mt-4 pt-8 border-t-2 border-black text-center text-sm font-bold text-gray-400 uppercase tracking-widest">Authorized Signature</div>}
-                                    <div className="text-right text-xs text-gray-400 mt-4">Page {pageIndex + 1} of {pages.length}</div>
+                                            </thead>
+                                            <tbody>
+                                                {pageItems.map((item, i) => (
+                                                    <tr key={i} className={`border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                                                        <td className="py-3 text-xs text-gray-300 font-mono">{pageIndex * itemsPerPage + i + 1}</td>
+                                                        <td className="py-3">
+                                                            <span className="text-base font-bold text-gray-800 leading-tight">{item.name}</span>
+                                                            {item.supplierCode && <span className="text-[10px] text-gray-400 block font-normal mt-0.5">{item.supplierCode}</span>}
+                                                        </td>
+                                                        <td className="py-3 text-lg font-mono text-center font-bold text-gray-800">{item.orderQty}</td>
+                                                        <td className="py-3 text-xs font-semibold text-center uppercase text-gray-500 tracking-wide">{item.unit}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        
+                                        {/* Item Count Summary (last page only) */}
+                                        {pageIndex === pages.length - 1 && (
+                                            <div className="mt-4 flex justify-end">
+                                                <div className="bg-gray-50 rounded-lg px-5 py-2 border border-gray-200">
+                                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Total Items: </span>
+                                                    <span className="text-sm font-black text-gray-800">{printingPO.items.length}</span>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Footer */}
+                                    <div className="mt-auto pt-6">
+                                        {pageIndex === pages.length - 1 && (
+                                            <div className="flex justify-between items-end mt-4">
+                                                <div className="flex-1">
+                                                    <div className="w-48 border-b-2 border-gray-300 mb-1"></div>
+                                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Authorized Signature</p>
+                                                </div>
+                                                <div className="flex-1 text-right">
+                                                    <div className="w-48 border-b-2 border-gray-300 mb-1 ml-auto"></div>
+                                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Received By (Supplier)</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-200">
+                                            <p className="text-[9px] text-gray-300">Generated by 御膳智控 ERP</p>
+                                            <p className="text-[9px] text-gray-400 font-mono">Page {pageIndex + 1} of {pages.length}</p>
+                                        </div>
+                                    </div>
                                  </div>
                              </div>
                          ));
