@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CreditCard, Calendar, Clock, DollarSign, Filter, CheckCircle2, AlertTriangle, X, Link as LinkIcon, Loader2, Plus, Save, Edit3, Trash2, Cloud, Clipboard, Search, ArrowLeft, ChevronRight, Hash, Tag, MoreHorizontal, ExternalLink, MessageSquare, List, CalendarDays, FileDown, Printer, User, Layers, Box, Wrench, Briefcase, CalendarRange, Wallet, RefreshCw, Square, CheckSquare, ListChecks, Settings2, ChevronDown, RotateCcw, Scissors, FileText, PenTool } from 'lucide-react';
 import { ExpenseItem, Supplier, SettlementRecord, Employee } from '../../types';
@@ -82,7 +81,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
     const [loading, setLoading] = useState(true);
     const [viewMode, setViewMode] = useState<'LIST' | 'SUPPLIER_DETAIL'>('LIST');
     const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'UNPAID' | 'PARTIAL' | 'PAID' | 'ALL'>('ALL');
+    const [activeTab, setActiveTab] = useState<'UNPAID' | 'PARTIAL' | 'PAID' | 'ALL'>('UNPAID');
     const [searchTerm, setSearchTerm] = useState('');
     const [dateRange, setDateRange] = useState<{start: string, end: string}>({ start: '', end: '' });
     const [selectedTag, setSelectedTag] = useState<string>('ALL');
@@ -93,6 +92,8 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
     const [newTagInput, setNewTagInput] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [showMobileFilters, setShowMobileFilters] = useState(false);
+    const [displayLimit, setDisplayLimit] = useState(50);
     const [payModalData, setPayModalData] = useState<ExpenseItem | null>(null);
     const [payAmount, setPayAmount] = useState(0);
     const [payMethod, setPayMethod] = useState('BANK_TRANSFER');
@@ -137,6 +138,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
     };
 
     const filteredBills = useMemo(() => {
+        setDisplayLimit(50); // Reset pagination on filter change
         let list = allBills;
         if (activeTab !== 'ALL') list = list.filter(b => b.paymentStatus === activeTab);
         if (searchTerm) {
@@ -529,62 +531,137 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                 </div>
 
                 {/* === CONTROLS & FILTERS === */}
-                <div className="bg-white border-b border-gray-200 p-4 space-y-4 shrink-0 shadow-sm z-10">
+                <div className="bg-white border-b border-gray-200 shrink-0 shadow-sm z-10">
                     {viewMode === 'SUPPLIER_DETAIL' && (
-                        <div className="flex items-center gap-4 mb-2">
+                        <div className="flex items-center gap-4 px-4 pt-3 pb-1">
                             <button onClick={() => { setViewMode('LIST'); setSelectedSupplierId(null); setSearchTerm(''); setSelectedBillIds(new Set()); }} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"><ArrowLeft size={20}/></button>
                             <div>
-                                <h2 className="text-xl font-black text-[#1A1A1A]">{suppliers.find(s => s.id === selectedSupplierId)?.name}</h2>
-                                <p className="text-xs text-gray-500 font-bold uppercase">Supplier Account Details (ID: {selectedSupplierId})</p>
+                                <h2 className="text-lg font-black text-[#1A1A1A]">{suppliers.find(s => s.id === selectedSupplierId)?.name}</h2>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase">Supplier Account (ID: {selectedSupplierId})</p>
                             </div>
                         </div>
                     )}
-                    <div className="flex flex-col md:flex-row gap-3">
-                        <div className="relative flex-grow md:flex-grow-0 md:w-64">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16}/>
-                            <input type="text" placeholder="🔍 搜索公司 / ID / 备注..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-3 bg-gray-50 border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#FFD700] transition-all outline-none"/>
-                            {searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-200 transition-colors"><X size={14} /></button>}
+                    
+                    {/* Row 1: Search + Filter Toggle (always visible) */}
+                    <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+                        <div className="relative flex-grow">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14}/>
+                            <input type="text" placeholder="🔍 搜索公司 / ID / 备注..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-9 pr-8 py-2.5 bg-gray-50 border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#FFD700] transition-all outline-none"/>
+                            {searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 rounded-full"><X size={14}/></button>}
                         </div>
-                        <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
-                            {[{ label: '今日 (Today)', value: 'TODAY' }, { label: '昨日 (Yest)', value: 'YESTERDAY' }, { label: '本周 (Week)', value: 'THIS_WEEK' }, { label: '本月 (Month)', value: 'THIS_MONTH' }, { label: '上月 (Last)', value: 'LAST_MONTH' }].map(item => (
-                                <button key={item.value} onClick={() => applyQuickDate(item.value as any)} className="px-3 py-1.5 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-[10px] font-bold whitespace-nowrap text-gray-600 transition-all shadow-sm">{item.label}</button>
+                        <button onClick={() => setShowMobileFilters(!showMobileFilters)} className={`sm:hidden p-2.5 rounded-xl border transition-all shrink-0 ${showMobileFilters ? 'bg-[#1A1A1A] text-[#FFD700] border-[#FFD700]' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
+                            <Filter size={16}/>
+                        </button>
+                    </div>
+
+                    {/* Row 2: Quick dates + Date range (collapsible on mobile) */}
+                    <div className={`${showMobileFilters ? 'flex' : 'hidden'} sm:flex flex-col sm:flex-row gap-2 px-4 pb-2`}>
+                        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
+                            {[{ label: '今日', value: 'TODAY' }, { label: '昨日', value: 'YESTERDAY' }, { label: '本周', value: 'THIS_WEEK' }, { label: '本月', value: 'THIS_MONTH' }, { label: '上月', value: 'LAST_MONTH' }].map(item => (
+                                <button key={item.value} onClick={() => applyQuickDate(item.value as any)} className="px-2.5 py-1.5 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 rounded-lg text-[10px] font-bold whitespace-nowrap text-gray-500 transition-all">{item.label}</button>
                             ))}
                         </div>
-                        <div className="flex items-center bg-white border border-gray-200 rounded-xl p-1 shadow-sm ml-auto md:ml-0">
-                            <div className="flex items-center px-2 text-gray-400 border-r border-gray-100"><CalendarRange size={14} /></div>
-                            <input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({...prev, start: e.target.value}))} className="bg-transparent text-xs font-bold p-1.5 outline-none text-gray-700 w-28 text-center cursor-pointer"/>
-                            <span className="text-gray-300 font-light px-1">to</span>
-                            <input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({...prev, end: e.target.value}))} className="bg-transparent text-xs font-bold p-1.5 outline-none text-gray-700 w-28 text-center cursor-pointer"/>
-                            {(dateRange.start || dateRange.end) && <button onClick={() => setDateRange({start:'', end:''})} className="p-1 hover:bg-gray-100 rounded-full text-gray-400"><X size={12}/></button>}
+                        <div className="flex items-center bg-white border border-gray-200 rounded-xl p-1 shadow-sm">
+                            <CalendarRange size={12} className="text-gray-400 mx-1.5 shrink-0"/>
+                            <input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({...prev, start: e.target.value}))} className="bg-transparent text-[10px] font-bold p-1 outline-none text-gray-700 w-24 cursor-pointer"/>
+                            <span className="text-gray-300 text-[10px]">→</span>
+                            <input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({...prev, end: e.target.value}))} className="bg-transparent text-[10px] font-bold p-1 outline-none text-gray-700 w-24 cursor-pointer"/>
+                            {(dateRange.start || dateRange.end) && <button onClick={() => setDateRange({start:'', end:''})} className="p-0.5 hover:bg-gray-100 rounded-full text-gray-400"><X size={10}/></button>}
                         </div>
                     </div>
-                    <div className="flex flex-col md:flex-row justify-between items-center gap-3">
-                        <div className="flex gap-2 overflow-x-auto scrollbar-hide w-full md:w-auto">
+
+                    {/* Row 3: Status tabs + actions */}
+                    <div className="flex items-center justify-between gap-2 px-4 pb-3">
+                        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide flex-grow">
                             {TABS.map(tab => (
-                                <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`px-6 py-2 rounded-xl text-xs font-black border-b-4 transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? tab.color : 'bg-white text-gray-400 border-transparent hover:bg-gray-50'}`}>{tab.label}{activeTab === tab.id && <span className="bg-white/20 px-1.5 rounded text-[10px] ml-1">{filteredBills.length}</span>}</button>
+                                <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`px-3 py-1.5 rounded-lg text-[10px] font-black border-b-2 transition-all whitespace-nowrap ${activeTab === tab.id ? tab.color : 'bg-white text-gray-400 border-transparent hover:bg-gray-50'}`}>
+                                    {tab.label.split(' ')[0]}
+                                    {activeTab === tab.id && <span className="ml-1 text-[9px] opacity-70">{filteredBills.length}</span>}
+                                </button>
                             ))}
                         </div>
-                        <div className="flex gap-2 w-full md:w-auto items-center">
-                            {unpaidFilteredBills.length > 0 && <button onClick={handleSelectAll} className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap ${selectedBillIds.size > 0 && selectedBillIds.size === unpaidFilteredBills.length ? 'bg-[#1A1A1A] text-[#FFD700]' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}><ListChecks size={16}/> {selectedBillIds.size > 0 && selectedBillIds.size === unpaidFilteredBills.length ? '取消全选' : '全选未付'}</button>}
-                            <div className="relative"><select value={selectedTag} onChange={e => setSelectedTag(e.target.value)} className="bg-gray-50 border-none rounded-xl pl-4 pr-8 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#FFD700] w-full md:w-auto appearance-none"><option value="ALL">🔖 所有标签 (All Tags)</option>{availableTags.map(t => <option key={t} value={t}>{t}</option>)}</select><div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"><ChevronDown size={12}/></div></div>
+                        <div className="flex gap-1.5 shrink-0">
+                            {unpaidFilteredBills.length > 0 && <button onClick={handleSelectAll} className={`p-2 rounded-lg text-[10px] font-bold transition-all ${selectedBillIds.size > 0 && selectedBillIds.size === unpaidFilteredBills.length ? 'bg-[#1A1A1A] text-[#FFD700]' : 'bg-gray-100 text-gray-500'}`} title="全选未付"><ListChecks size={14}/></button>}
+                            <div className="relative">
+                                <select value={selectedTag} onChange={e => setSelectedTag(e.target.value)} className="bg-gray-50 border-none rounded-lg pl-2 pr-6 py-2 text-[10px] font-bold outline-none appearance-none w-20">
+                                    <option value="ALL">🔖 All</option>
+                                    {availableTags.map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 {/* === MAIN CONTENT === */}
-                <div className="flex-grow overflow-y-auto p-4 md:p-6 bg-[#F5F7FA] pb-32">
+                <div className="flex-grow overflow-y-auto p-3 md:p-6 bg-[#F5F7FA] pb-32">
                     {loading ? (
                         <div className="flex items-center justify-center h-40"><Loader2 size={32} className="animate-spin text-gray-400"/></div>
                     ) : filteredBills.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-20 text-gray-300"><Filter size={64} className="mb-4 opacity-20"/><p className="font-black text-sm">没有找到相关账单</p></div>
                     ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {filteredBills.map(bill => {
-                                const isPaid = bill.paymentStatus === 'PAID';
-                                const isOverdue = !isPaid && new Date() > new Date(bill.dueDate || '9999-12-31');
-                                const sup = suppliers.find(s => s.name === bill.company);
-                                const isSelected = selectedBillIds.has(bill.id);
-                                return (
+                        <>
+                            {/* MOBILE: Compact Row Layout */}
+                            <div className="sm:hidden space-y-1.5">
+                                {filteredBills.slice(0, displayLimit).map(bill => {
+                                    const isPaid = bill.paymentStatus === 'PAID';
+                                    const isOverdue = !isPaid && new Date() > new Date(bill.dueDate || '9999-12-31');
+                                    const sup = suppliers.find(s => s.name === bill.company);
+                                    const isSelected = selectedBillIds.has(bill.id);
+                                    const amt = bill.totalBillAmount || bill.amount || 0;
+                                    const outstanding = bill.outstandingAmount || 0;
+                                    return (
+                                        <div 
+                                            key={bill.id}
+                                            onClick={() => { if (!isPaid) toggleSelection(bill.id); }}
+                                            className={`bg-white rounded-xl p-3 flex items-center gap-3 border-l-4 transition-all active:scale-[0.99] ${isPaid ? 'border-l-green-500' : isOverdue ? 'border-l-red-500' : 'border-l-orange-400'} ${isSelected ? 'ring-2 ring-[#FFD700] ring-offset-1' : ''}`}
+                                        >
+                                            {/* Checkbox */}
+                                            {!isPaid && (
+                                                <div className={`w-5 h-5 rounded shrink-0 border-2 flex items-center justify-center ${isSelected ? 'bg-[#1A1A1A] border-[#1A1A1A] text-[#FFD700]' : 'border-gray-300'}`}>
+                                                    {isSelected && <CheckSquare size={12} strokeWidth={3}/>}
+                                                </div>
+                                            )}
+                                            {/* Company + Category */}
+                                            <div className="flex-grow min-w-0">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="font-bold text-sm text-[#1A1A1A] truncate">{bill.company}</span>
+                                                    {sup && <span className="bg-[#FFD700] text-black text-[8px] font-mono px-1 py-0.5 rounded font-bold shrink-0">{sup.id}</span>}
+                                                </div>
+                                                <div className="flex items-center gap-1.5 mt-0.5">
+                                                    <span className="text-[9px] text-gray-400 font-mono">{bill.time.split('T')[0]}</span>
+                                                    {bill.category && <span className="text-[8px] bg-blue-50 text-blue-600 px-1 py-0.5 rounded font-bold truncate max-w-[80px]">{FLAT_CATEGORIES.find(c => c.id === bill.category)?.label.split('(')[0] || bill.category}</span>}
+                                                </div>
+                                            </div>
+                                            {/* Amount */}
+                                            <div className="text-right shrink-0">
+                                                <div className="text-xs font-black font-mono text-[#1A1A1A]">RM {amt.toFixed(2)}</div>
+                                                {!isPaid && outstanding > 0 && (
+                                                    <div className="text-[9px] font-bold text-red-500 font-mono">欠 {outstanding.toFixed(2)}</div>
+                                                )}
+                                                {isPaid && <div className="text-[9px] font-bold text-green-600">✓ Paid</div>}
+                                            </div>
+                                            {/* Action buttons */}
+                                            <div className="flex flex-col gap-1 shrink-0">
+                                                {!isPaid ? (
+                                                    <button onClick={(e) => { e.stopPropagation(); setPayModalData(bill); setPayAmount(outstanding); }} className="bg-[#1A1A1A] text-[#FFD700] px-2 py-1 rounded-md text-[9px] font-black">Pay</button>
+                                                ) : (
+                                                    <button onClick={(e) => { e.stopPropagation(); handleUndoPayment(bill); }} className="bg-yellow-50 text-yellow-600 border border-yellow-200 px-1.5 py-1 rounded-md text-[9px] font-bold"><RotateCcw size={10}/></button>
+                                                )}
+                                                <button onClick={(e) => { e.stopPropagation(); handleOpenForm(bill); }} className="bg-gray-100 text-gray-500 px-2 py-1 rounded-md text-[9px]"><Edit3 size={10}/></button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* DESKTOP/TABLET: Card Layout */}
+                            <div className="hidden sm:grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {filteredBills.slice(0, displayLimit).map(bill => {
+                                    const isPaid = bill.paymentStatus === 'PAID';
+                                    const isOverdue = !isPaid && new Date() > new Date(bill.dueDate || '9999-12-31');
+                                    const sup = suppliers.find(s => s.name === bill.company);
+                                    const isSelected = selectedBillIds.has(bill.id);
+                                    return (
                                     <div key={bill.id} className={`bg-white rounded-[1.5rem] p-5 shadow-sm border-l-[6px] transition-all hover:shadow-lg group relative ${isPaid ? 'border-l-green-500' : isOverdue ? 'border-l-red-500' : 'border-l-orange-400'} ${isSelected ? 'ring-2 ring-offset-2 ring-[#FFD700]' : ''}`}>
                                         <div className="flex justify-between items-start mb-3">
                                             <div className="flex items-center gap-3">
@@ -621,7 +698,20 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                                     </div>
                                 )
                             })}
-                        </div>
+                            </div>
+
+                            {/* Load More Button */}
+                            {filteredBills.length > displayLimit && (
+                                <div className="flex justify-center mt-4 mb-8">
+                                    <button 
+                                        onClick={() => setDisplayLimit(prev => prev + 50)} 
+                                        className="bg-white border border-gray-200 text-gray-600 px-6 py-3 rounded-xl text-xs font-bold shadow-sm hover:shadow-md transition-all active:scale-95 flex items-center gap-2"
+                                    >
+                                        <ChevronDown size={14}/> 加载更多 ({displayLimit} / {filteredBills.length})
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
 
@@ -637,12 +727,14 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
 
                 {/* === FOOTER STATS === */}
                 {selectedBillIds.size === 0 && (
-                    <div className="bg-white border-t border-gray-200 p-4 shrink-0 flex justify-between items-center safe-area-bottom">
-                        <div className="text-xs font-bold text-gray-500">Showing {stats.count} bills</div>
-                        <div className="flex gap-6 text-right">
-                            {stats.cn > 0 && <div><div className="text-[9px] text-gray-400 uppercase font-black">Total Credit</div><div className="text-sm font-black text-orange-600">RM {stats.cn.toLocaleString()}</div></div>}
-                            <div><div className="text-[9px] text-gray-400 uppercase font-black">Total Amount</div><div className="text-sm font-black text-[#1A1A1A]">RM {stats.total.toLocaleString()}</div></div>
-                            <div><div className="text-[9px] text-gray-400 uppercase font-black">Total Outstanding</div><div className="text-lg font-black text-red-600">RM {stats.outstanding.toLocaleString()}</div></div>
+                    <div className="bg-white border-t border-gray-200 p-3 sm:p-4 shrink-0 flex justify-between items-center safe-area-bottom">
+                        <div className="text-[10px] sm:text-xs font-bold text-gray-500">
+                            {filteredBills.length > displayLimit ? `显示 ${displayLimit} / ${filteredBills.length}` : `共 ${stats.count} 笔`}
+                        </div>
+                        <div className="flex gap-3 sm:gap-6 text-right">
+                            {stats.cn > 0 && <div><div className="text-[8px] sm:text-[9px] text-gray-400 uppercase font-black">Credit</div><div className="text-xs sm:text-sm font-black text-orange-600 font-mono">RM {stats.cn.toLocaleString()}</div></div>}
+                            <div><div className="text-[8px] sm:text-[9px] text-gray-400 uppercase font-black">Total</div><div className="text-xs sm:text-sm font-black text-[#1A1A1A] font-mono">RM {stats.total.toLocaleString()}</div></div>
+                            <div><div className="text-[8px] sm:text-[9px] text-gray-400 uppercase font-black">Outstanding</div><div className="text-sm sm:text-lg font-black text-red-600 font-mono">RM {stats.outstanding.toLocaleString()}</div></div>
                         </div>
                     </div>
                 )}
