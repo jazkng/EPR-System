@@ -63,13 +63,16 @@ const CATEGORY_LABELS: Record<string, string> = {
     'MARKETING': '营销 (Marketing)',
     'LICENSE': '执照 (License)',
     'MBB_COMM': '银行手续费 (Maybank)',
-    'DIVIDEND': '股东分红 (Dividend)'
+    'DIVIDEND': '股东分红 (Dividend)',
+    'STAFF_MEAL': '员工餐 (Staff Meal)',
+    'DEPOSIT': '押金 (Deposit)'
 };
 
 const categorizeExpense = (category: string) => {
     const c = category?.toUpperCase() || 'OTHER';
+    if (c.includes('DEPOSIT')) return 'ASSET'; // 押金不算费用
     if (['INGREDIENT', 'MEAT', 'SEAFOOD', 'VEG', 'DRY', 'SAUCE', 'BEVERAGE', 'PACKAGING', 'GAS', 'SUPPLIER', 'HQ'].some(k => c.includes(k))) return 'COGS';
-    if (['SALARY', 'EPF', 'SOCSO', 'ADVANCE', 'COMMISSION', 'STAFF_ADVANCE', 'ALLOWANCE', 'PAYROLL'].some(k => c.includes(k))) return 'LABOR';
+    if (['SALARY', 'EPF', 'SOCSO', 'ADVANCE', 'COMMISSION', 'STAFF_ADVANCE', 'ALLOWANCE', 'PAYROLL', 'STAFF_MEAL'].some(k => c.includes(k))) return 'LABOR';
     return 'OPEX'; 
 };
 
@@ -202,7 +205,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         };
 
         const revenueDetails = {
-            cash: 0, ewallet: 0, debitCard: 0, creditCard: 0, delivery: 0, totalRevenue: 0, variance: 0 
+            cash: 0, tng: 0, debitCard: 0, creditCard: 0, delivery: 0, totalRevenue: 0, variance: 0 
         };
 
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
@@ -217,23 +220,26 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 : 0;
             const deliveryAmt = Number(del);
 
-            const rawTotal = Number(s.sales?.total || 0);
-            const calculatedTotal = cashAmt + tngAmt + duitnowAmt + cardAmt + deliveryAmt;
+            // sales.total = 堂食 POS 总额（不含 delivery）
+            // 总营收 = POS 堂食 + 外卖平台到账
+            const posTotal = Number(s.sales?.total || 0);
+            const posCalculated = cashAmt + tngAmt + duitnowAmt + cardAmt;
+            const storeSales = Math.max(posTotal, posCalculated);
             
-            revenueDetails.totalRevenue += Math.max(rawTotal, calculatedTotal);
+            revenueDetails.totalRevenue += storeSales + deliveryAmt;
             revenueDetails.cash += cashAmt;
-            revenueDetails.ewallet += tngAmt; 
+            revenueDetails.tng += tngAmt; 
             revenueDetails.debitCard += duitnowAmt;
             revenueDetails.creditCard += cardAmt;
             revenueDetails.delivery += deliveryAmt;
             revenueDetails.variance += varianceAmt;
         });
 
-        const totalPaymentMethodVolume = revenueDetails.cash + revenueDetails.ewallet + revenueDetails.debitCard + revenueDetails.creditCard; 
+        const totalPaymentMethodVolume = revenueDetails.cash + revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard; 
         const cashPercentage = totalPaymentMethodVolume > 0 ? (revenueDetails.cash / totalPaymentMethodVolume) * 100 : 0;
-        const ewalletPercentage = totalPaymentMethodVolume > 0 ? ((revenueDetails.ewallet + revenueDetails.debitCard + revenueDetails.creditCard) / totalPaymentMethodVolume) * 100 : 0;
+        const ewalletPercentage = totalPaymentMethodVolume > 0 ? ((revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard) / totalPaymentMethodVolume) * 100 : 0;
 
-        let totalCOGS = 0, totalLabor = 0, totalOPEX = 0;
+        let totalCOGS = 0, totalLabor = 0, totalOPEX = 0, totalDeposits = 0;
         const groups: Record<string, CostGroup> = {};
 
         const addCost = (amount: number, category: string, label?: string, isPending: boolean = false) => {
@@ -241,6 +247,14 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             
             const catKey = category ? category.toUpperCase() : 'OTHER';
             const type = categorizeExpense(catKey);
+
+            // ASSET（押金）不计入损益，单独追踪
+            if (type === 'ASSET') {
+                totalDeposits += amount;
+                if (!groups[catKey]) groups[catKey] = { id: catKey, label: label || CATEGORY_LABELS[catKey] || '押金 (Deposit)', amount: 0, type, isPending };
+                groups[catKey].amount += amount;
+                return;
+            }
             
             if (!isPending) {
                 if (type === 'COGS') totalCOGS += amount;
@@ -304,19 +318,25 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
         const totalExpenses = totalCOGS + totalLabor + totalOPEX;
         const grossProfit = revenueDetails.totalRevenue - totalCOGS;
-        const netProfit = grossProfit - (totalLabor + totalOPEX) + revenueDetails.variance;
+        // Fix #4: 净利润 = 经营利润，不含现金差异
+        const netProfit = grossProfit - (totalLabor + totalOPEX);
+        // 含差异的实际净利
+        const adjustedNetProfit = netProfit + revenueDetails.variance;
 
         const cogsMargin = revenueDetails.totalRevenue > 0 ? (totalCOGS / revenueDetails.totalRevenue) * 100 : 0;
         const laborMargin = revenueDetails.totalRevenue > 0 ? (totalLabor / revenueDetails.totalRevenue) * 100 : 0;
         const opexMargin = revenueDetails.totalRevenue > 0 ? (totalOPEX / revenueDetails.totalRevenue) * 100 : 0;
         const netMargin = revenueDetails.totalRevenue > 0 ? (netProfit / revenueDetails.totalRevenue) * 100 : 0;
 
-        // Daily Sales Trend Data
+        // Fix #8: Daily Sales Trend — 与总营收逻辑一致（POS堂食 + delivery）
         const dailySalesMap: Record<string, number> = {};
         const dailyExpenseMap: Record<string, number> = {};
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
             const d = s.date.split('T')[0];
-            dailySalesMap[d] = (dailySalesMap[d] || 0) + Number(s.sales?.total || 0);
+            const posTotal = Number(s.sales?.total || 0);
+            const posCal = Number(s.sales?.cash || 0) + Number(s.sales?.tng || 0) + Number(s.sales?.duitnow || 0) + Number(s.sales?.card || 0);
+            const delivery = s.sales?.deliveryBreakdown ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0) : 0;
+            dailySalesMap[d] = (dailySalesMap[d] || 0) + Math.max(posTotal, posCal) + Number(delivery);
             const dayExp = s.expenses?.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0) || 0;
             dailyExpenseMap[d] = (dailyExpenseMap[d] || 0) + dayExp;
         });
@@ -330,13 +350,14 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
         return {
             revenueDetails, percentages: { cash: cashPercentage, ewallet: ewalletPercentage },
-            grossProfit, netProfit, netMargin,
-            costs: { totalCOGS, totalLabor, totalOPEX, totalExpenses },
+            grossProfit, netProfit, adjustedNetProfit, netMargin,
+            costs: { totalCOGS, totalLabor, totalOPEX, totalExpenses, totalDeposits },
             margins: { cogs: cogsMargin, labor: laborMargin, opex: opexMargin },
             lists: {
                 cogsList: Object.values(groups).filter(g => g.type === 'COGS').sort((a,b) => b.amount - a.amount),
                 laborList: Object.values(groups).filter(g => g.type === 'LABOR').sort((a,b) => b.amount - a.amount),
-                opexList: Object.values(groups).filter(g => g.type === 'OPEX').sort((a,b) => b.amount - a.amount)
+                opexList: Object.values(groups).filter(g => g.type === 'OPEX').sort((a,b) => b.amount - a.amount),
+                depositList: Object.values(groups).filter(g => g.type === 'ASSET').sort((a,b) => b.amount - a.amount)
             },
             fees: { debitFee, creditFee, totalCommission },
             dailySales, avgDailySales, settlementCount
@@ -645,9 +666,12 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             <p className="text-[9px] text-emerald-500 font-bold mt-1 relative z-10">毛利率 {analytics.revenueDetails.totalRevenue > 0 ? ((analytics.grossProfit / analytics.revenueDetails.totalRevenue) * 100).toFixed(1) : '0'}%</p>
                                         </div>
                                         <div className={`${analytics.netProfit >= 0 ? 'bg-[#1A1A1A]' : 'bg-red-900'} p-4 md:p-5 rounded-2xl shadow-xl relative overflow-hidden group`}>
-                                            <p className="text-[9px] md:text-[10px] font-bold text-[#FFD700] uppercase mb-1 tracking-wider relative z-10">净利润 (Net Profit)</p>
+                                            <p className="text-[9px] md:text-[10px] font-bold text-[#FFD700] uppercase mb-1 tracking-wider relative z-10">经营净利 (Operating Profit)</p>
                                             <p className="text-xl md:text-2xl font-black text-white font-mono relative z-10">{formatMoney(analytics.netProfit)}</p>
                                             <p className="text-[9px] text-[#FFD700]/80 font-bold mt-1 relative z-10">净利率 {analytics.netMargin.toFixed(1)}%</p>
+                                            {analytics.revenueDetails.variance !== 0 && (
+                                                <p className="text-[8px] text-white/50 font-mono mt-0.5 relative z-10">含差异后: {formatMoney(analytics.adjustedNetProfit)}</p>
+                                            )}
                                         </div>
                                     </div>
 
@@ -793,17 +817,25 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                     
                                     {/* Cash Variance + Payment Mix */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
-                                            <div>
-                                                <h4 className="font-bold text-sm text-[#1A1A1A] flex items-center gap-2"><Calculator size={14} className="text-gray-400"/> 现金差异 (Variance)</h4>
-                                                <p className="text-[10px] text-gray-400 mt-0.5">Daily settlement variance total</p>
+                                        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <h4 className="font-bold text-sm text-[#1A1A1A] flex items-center gap-2"><Calculator size={14} className="text-gray-400"/> 现金差异 (Variance)</h4>
+                                                    <p className="text-[10px] text-gray-400 mt-0.5">不计入经营净利，仅供参考</p>
+                                                </div>
+                                                <div className={`text-xl font-black font-mono ${analytics.revenueDetails.variance >= 0 ? 'text-gray-400' : 'text-red-600'}`}>
+                                                    {analytics.revenueDetails.variance > 0 ? '+' : ''}{formatMoney(analytics.revenueDetails.variance)}
+                                                </div>
                                             </div>
-                                            <div className={`text-xl font-black font-mono ${analytics.revenueDetails.variance >= 0 ? 'text-gray-400' : 'text-red-600'}`}>
-                                                {analytics.revenueDetails.variance > 0 ? '+' : ''}{formatMoney(analytics.revenueDetails.variance)}
-                                            </div>
+                                            {analytics.revenueDetails.variance !== 0 && (
+                                                <div className="mt-2 pt-2 border-t border-gray-100 flex justify-between text-[10px]">
+                                                    <span className="text-gray-400 font-bold">含差异实际净利</span>
+                                                    <span className={`font-mono font-black ${analytics.adjustedNetProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatMoney(analytics.adjustedNetProfit)}</span>
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
-                                            <h4 className="font-bold text-sm text-[#1A1A1A] flex items-center gap-2 mb-3"><Wallet size={14} className="text-gray-400"/> 收款方式 (Payment Mix)</h4>
+                                            <h4 className="font-bold text-sm text-[#1A1A1A] flex items-center gap-2 mb-3"><Wallet size={14} className="text-gray-400"/> 堂食收款 (In-Store Payments)</h4>
                                             <div className="flex h-3 rounded-full overflow-hidden bg-gray-100 mb-2">
                                                 <div className="bg-green-500 transition-all duration-700" style={{ width: `${analytics.percentages.cash}%` }}></div>
                                                 <div className="bg-blue-500 transition-all duration-700" style={{ width: `${analytics.percentages.ewallet}%` }}></div>
@@ -814,6 +846,14 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             </div>
                                         </div>
                                     </div>
+
+                                    {/* Deposit notice (if any) */}
+                                    {analytics.costs.totalDeposits > 0 && (
+                                        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[10px] text-gray-500 font-bold">
+                                            <Info size={12} className="shrink-0"/>
+                                            押金 (Deposit) {formatMoney(analytics.costs.totalDeposits)} 不计入损益（属于资产，非费用）
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -848,7 +888,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                     )}
 
                                     <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm">
-                                        <h4 className="font-black text-sm text-[#1A1A1A] mb-6 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> 支付方式占比 (Payment Methods)</h4>
+                                        <h4 className="font-black text-sm text-[#1A1A1A] mb-6 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> 堂食收款方式 (In-Store Payment Methods)</h4>
                                         <div className="flex h-4 rounded-full overflow-hidden mb-4 bg-gray-100">
                                             <div className="bg-green-500 transition-all duration-1000" style={{ width: `${analytics.percentages.cash}%` }}></div>
                                             <div className="bg-blue-500 transition-all duration-1000" style={{ width: `${analytics.percentages.ewallet}%` }}></div>
@@ -866,11 +906,11 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                     <span className="text-xs font-bold text-blue-700 flex items-center gap-2"><CreditCard size={14}/> Digital (Bank/QR)</span>
                                                     <span className="text-lg font-black text-blue-800">{analytics.percentages.ewallet.toFixed(1)}%</span>
                                                 </div>
-                                                <div className="text-xl font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.ewallet + analytics.revenueDetails.debitCard + analytics.revenueDetails.creditCard)}</div>
+                                                <div className="text-xl font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.tng + analytics.revenueDetails.debitCard + analytics.revenueDetails.creditCard)}</div>
                                                 <div className="mt-2 text-[10px] text-blue-600 space-y-0.5">
                                                     <div className="flex justify-between"><span>Debit Card:</span><span>{formatMoney(analytics.revenueDetails.debitCard)}</span></div>
                                                     <div className="flex justify-between"><span>Credit Card:</span><span>{formatMoney(analytics.revenueDetails.creditCard)}</span></div>
-                                                    <div className="flex justify-between"><span>TNG eWallet:</span><span>{formatMoney(analytics.revenueDetails.ewallet)}</span></div>
+                                                    <div className="flex justify-between"><span>TNG eWallet:</span><span>{formatMoney(analytics.revenueDetails.tng)}</span></div>
                                                 </div>
                                             </div>
                                         </div>
@@ -1206,7 +1246,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             <p className="text-xs font-black uppercase mb-2">REVENUE</p>
                                             <div className="flex justify-between text-sm mb-1"><span>Total Revenue</span><span className="font-mono font-bold">RM {Number(analytics.revenueDetails.totalRevenue || 0).toFixed(2)}</span></div>
                                             <div className="flex justify-between text-xs text-gray-500"><span>- Cash</span><span className="font-mono">RM {Number(analytics.revenueDetails.cash || 0).toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-xs text-gray-500"><span>- Digital/Card</span><span className="font-mono">RM {Number((analytics.revenueDetails.ewallet || 0) + (analytics.revenueDetails.creditCard || 0) + (analytics.revenueDetails.debitCard || 0)).toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-xs text-gray-500"><span>- Digital/Card</span><span className="font-mono">RM {Number((analytics.revenueDetails.tng || 0) + (analytics.revenueDetails.creditCard || 0) + (analytics.revenueDetails.debitCard || 0)).toFixed(2)}</span></div>
                                         </div>
                                         <div>
                                             <p className="text-xs font-black uppercase mb-2">EXPENSES</p>
