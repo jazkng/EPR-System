@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { DollarSign, Save, Calendar, CheckCircle2, Calculator, X, Plus, MinusCircle, Building2, Info, RotateCcw, Printer, FileDown, Loader2, Wallet, Banknote, CreditCard, ToggleLeft, ToggleRight, CalendarDays, CheckSquare, Square, UserX, ChevronLeft, ChevronRight, RefreshCw, LockOpen, Landmark, Ban, History, FileText } from 'lucide-react';
 import { Employee, PayrollRecord, ExpenseItem, RosterStatus } from '../../../types';
@@ -60,6 +59,12 @@ const calculateEPF = (gross: number, isEmployer: boolean) => {
 };
 
 const SOCSO_EMPLOYER_LOOKUP: Record<number, number> = {
+    // Low wage brackets (per PERKESO Jadual Caruman)
+    100: 0.40, 200: 0.70, 300: 1.20, 400: 1.75, 500: 2.30, 600: 2.80, 700: 3.35, 800: 3.90, 900: 4.40,
+    1000: 4.95, 1100: 5.45, 1200: 5.95, 1300: 6.50, 1400: 7.00, 1500: 7.50, 1600: 8.05, 1700: 8.55, 
+    1800: 9.05, 1900: 9.60, 2000: 10.10, 2100: 14.65, 2200: 16.35, 2300: 18.15, 2400: 19.85, 2500: 21.65,
+    2600: 23.35, 2700: 25.15, 2800: 26.85, 2900: 28.65,
+    // Standard brackets
     3000: 51.65, 3100: 53.35, 3200: 55.15, 3300: 56.85, 3400: 58.65,
     3500: 60.35, 3600: 62.15, 3700: 63.85, 3800: 65.65, 3900: 67.35,
     4000: 69.05, 4100: 70.85, 4200: 72.55, 4300: 74.35, 4400: 76.05,
@@ -69,24 +74,48 @@ const SOCSO_EMPLOYER_LOOKUP: Record<number, number> = {
     6000: 104.15
 };
 
+const SOCSO_EMPLOYEE_LOOKUP: Record<number, number> = {
+    100: 0.10, 200: 0.20, 300: 0.30, 400: 0.50, 500: 0.60, 600: 0.70, 700: 0.85, 800: 1.00, 900: 1.10,
+    1000: 1.25, 1100: 1.35, 1200: 1.50, 1300: 1.65, 1400: 1.75, 1500: 1.90, 1600: 2.05, 1700: 2.15,
+    1800: 2.30, 1900: 2.45, 2000: 2.55, 2100: 3.65, 2200: 4.10, 2300: 4.55, 2400: 4.95, 2500: 5.40,
+    2600: 5.85, 2700: 6.30, 2800: 6.70, 2900: 7.15,
+    3000: 7.60, 3100: 7.85, 3200: 8.10, 3300: 8.35, 3400: 8.60, 3500: 8.85, 3600: 9.10, 3700: 9.35,
+    3800: 9.65, 3900: 9.90, 4000: 10.15, 4100: 10.40, 4200: 10.65, 4300: 10.90, 4400: 11.15,
+    4500: 11.40, 4600: 11.65, 4700: 11.90, 4800: 12.15, 4900: 12.45, 5000: 12.70,
+    5100: 12.95, 5200: 13.20, 5300: 13.45, 5400: 13.70, 5500: 13.95, 5600: 14.20,
+    5700: 14.45, 5800: 14.70, 5900: 14.95, 6000: 15.20
+};
+
 const calculateSOCSO = (wage: number, isEmployer: boolean) => {
     if (wage <= 0) return 0;
     const cappedWage = Math.min(wage, 6000);
     if (cappedWage < 30) return isEmployer ? 0.40 : 0.10;
     const bracket = Math.ceil(cappedWage / 100) * 100;
     
+    const lookup = isEmployer ? SOCSO_EMPLOYER_LOOKUP : SOCSO_EMPLOYEE_LOOKUP;
+    if (lookup[bracket]) return lookup[bracket];
+    
+    // Fallback formula (should not normally be needed)
     if (!isEmployer) {
         let amount = (bracket * 0.005);
         if (bracket > 200) amount = amount - 0.25;
         return parseFloat(amount.toFixed(2));
     } else {
-        if (bracket >= 3000 && SOCSO_EMPLOYER_LOOKUP[bracket]) {
-            return SOCSO_EMPLOYER_LOOKUP[bracket];
-        }
         let amount = (bracket * 0.0175);
         if (bracket > 200) amount = amount - 0.85; 
         return parseFloat(amount.toFixed(2));
     }
+};
+
+const EIS_LOOKUP: Record<number, number> = {
+    100: 0.05, 200: 0.10, 300: 0.15, 400: 0.20, 500: 0.25, 600: 0.30, 700: 0.35, 800: 0.40, 900: 0.45,
+    1000: 0.50, 1100: 0.55, 1200: 0.60, 1300: 0.65, 1400: 0.70, 1500: 0.75, 1600: 0.80, 1700: 0.85,
+    1800: 0.90, 1900: 0.95, 2000: 1.00, 2100: 2.10, 2200: 2.20, 2300: 2.30, 2400: 2.40, 2500: 2.50,
+    2600: 2.60, 2700: 2.70, 2800: 2.80, 2900: 2.90, 3000: 3.00, 3100: 3.10, 3200: 3.20, 3300: 3.30,
+    3400: 3.40, 3500: 3.50, 3600: 3.60, 3700: 3.70, 3800: 3.80, 3900: 3.90, 4000: 4.00,
+    4100: 4.10, 4200: 4.20, 4300: 4.30, 4400: 4.40, 4500: 4.50, 4600: 4.60, 4700: 4.70,
+    4800: 4.80, 4900: 4.90, 5000: 5.00, 5100: 5.10, 5200: 5.20, 5300: 5.30, 5400: 5.40,
+    5500: 5.50, 5600: 5.60, 5700: 5.70, 5800: 5.80, 5900: 5.90, 6000: 6.00
 };
 
 const calculateEIS = (wage: number, isEmployer: boolean) => {
@@ -94,6 +123,11 @@ const calculateEIS = (wage: number, isEmployer: boolean) => {
     const cappedWage = Math.min(wage, 6000);
     if (cappedWage <= 30) return 0.05;
     const bracket = Math.ceil(cappedWage / 100) * 100;
+    
+    // EIS rate is same for employee and employer (0.2% each)
+    if (EIS_LOOKUP[bracket]) return EIS_LOOKUP[bracket];
+    
+    // Fallback
     let amount = (bracket * 0.002);
     if (bracket > 200) amount = amount - 0.10; 
     return parseFloat(amount.toFixed(2));
@@ -185,10 +219,13 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
 
     // 1. Create Default Entry (Moved inside component to access selectedMonth)
     const createDefaultEntry = (emp: Employee, advances: ExpenseItem[]): DetailedPayrollEntry => {
-        // Strict Name Matching for Advance
+        // Strict Name Matching for Advance (from standalone_expenses)
         const totalAdv = advances
             .filter(a => a.company === emp.name) // EXACT MATCH
             .reduce((sum, a) => sum + (a.amount || 0), 0);
+
+        // LOAN SYNC: Also include outstanding loan balance from employee profile
+        const loanBalance = (emp.loanRecords || []).reduce((sum, r) => sum + (r.type === 'BORROW' ? r.amount : -r.amount), 0);
 
         const isLocal = emp.nationality.includes('Malaysian') || emp.nationality.includes('🇲🇾');
         const historicalBasic = getHistoricalSalary(emp, selectedMonth);
@@ -200,10 +237,10 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
             bonus: 0,
             latePenalty: 0,
             unpaidLeave: 0,
-            advanceLoan: totalAdv,
+            advanceLoan: totalAdv + Math.max(0, loanBalance), // Combine advances + outstanding loans
             ee_epf: 0, ee_socso: 0, ee_eis: 0, ee_pcb: 0,
             er_epf: 0, er_socso: 0, er_eis: 0,
-            note: '',
+            note: loanBalance > 0 ? `[Auto] Outstanding loan: RM${loanBalance.toFixed(2)}` : '',
             autoCalc: true,
             hasEPF: isLocal || emp.hasEPF === true,
             hasSOCSO: isLocal,
@@ -256,6 +293,10 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                     const realTimeAdvance = advances
                         .filter(a => a.company === emp.name)
                         .reduce((sum, a) => sum + (a.amount || 0), 0);
+                    
+                    // LOAN SYNC: Include outstanding loan from employee profile
+                    const empLoanBalance = (emp.loanRecords || []).reduce((sum: number, r: any) => sum + (r.type === 'BORROW' ? r.amount : -r.amount), 0);
+                    const totalAdvanceWithLoan = realTimeAdvance + Math.max(0, empLoanBalance);
 
                     if (savedDetail) {
                         initialData[emp.id] = {
@@ -265,8 +306,8 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                             bonus: 0,
                             latePenalty: Number(savedDetail.penalty) || 0,
                             unpaidLeave: 0,
-                            // FORCE OVERRIDE ADVANCE IF IN DRAFT MODE
-                            advanceLoan: existingRecord.status === 'DRAFT' ? realTimeAdvance : (Number(savedDetail.advanceLoan) || 0),
+                            // FORCE OVERRIDE ADVANCE+LOAN IF IN DRAFT MODE
+                            advanceLoan: existingRecord.status === 'DRAFT' ? totalAdvanceWithLoan : (Number(savedDetail.advanceLoan) || 0),
                             ee_epf: Number(savedDetail.ee_epf) || 0,
                             ee_socso: Number(savedDetail.ee_socso) || 0,
                             ee_eis: Number(savedDetail.ee_eis) || 0,
@@ -827,7 +868,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                 <div className="w-full md:w-2/3 flex flex-row justify-between items-center md:justify-end gap-2 md:gap-6 text-right mt-2 md:mt-0">
                     {entry.advanceLoan > 0 && (
                         <div className="hidden md:block">
-                            <div className="text-[9px] text-red-400 uppercase font-bold mb-0.5">Advance</div>
+                            <div className="text-[9px] text-red-400 uppercase font-bold mb-0.5">Advance/Loan</div>
                             <div className="text-xs font-mono font-bold text-red-600">-RM {entry.advanceLoan.toFixed(2)}</div>
                         </div>
                     )}
@@ -1130,18 +1171,28 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                                     <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Late Penalty (迟到)</label><input type="number" disabled={isPosted} value={editingEntry.latePenalty} onChange={e => updateEntry(editingEmpId, {latePenalty: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/></div>
                                     <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Unpaid Leave (无薪假)</label><input type="number" disabled={isPosted} value={editingEntry.unpaidLeave} onChange={e => updateEntry(editingEmpId, {unpaidLeave: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/></div>
                                     
-                                    {/* ADVANCE HISTORY BUTTON */}
+                                    {/* ADVANCE + LOAN SYNC */}
                                     <div className="relative">
                                         <div className="flex justify-between items-center mb-1">
-                                            <label className="input-label text-[10px] font-bold text-gray-400 uppercase block">Advance/Loan (预支)</label>
-                                            {currentEmpAdvances.length > 0 && (
-                                                <button 
-                                                    onClick={() => setShowAdvanceHistory(true)}
-                                                    className="text-[9px] bg-red-50 text-red-600 px-2 py-0.5 rounded-lg border border-red-100 hover:bg-red-100 flex items-center gap-1 font-bold"
-                                                >
-                                                    <History size={10}/> {currentEmpAdvances.length} records
-                                                </button>
-                                            )}
+                                            <label className="input-label text-[10px] font-bold text-gray-400 uppercase block">Advance/Loan (预支/借款)</label>
+                                            <div className="flex gap-1">
+                                                {(() => {
+                                                    const empLoan = (editingEmp?.loanRecords || []).reduce((s: number, r: any) => s + (r.type === 'BORROW' ? r.amount : -r.amount), 0);
+                                                    return empLoan > 0 ? (
+                                                        <span className="text-[9px] bg-red-50 text-red-600 px-2 py-0.5 rounded-lg border border-red-100 font-bold">
+                                                            💰 欠款: RM{empLoan.toFixed(0)}
+                                                        </span>
+                                                    ) : null;
+                                                })()}
+                                                {currentEmpAdvances.length > 0 && (
+                                                    <button 
+                                                        onClick={() => setShowAdvanceHistory(true)}
+                                                        className="text-[9px] bg-red-50 text-red-600 px-2 py-0.5 rounded-lg border border-red-100 hover:bg-red-100 flex items-center gap-1 font-bold"
+                                                    >
+                                                        <History size={10}/> {currentEmpAdvances.length} records
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                         <input type="number" disabled={isPosted} value={editingEntry.advanceLoan} onChange={e => updateEntry(editingEmpId, {advanceLoan: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/>
                                     </div>

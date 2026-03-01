@@ -22,33 +22,55 @@ const ACCOUNTING_CATEGORIES: Record<string, { label: string, options: {id: strin
             { id: 'INGREDIENT_VEG', label: '食材-蔬果 (Veg/Fruit)' },
             { id: 'INGREDIENT_DRY', label: '食材-干货 (Dry Goods)' },
             { id: 'INGREDIENT_SAUCE', label: '食材-酱料 (Sauce)' },
+            { id: 'INGREDIENT_NOODLE', label: '食材-面条 (Noodle/Rice)' },
+            { id: 'INGREDIENT_OIL', label: '食材-油类 (Cooking Oil)' },
+            { id: 'INGREDIENT_EGG', label: '食材-蛋类 (Eggs)' },
+            { id: 'INGREDIENT_FROZEN', label: '食材-冷冻品 (Frozen)' },
             { id: 'BEVERAGE', label: '水吧原料 (Beverage)' },
             { id: 'PACKAGING', label: '包装材料 (Packaging)' },
             { id: 'GAS_COGS', label: '烹饪煤气 (Cooking Gas)' },
-            { id: 'SUPPLIER', label: '一般进货 (General)' }
+            { id: 'SUPPLIER', label: '一般进货 (General)' },
+            { id: 'SUPPLIER_HQ', label: '总店进货 (HQ Supply)' }
         ]
     },
     'OPEX (营运开支 - 固定/半固定)': {
         label: 'OPEX (Operating Expenses)',
         options: [
             { id: 'RENT', label: '租金 (Rent)' },
-            { id: 'UTILITIES', label: '水电费 (Utilities)' },
+            { id: 'UTILITIES_ELECTRIC', label: '电费 (Electricity)' },
+            { id: 'UTILITIES_WATER', label: '水费 (Water)' },
+            { id: 'UTILITIES_GAS', label: '管道煤气 (Piped Gas)' },
+            { id: 'UTILITIES', label: '水电杂费 (Utilities-Other)' },
+            { id: 'INTERNET', label: '网络/电话 (Internet/Telco)' },
             { id: 'SALARY', label: '薪资 (Salary)' },
-            { id: 'STAFF_MEAL', label: '员工餐 (Staff Meal)' }, 
+            { id: 'STAFF_MEAL', label: '员工餐 (Staff Meal)' },
+            { id: 'STAFF_ACCOMMODATION', label: '员工住宿 (Staff Housing)' },
             { id: 'MAINTENANCE', label: '维修保养 (Maintenance)' },
+            { id: 'PEST_CONTROL', label: '虫害防治 (Pest Control)' },
+            { id: 'CLEANING', label: '清洁服务 (Cleaning Service)' },
+            { id: 'WASTE', label: '垃圾处理 (Waste Disposal)' },
             { id: 'MARKETING', label: '营销广告 (Marketing)' },
             { id: 'PROFESSIONAL', label: '专业服务/律师 (Professional/Legal)' },
-            { id: 'SUPPLIES', label: '杂项耗材 (Supplies - Cleaning/Office)' },
+            { id: 'ACCOUNTING', label: '会计服务 (Accounting)' },
+            { id: 'INSURANCE', label: '保险 (Insurance)' },
+            { id: 'SUPPLIES', label: '杂项耗材 (Supplies)' },
             { id: 'LICENSE', label: '执照/订阅 (License/Sub)' },
-            { id: 'LOGISTICS', label: '物流运输 (Logistics)' }
+            { id: 'LOGISTICS', label: '物流运输 (Logistics)' },
+            { id: 'TRANSPORT', label: '交通/油费 (Transport/Fuel)' },
+            { id: 'PRINTING', label: '印刷品 (Printing)' },
+            { id: 'MISC_OPEX', label: '其他杂费 (Miscellaneous)' }
         ]
     },
     'CAPEX (资本支出 - 资产增加)': {
         label: 'CAPEX (Capital Expenditure)',
         options: [
             { id: 'EQUIPMENT', label: '设备采购 (Equipment)' },
+            { id: 'KITCHEN_EQUIPMENT', label: '厨房设备 (Kitchen Equipment)' },
+            { id: 'FURNITURE', label: '家具/桌椅 (Furniture)' },
             { id: 'RENOVATION', label: '装修工程 (Renovation)' },
-            { id: 'DEPOSIT', label: '押金 (Deposit)' }
+            { id: 'IT_SYSTEM', label: '电脑/系统 (IT/POS System)' },
+            { id: 'DEPOSIT', label: '押金 (Deposit)' },
+            { id: 'SIGNAGE', label: '招牌/装饰 (Signage/Décor)' }
         ]
     }
 };
@@ -510,23 +532,23 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             <div className="bg-[#F5F7FA] w-full h-full md:max-w-6xl md:h-[95vh] md:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
                 
                 {/* === HEADER === */}
-                <div className="bg-[#1A1A1A] p-4 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
-                    <div className="flex items-center gap-4">
-                        <div className="bg-[#FFD700] text-black p-2.5 rounded-2xl shadow-lg"><CreditCard size={24}/></div>
+                <div className="bg-[#1A1A1A] px-3 py-2.5 sm:p-4 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
+                    <div className="flex items-center gap-2 sm:gap-4">
+                        <div className="bg-[#FFD700] text-black p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl shadow-lg"><CreditCard size={18} className="sm:hidden"/><CreditCard size={24} className="hidden sm:block"/></div>
                         <div>
-                            <h3 className="font-serif font-black text-xl tracking-wide">应付账款中心</h3>
-                            <p className="text-[10px] text-gray-400 font-mono uppercase tracking-widest mt-0.5">ACCOUNTS PAYABLE</p>
+                            <h3 className="font-serif font-black text-base sm:text-xl tracking-wide">应付账款中心</h3>
+                            <p className="text-[8px] sm:text-[10px] text-gray-400 font-mono uppercase tracking-widest">ACCOUNTS PAYABLE</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
                         <ModuleGuideButton module="AP" />
-                        <button onClick={() => handleExportPDF(filteredBills)} disabled={isGeneratingPdf} className="bg-white/10 hover:bg-white/20 text-white px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50">
-                            {isGeneratingPdf ? <Loader2 size={16} className="animate-spin"/> : <FileDown size={16}/>} <span className="hidden sm:inline">导出 PDF</span>
+                        <button onClick={() => handleExportPDF(filteredBills)} disabled={isGeneratingPdf} className="bg-white/10 hover:bg-white/20 text-white p-2 sm:px-3 sm:py-2.5 rounded-lg sm:rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50">
+                            {isGeneratingPdf ? <Loader2 size={14} className="animate-spin"/> : <FileDown size={14}/>} <span className="hidden sm:inline">导出 PDF</span>
                         </button>
-                        <button onClick={() => handleOpenForm()} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all active:scale-95">
-                            <Plus size={18}/> 录入新账单
+                        <button onClick={() => handleOpenForm()} className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-2 sm:px-4 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1.5 shadow-lg transition-all active:scale-95">
+                            <Plus size={14}/> <span className="hidden sm:inline">录入新账单</span><span className="sm:hidden">新增</span>
                         </button>
-                        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full ml-1"><X/></button>
+                        <button onClick={onClose} className="p-1.5 sm:p-2 hover:bg-white/10 rounded-full"><X size={20}/></button>
                     </div>
                 </div>
 
@@ -717,10 +739,25 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
 
                 {/* === BATCH PAYMENT BAR === */}
                 {selectedBillIds.size > 0 && (
-                    <div className="absolute bottom-20 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:w-[600px] z-30 animate-in slide-in-from-bottom-10 fade-in duration-300">
-                        <div className="bg-[#1A1A1A] text-white p-4 rounded-2xl shadow-2xl flex justify-between items-center border border-[#FFD700]/30">
-                            <div className="flex items-center gap-4"><div className="bg-[#FFD700] text-black w-10 h-10 rounded-xl flex items-center justify-center font-black animate-bounce shadow-lg">{selectedBillIds.size}</div><div><p className="text-[10px] text-gray-400 uppercase font-bold tracking-widest">Selected Total</p><p className="text-xl font-mono font-black text-[#FFD700]">RM {batchTotalAmount.toFixed(2)}</p></div></div>
-                            <div className="flex gap-2"><button onClick={() => setSelectedBillIds(new Set())} className="px-4 py-2 rounded-xl text-xs font-bold text-gray-400 hover:bg-white/10 transition-colors">Cancel</button><button onClick={() => handleExportPDF(allBills.filter(b => selectedBillIds.has(b.id)))} disabled={isGeneratingPdf} className="bg-white/10 hover:bg-white/20 text-white px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50 text-[#FFD700]" title="Export Selected PDF">{isGeneratingPdf ? <Loader2 size={16} className="animate-spin"/> : <FileDown size={16}/>} <span className="hidden sm:inline">导出选中 (Export)</span></button><button onClick={() => setIsBatchPayModalOpen(true)} className="bg-[#FFD700] text-black px-6 py-2.5 rounded-xl text-sm font-black shadow-lg hover:bg-white transition-all active:scale-95 flex items-center gap-2"><CheckCircle2 size={18}/> 批量支付</button></div>
+                    <div className="absolute bottom-14 sm:bottom-20 left-2 right-2 sm:left-4 sm:right-4 md:left-1/2 md:-translate-x-1/2 md:w-[600px] z-30 animate-in slide-in-from-bottom-10 fade-in duration-300">
+                        <div className="bg-[#1A1A1A] text-white px-3 py-2.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-2xl flex items-center gap-2 sm:gap-4 border border-[#FFD700]/30">
+                            {/* Count badge */}
+                            <div className="bg-[#FFD700] text-black w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center font-black text-sm sm:text-base shrink-0">{selectedBillIds.size}</div>
+                            {/* Amount */}
+                            <div className="flex-grow min-w-0">
+                                <p className="text-[8px] sm:text-[10px] text-gray-400 uppercase font-bold tracking-wider">Selected</p>
+                                <p className="text-base sm:text-xl font-mono font-black text-[#FFD700] truncate">RM {batchTotalAmount.toFixed(2)}</p>
+                            </div>
+                            {/* Actions */}
+                            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                                <button onClick={() => setSelectedBillIds(new Set())} className="text-[10px] sm:text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-lg hover:bg-white/10 font-bold">✕</button>
+                                <button onClick={() => handleExportPDF(allBills.filter(b => selectedBillIds.has(b.id)))} disabled={isGeneratingPdf} className="bg-white/10 p-2 rounded-lg text-[#FFD700]" title="导出选中">
+                                    {isGeneratingPdf ? <Loader2 size={14} className="animate-spin"/> : <FileDown size={14}/>}
+                                </button>
+                                <button onClick={() => setIsBatchPayModalOpen(true)} className="bg-[#FFD700] text-black px-3 py-2 sm:px-5 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-black shadow-lg hover:bg-white transition-all active:scale-95 flex items-center gap-1.5">
+                                    <CheckCircle2 size={14}/> <span className="hidden sm:inline">批量支付</span><span className="sm:hidden">支付</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

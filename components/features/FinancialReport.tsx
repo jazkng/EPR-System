@@ -40,13 +40,22 @@ const CATEGORY_LABELS: Record<string, string> = {
     'INGREDIENT_VEG': '食材-蔬果 (Veg)',
     'INGREDIENT_DRY': '食材-干货 (Dry)',
     'INGREDIENT_SAUCE': '食材-酱料 (Sauce)',
+    'INGREDIENT_NOODLE': '食材-面条 (Noodle)',
+    'INGREDIENT_OIL': '食材-油类 (Oil)',
+    'INGREDIENT_EGG': '食材-蛋类 (Eggs)',
+    'INGREDIENT_FROZEN': '食材-冷冻品 (Frozen)',
     'BEVERAGE': '水吧原料 (Beverage)',
     'PACKAGING': '包装材料 (Packaging)',
     'GAS_COGS': '烹饪煤气 (Gas)',
     'SUPPLIER': '一般进货 (General)',
+    'SUPPLIER_HQ': '总店进货 (HQ)',
     'SALARY': '薪资支出 (Salary)',
     'RENT': '租金 (Rent)',
-    'UTILITIES': '水电费 (Utilities)',
+    'UTILITIES': '水电杂费 (Utilities)',
+    'UTILITIES_ELECTRIC': '电费 (Electricity)',
+    'UTILITIES_WATER': '水费 (Water)',
+    'UTILITIES_GAS': '管道煤气 (Piped Gas)',
+    'INTERNET': '网络/电话 (Internet)',
     'SALES': '营业收入 (Sales)',
     'TRANSFER': '资金转账 (Transfer)',
     'BILL': '固定账单 (Bill)',
@@ -54,25 +63,41 @@ const CATEGORY_LABELS: Record<string, string> = {
     'ADJUSTMENT': '现金调整 (Adjustment)',
     'FUND': '资金注入/提取 (Fund)',
     'STAFF_ADVANCE': '员工预支 (Advance)',
+    'STAFF_MEAL': '员工餐 (Staff Meal)',
+    'STAFF_ACCOMMODATION': '员工住宿 (Housing)',
     'PAYROLL': '月度薪资 (Payroll)',
     'EPF': '公积金 (EPF)',
     'SOCSO': '社险 (SOCSO)',
     'RENOVATION': '装修 (Renovation)',
     'EQUIPMENT': '设备 (Equipment)',
+    'KITCHEN_EQUIPMENT': '厨房设备 (Kitchen)',
+    'FURNITURE': '家具/桌椅 (Furniture)',
+    'IT_SYSTEM': '电脑/系统 (IT/POS)',
+    'SIGNAGE': '招牌/装饰 (Signage)',
     'MAINTENANCE': '维修 (Maintenance)',
+    'PEST_CONTROL': '虫害防治 (Pest)',
+    'CLEANING': '清洁服务 (Cleaning)',
+    'WASTE': '垃圾处理 (Waste)',
     'MARKETING': '营销 (Marketing)',
+    'PROFESSIONAL': '专业服务 (Professional)',
+    'ACCOUNTING': '会计服务 (Accounting)',
+    'INSURANCE': '保险 (Insurance)',
     'LICENSE': '执照 (License)',
+    'LOGISTICS': '物流 (Logistics)',
+    'TRANSPORT': '交通/油费 (Transport)',
+    'PRINTING': '印刷品 (Printing)',
+    'MISC_OPEX': '其他杂费 (Misc)',
     'MBB_COMM': '银行手续费 (Maybank)',
     'DIVIDEND': '股东分红 (Dividend)',
-    'STAFF_MEAL': '员工餐 (Staff Meal)',
     'DEPOSIT': '押金 (Deposit)'
 };
 
 const categorizeExpense = (category: string) => {
     const c = category?.toUpperCase() || 'OTHER';
     if (c.includes('DEPOSIT')) return 'ASSET'; // 押金不算费用
-    if (['INGREDIENT', 'MEAT', 'SEAFOOD', 'VEG', 'DRY', 'SAUCE', 'BEVERAGE', 'PACKAGING', 'GAS', 'SUPPLIER', 'HQ'].some(k => c.includes(k))) return 'COGS';
-    if (['SALARY', 'EPF', 'SOCSO', 'ADVANCE', 'COMMISSION', 'STAFF_ADVANCE', 'ALLOWANCE', 'PAYROLL', 'STAFF_MEAL'].some(k => c.includes(k))) return 'LABOR';
+    if (['INGREDIENT', 'MEAT', 'SEAFOOD', 'VEG', 'DRY', 'SAUCE', 'NOODLE', 'OIL', 'EGG', 'FROZEN', 'BEVERAGE', 'PACKAGING', 'GAS_COGS', 'SUPPLIER', 'HQ'].some(k => c.includes(k))) return 'COGS';
+    if (['SALARY', 'EPF', 'SOCSO', 'ADVANCE', 'COMMISSION', 'STAFF_ADVANCE', 'ALLOWANCE', 'PAYROLL', 'STAFF_MEAL', 'STAFF_ACCOMMODATION'].some(k => c.includes(k))) return 'LABOR';
+    if (['EQUIPMENT', 'KITCHEN_EQUIPMENT', 'FURNITURE', 'RENOVATION', 'IT_SYSTEM', 'SIGNAGE'].some(k => c === k)) return 'CAPEX';
     return 'OPEX'; 
 };
 
@@ -239,7 +264,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const cashPercentage = totalPaymentMethodVolume > 0 ? (revenueDetails.cash / totalPaymentMethodVolume) * 100 : 0;
         const ewalletPercentage = totalPaymentMethodVolume > 0 ? ((revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard) / totalPaymentMethodVolume) * 100 : 0;
 
-        let totalCOGS = 0, totalLabor = 0, totalOPEX = 0, totalDeposits = 0;
+        let totalCOGS = 0, totalLabor = 0, totalOPEX = 0, totalDeposits = 0, totalCapex = 0;
         const groups: Record<string, CostGroup> = {};
 
         const addCost = (amount: number, category: string, label?: string, isPending: boolean = false) => {
@@ -248,10 +273,16 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             const catKey = category ? category.toUpperCase() : 'OTHER';
             const type = categorizeExpense(catKey);
 
-            // ASSET（押金）不计入损益，单独追踪
+            // ASSET（押金）& CAPEX（资本支出）不计入经营损益，单独追踪
             if (type === 'ASSET') {
                 totalDeposits += amount;
                 if (!groups[catKey]) groups[catKey] = { id: catKey, label: label || CATEGORY_LABELS[catKey] || '押金 (Deposit)', amount: 0, type, isPending };
+                groups[catKey].amount += amount;
+                return;
+            }
+            if (type === 'CAPEX') {
+                totalCapex += amount;
+                if (!groups[catKey]) groups[catKey] = { id: catKey, label: label || CATEGORY_LABELS[catKey] || catKey, amount: 0, type, isPending };
                 groups[catKey].amount += amount;
                 return;
             }
@@ -351,12 +382,13 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         return {
             revenueDetails, percentages: { cash: cashPercentage, ewallet: ewalletPercentage },
             grossProfit, netProfit, adjustedNetProfit, netMargin,
-            costs: { totalCOGS, totalLabor, totalOPEX, totalExpenses, totalDeposits },
+            costs: { totalCOGS, totalLabor, totalOPEX, totalExpenses, totalDeposits, totalCapex },
             margins: { cogs: cogsMargin, labor: laborMargin, opex: opexMargin },
             lists: {
                 cogsList: Object.values(groups).filter(g => g.type === 'COGS').sort((a,b) => b.amount - a.amount),
                 laborList: Object.values(groups).filter(g => g.type === 'LABOR').sort((a,b) => b.amount - a.amount),
                 opexList: Object.values(groups).filter(g => g.type === 'OPEX').sort((a,b) => b.amount - a.amount),
+                capexList: Object.values(groups).filter(g => g.type === 'CAPEX').sort((a,b) => b.amount - a.amount),
                 depositList: Object.values(groups).filter(g => g.type === 'ASSET').sort((a,b) => b.amount - a.amount)
             },
             fees: { debitFee, creditFee, totalCommission },
@@ -847,11 +879,21 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         </div>
                                     </div>
 
-                                    {/* Deposit notice (if any) */}
-                                    {analytics.costs.totalDeposits > 0 && (
-                                        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[10px] text-gray-500 font-bold">
-                                            <Info size={12} className="shrink-0"/>
-                                            押金 (Deposit) {formatMoney(analytics.costs.totalDeposits)} 不计入损益（属于资产，非费用）
+                                    {/* Non-operating expenditure notices */}
+                                    {(analytics.costs.totalDeposits > 0 || analytics.costs.totalCapex > 0) && (
+                                        <div className="space-y-1.5">
+                                            {analytics.costs.totalCapex > 0 && (
+                                                <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-50 border border-purple-200 text-[10px] text-purple-600 font-bold">
+                                                    <Info size={12} className="shrink-0"/>
+                                                    资本支出 (CAPEX) {formatMoney(analytics.costs.totalCapex)} 不计入经营损益（设备/装修等长期资产）
+                                                </div>
+                                            )}
+                                            {analytics.costs.totalDeposits > 0 && (
+                                                <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[10px] text-gray-500 font-bold">
+                                                    <Info size={12} className="shrink-0"/>
+                                                    押金 (Deposit) {formatMoney(analytics.costs.totalDeposits)} 不计入损益（属于资产，非费用）
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>

@@ -1,4 +1,3 @@
-
 export enum UserRole {
   BOSS = 'BOSS',
   MANAGEMENT = 'MANAGEMENT',
@@ -178,6 +177,15 @@ export interface MisconductStats {
     yellowCount: number; // 3 triggers Red
 }
 
+export interface LoanRecord {
+    id: string;
+    date: string;
+    type: 'BORROW' | 'REPAY';
+    amount: number;
+    note: string;
+    via?: string; // e.g. 'CASH', 'BANK', 'SALARY_DEDUCT'
+}
+
 export interface Employee {
     id: string;
     name: string;
@@ -216,6 +224,13 @@ export interface Employee {
     emergencyPhone?: string;
     typhoidExpiry?: string;
     foodHandlingDate?: string;
+    dateOfBirth?: string;
+    passportNo?: string;
+    workPermitNo?: string;
+    workPermitExpiry?: string;
+    eisNo?: string;
+    probationEndDate?: string;
+    contractEndDate?: string;
     attributes?: EmployeeAttributes;
     assessmentHistory?: AssessmentRecord[]; 
     assessmentYearlyLimit?: number; 
@@ -229,6 +244,10 @@ export interface Employee {
     customGuide?: RoleGuide; 
     customSop?: { start: { title: string, tasks: SOPItem[] }, end: { title: string, tasks: SOPItem[] } };
     misconductStats?: MisconductStats;
+    loanRecords?: LoanRecord[];
+    terminationType?: 'RESIGNED' | 'FIRED' | 'CONTRACT_END' | 'ABSCONDED';
+    noticeDate?: string;
+    settlementStatus?: 'PENDING' | 'SETTLED';
 }
 
 export interface StoreConfig {
