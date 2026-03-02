@@ -16,6 +16,10 @@ interface DetailedPayrollEntry {
     ot: number;        // Overtime / Commission / Variable
     bonus: number;
     
+    // Public Holiday Pay (3x)
+    holidayDays: number;     // Number of PH days worked
+    holidayPay: number;      // Auto-calculated: dailyRate * 2 * holidayDays (extra 2x on top of basic)
+    
     // Deductions (Company)
     latePenalty: number;
     unpaidLeave: number;
@@ -235,6 +239,8 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
             allowance: 0,
             ot: 0,
             bonus: 0,
+            holidayDays: 0,
+            holidayPay: 0,
             latePenalty: 0,
             unpaidLeave: 0,
             advanceLoan: totalAdv + Math.max(0, loanBalance), // Combine advances + outstanding loans
@@ -304,6 +310,8 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                             allowance: Number(savedDetail.allowance) || 0,
                             ot: 0, 
                             bonus: 0,
+                            holidayDays: Number(savedDetail.holidayDays) || 0,
+                            holidayPay: Number(savedDetail.holidayPay) || 0,
                             latePenalty: Number(savedDetail.penalty) || 0,
                             unpaidLeave: 0,
                             // FORCE OVERRIDE ADVANCE+LOAN IF IN DRAFT MODE
@@ -442,7 +450,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                 current.autoCalc = false; 
             }
             if (current.autoCalc && !isPosted) {
-                const grossForStatutory = current.basic + current.allowance + current.ot + current.bonus - current.unpaidLeave;
+                const grossForStatutory = current.basic + current.allowance + current.ot + current.bonus + (current.holidayPay || 0) - current.unpaidLeave;
                 const safeGross = Math.max(0, grossForStatutory);
                 
                 if (current.hasEPF) {
@@ -469,7 +477,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
     const triggerRecalculateStatutory = (id: string) => {
         setPayrollData(prev => {
             const current = { ...prev[id], autoCalc: true }; 
-            const grossForStatutory = current.basic + current.allowance + current.ot + current.bonus - current.unpaidLeave;
+            const grossForStatutory = current.basic + current.allowance + current.ot + current.bonus + (current.holidayPay || 0) - current.unpaidLeave;
             const safeGross = Math.max(0, grossForStatutory);
             
             if (current.hasEPF) {
@@ -633,7 +641,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
     };
 
     const getTotals = (entry: DetailedPayrollEntry) => {
-        const gross = entry.basic + entry.allowance + entry.ot + entry.bonus;
+        const gross = entry.basic + entry.allowance + entry.ot + entry.bonus + (entry.holidayPay || 0);
         const employeeDeductions = entry.latePenalty + entry.unpaidLeave + entry.advanceLoan + entry.ee_epf + entry.ee_socso + entry.ee_eis + entry.ee_pcb;
         const netPay = gross - employeeDeductions;
         const employerCost = entry.er_epf + entry.er_socso + entry.er_eis;
@@ -664,7 +672,9 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                     employeeId: id,
                     employeeName: emp?.name || 'Unknown',
                     basicSalary: entry.basic,
-                    allowance: entry.allowance + entry.ot + entry.bonus,
+                    allowance: entry.allowance + entry.ot + entry.bonus + (entry.holidayPay || 0),
+                    holidayDays: entry.holidayDays || 0,
+                    holidayPay: entry.holidayPay || 0,
                     penalty: entry.latePenalty + entry.unpaidLeave,
                     advanceLoan: entry.advanceLoan,
                     ee_epf: entry.ee_epf, ee_socso: entry.ee_socso, ee_eis: entry.ee_eis, ee_pcb: entry.ee_pcb,
@@ -758,7 +768,9 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                 const t = getTotals(entry);
                 return {
                     employeeId: id, employeeName: emp?.name || 'Unknown',
-                    basicSalary: entry.basic, allowance: entry.allowance + entry.ot + entry.bonus,
+                    basicSalary: entry.basic, allowance: entry.allowance + entry.ot + entry.bonus + (entry.holidayPay || 0),
+                    holidayDays: entry.holidayDays || 0,
+                    holidayPay: entry.holidayPay || 0,
                     penalty: entry.latePenalty + entry.unpaidLeave, advanceLoan: entry.advanceLoan,
                     ee_epf: entry.ee_epf, ee_socso: entry.ee_socso, ee_eis: entry.ee_eis, ee_pcb: entry.ee_pcb,
                     er_epf: entry.er_epf, er_socso: entry.er_socso, er_eis: entry.er_eis,
@@ -1160,6 +1172,28 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                                     <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Fixed Allowance (津贴)</label><input type="number" disabled={isPosted} value={editingEntry.allowance} onChange={e => updateEntry(editingEmpId, {allowance: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
                                     <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">OT / Commission</label><input type="number" disabled={isPosted} value={editingEntry.ot} onChange={e => updateEntry(editingEmpId, {ot: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
                                     <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Bonus (奖金)</label><input type="number" disabled={isPosted} value={editingEntry.bonus} onChange={e => updateEntry(editingEmpId, {bonus: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
+                                    {/* PUBLIC HOLIDAY PAY (3X) */}
+                                    <div className="col-span-full bg-red-50 p-3 rounded-xl border border-red-100">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <span className="text-[10px] font-black text-red-700 uppercase">🎌 Public Holiday Pay (公假3倍工资)</span>
+                                            <span className="text-[9px] text-gray-400">Daily Rate = Basic / 26</span>
+                                        </div>
+                                        <div className="grid grid-cols-3 gap-3 items-end">
+                                            <div>
+                                                <label className="text-[9px] font-bold text-gray-400 uppercase mb-1 block">PH Days Worked</label>
+                                                <input type="number" disabled={isPosted} min="0" step="0.5" value={editingEntry.holidayDays || ''} onChange={e => { const days = parseFloat(e.target.value) || 0; const dailyRate = editingEntry.basic / 26; const extra = parseFloat((dailyRate * 2 * days).toFixed(2)); updateEntry(editingEmpId, { holidayDays: days, holidayPay: extra }); }} className="w-full p-3 bg-white border-2 border-red-200 rounded-xl text-sm font-black text-center outline-none focus:border-red-400" placeholder="0"/>
+                                            </div>
+                                            <div>
+                                                <label className="text-[9px] font-bold text-gray-400 uppercase mb-1 block">Daily Rate (÷26)</label>
+                                                <div className="w-full p-3 bg-white/50 border border-gray-200 rounded-xl text-sm font-mono text-gray-500 text-center">RM {(editingEntry.basic / 26).toFixed(2)}</div>
+                                            </div>
+                                            <div>
+                                                <label className="text-[9px] font-bold text-red-600 uppercase mb-1 block">Extra 2x Pay</label>
+                                                <div className={`w-full p-3 rounded-xl text-sm font-black font-mono text-center ${(editingEntry.holidayPay || 0) > 0 ? 'bg-red-100 border-2 border-red-300 text-red-700' : 'bg-gray-100 border border-gray-200 text-gray-400'}`}>+ RM {(editingEntry.holidayPay || 0).toFixed(2)}</div>
+                                            </div>
+                                        </div>
+                                        <p className="text-[9px] text-gray-400 mt-2">计算方式: 底薪 ÷ 26 × 2 × 天数 = 额外补贴 (基本薪已包含1倍, 此处补额外2倍 = 总共3倍)</p>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1473,6 +1507,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                                             {editingEntry.allowance > 0 && <div className="flex justify-between"><span>Allowances (津贴)</span><span className="font-mono">{editingEntry.allowance.toFixed(2)}</span></div>}
                                             {editingEntry.ot > 0 && <div className="flex justify-between"><span>Overtime / Comm (加班/佣金)</span><span className="font-mono">{editingEntry.ot.toFixed(2)}</span></div>}
                                             {editingEntry.bonus > 0 && <div className="flex justify-between"><span>Bonus (奖金)</span><span className="font-mono">{editingEntry.bonus.toFixed(2)}</span></div>}
+                                            {(editingEntry.holidayPay || 0) > 0 && <div className="flex justify-between text-red-700"><span>PH 3x Pay (公假补贴) — {editingEntry.holidayDays || 0}天</span><span className="font-mono">{(editingEntry.holidayPay || 0).toFixed(2)}</span></div>}
                                             <div className="flex justify-between font-bold pt-2 border-t border-gray-200 mt-2"><span>GROSS PAY (总收入)</span><span className="font-mono">{getTotals(editingEntry).gross.toFixed(2)}</span></div>
                                         </div>
                                     </div>
@@ -1616,7 +1651,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                                         <td className="p-2 border-r border-gray-100 font-bold">{emp.name}</td>
                                         <td className="p-2 text-right border-r border-gray-100">{entry.basic.toFixed(2)}</td>
                                         <td className="p-2 text-right border-r border-gray-100">{entry.allowance.toFixed(2)}</td>
-                                        <td className="p-2 text-right border-r border-gray-100">{(entry.ot + entry.bonus).toFixed(2)}</td>
+                                        <td className="p-2 text-right border-r border-gray-100">{(entry.ot + entry.bonus + (entry.holidayPay || 0)).toFixed(2)}</td>
                                         <td className="p-2 text-right border-r border-gray-100 text-red-600">{entry.advanceLoan > 0 ? `(${entry.advanceLoan.toFixed(2)})` : '-'}</td>
                                         <td className="p-2 text-right border-r border-gray-100 text-red-600">{entry.ee_epf > 0 ? `(${entry.ee_epf.toFixed(2)})` : '-'}</td>
                                         <td className="p-2 text-right border-r border-gray-100 text-red-600">{entry.ee_socso > 0 ? `(${entry.ee_socso.toFixed(2)})` : '-'}</td>

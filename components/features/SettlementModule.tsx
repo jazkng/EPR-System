@@ -244,6 +244,12 @@ const HistoryDetailModal = ({ record, onClose, onDelete }: { record: SettlementR
                                 <span className="flex items-center gap-1"><CreditCard size={12}/> Credit Card</span>
                                 <span className="font-mono font-bold text-gray-800">RM {totalCard.toFixed(2)}</span>
                             </div>
+                            {(record.sales.amex || 0) > 0 && (
+                                <div className="flex justify-between text-xs text-gray-600">
+                                    <span className="flex items-center gap-1"><CreditCard size={12}/> Amex</span>
+                                    <span className="font-mono font-bold text-blue-700">RM {(record.sales.amex || 0).toFixed(2)}</span>
+                                </div>
+                            )}
                         </div>
 
                         {/* 精美的外卖数据 UI (Delivery Breakdown) */}
@@ -257,21 +263,30 @@ const HistoryDetailModal = ({ record, onClose, onDelete }: { record: SettlementR
                                 
                                 <div className="grid grid-cols-2 gap-3 pt-1">
                                     {deliveryBreakdown.grab > 0 && (
-                                        <div className="bg-white p-2.5 rounded-xl border border-green-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
-                                            <span className="text-[10px] font-black text-green-700 bg-green-50 px-2.5 py-1 rounded-md">Grab</span>
-                                            <span className="font-mono font-bold text-green-800 text-xs">RM {deliveryBreakdown.grab.toFixed(2)}</span>
+                                        <div className="flex flex-col gap-1">
+                                            <div className="bg-white p-2.5 rounded-xl border border-green-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
+                                                <span className="text-[10px] font-black text-green-700 bg-green-50 px-2.5 py-1 rounded-md">Grab</span>
+                                                <span className="font-mono font-bold text-green-800 text-xs">RM {deliveryBreakdown.grab.toFixed(2)}</span>
+                                            </div>
+                                            {(deliveryBreakdown as any).grabGross > 0 && <div className="flex justify-between px-2.5 pb-1 text-[9px] text-gray-400"><span>Gross: RM {(deliveryBreakdown as any).grabGross.toFixed(2)}</span><span className="text-red-500 font-bold">-RM {((deliveryBreakdown as any).grabGross - deliveryBreakdown.grab).toFixed(2)}</span></div>}
                                         </div>
                                     )}
                                     {deliveryBreakdown.panda > 0 && (
-                                        <div className="bg-white p-2.5 rounded-xl border border-pink-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
-                                            <span className="text-[10px] font-black text-pink-700 bg-pink-50 px-2.5 py-1 rounded-md">Panda</span>
-                                            <span className="font-mono font-bold text-pink-800 text-xs">RM {deliveryBreakdown.panda.toFixed(2)}</span>
+                                        <div className="flex flex-col gap-1">
+                                            <div className="bg-white p-2.5 rounded-xl border border-pink-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
+                                                <span className="text-[10px] font-black text-pink-700 bg-pink-50 px-2.5 py-1 rounded-md">Panda</span>
+                                                <span className="font-mono font-bold text-pink-800 text-xs">RM {deliveryBreakdown.panda.toFixed(2)}</span>
+                                            </div>
+                                            {(deliveryBreakdown as any).pandaGross > 0 && <div className="flex justify-between px-2.5 pb-1 text-[9px] text-gray-400"><span>Gross: RM {(deliveryBreakdown as any).pandaGross.toFixed(2)}</span><span className="text-red-500 font-bold">-RM {((deliveryBreakdown as any).pandaGross - deliveryBreakdown.panda).toFixed(2)}</span></div>}
                                         </div>
                                     )}
                                     {deliveryBreakdown.shopee > 0 && (
-                                        <div className="bg-white p-2.5 rounded-xl border border-orange-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
-                                            <span className="text-[10px] font-black text-orange-700 bg-orange-50 px-2.5 py-1 rounded-md">Shopee</span>
-                                            <span className="font-mono font-bold text-orange-800 text-xs">RM {deliveryBreakdown.shopee.toFixed(2)}</span>
+                                        <div className="flex flex-col gap-1">
+                                            <div className="bg-white p-2.5 rounded-xl border border-orange-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
+                                                <span className="text-[10px] font-black text-orange-700 bg-orange-50 px-2.5 py-1 rounded-md">Shopee</span>
+                                                <span className="font-mono font-bold text-orange-800 text-xs">RM {deliveryBreakdown.shopee.toFixed(2)}</span>
+                                            </div>
+                                            {(deliveryBreakdown as any).shopeeGross > 0 && <div className="flex justify-between px-2.5 pb-1 text-[9px] text-gray-400"><span>Gross: RM {(deliveryBreakdown as any).shopeeGross.toFixed(2)}</span><span className="text-red-500 font-bold">-RM {((deliveryBreakdown as any).shopeeGross - deliveryBreakdown.shopee).toFixed(2)}</span></div>}
                                         </div>
                                     )}
                                     {deliveryBreakdown.lalamove > 0 && (
@@ -341,7 +356,7 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     const [businessDate, setBusinessDate] = useState<string>(getBusinessDateStr(storeConfig.businessDayCutoff || 4));
     
     const [salesData, setSalesData] = useState({
-        storeHubTotal: 0, refundTotal: 0, cash: 0, tng: 0, duitnow: 0, card: 0, grab: 0, panda: 0, shopee: 0, lalamove: 0
+        storeHubTotal: 0, refundTotal: 0, cash: 0, tng: 0, duitnow: 0, card: 0, amex: 0, grab: 0, panda: 0, shopee: 0, lalamove: 0, grabGross: 0, pandaGross: 0, shopeeGross: 0
     });
     
     const [shiftExpenses, setShiftExpenses] = useState<ExpenseItem[]>([]);
@@ -380,8 +395,9 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                 setSalesData({
                     storeHubTotal: savedSales.storeHubTotal || 0, refundTotal: savedSales.refundTotal || 0, 
                     cash: savedSales.cash || 0, tng: savedSales.tng || 0, duitnow: savedSales.duitnow || 0, 
-                    card: savedSales.card || 0, grab: savedSales.grab || 0, panda: savedSales.panda || 0,
-                    shopee: savedSales.shopee || 0, lalamove: savedSales.lalamove || 0
+                    card: savedSales.card || 0, amex: savedSales.amex || 0, grab: savedSales.grab || 0, panda: savedSales.panda || 0,
+                    shopee: savedSales.shopee || 0, lalamove: savedSales.lalamove || 0,
+                    grabGross: savedSales.grabGross || 0, pandaGross: savedSales.pandaGross || 0, shopeeGross: savedSales.shopeeGross || 0
                 });
                 
                 setShiftExpenses(shift.expenseList || []);
@@ -419,7 +435,7 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
 
     const totals = useMemo(() => {
         const s = salesData;
-        const posSales = (Number(s.cash)||0) + (Number(s.tng)||0) + (Number(s.duitnow)||0) + (Number(s.card)||0);
+        const posSales = (Number(s.cash)||0) + (Number(s.tng)||0) + (Number(s.duitnow)||0) + (Number(s.card)||0) + (Number(s.amex)||0);
         const deliverySales = (Number(s.grab)||0) + (Number(s.panda)||0) + (Number(s.shopee)||0) + (Number(s.lalamove)||0);
         const totalRevenue = posSales + deliverySales;
         const totalCashOut = shiftExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
@@ -492,10 +508,12 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                 cash: salesData.cash || 0,
                 tng: salesData.tng || 0,
                 duitnow: salesData.duitnow || 0, 
-                card: salesData.card || 0, 
+                card: salesData.card || 0,
+                amex: salesData.amex || 0,
                 deliveryBreakdown: {
                     grab: salesData.grab || 0, panda: salesData.panda || 0, 
-                    shopee: salesData.shopee || 0, lalamove: salesData.lalamove || 0
+                    shopee: salesData.shopee || 0, lalamove: salesData.lalamove || 0,
+                    grabGross: salesData.grabGross || 0, pandaGross: salesData.pandaGross || 0, shopeeGross: salesData.shopeeGross || 0
                 }
             },
             expenses: shiftExpenses,
@@ -514,7 +532,7 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
             setBusinessDate(nextDateStr);
             setOpeningCounts({ 100:0, 50:0, 20:0, 10:0, 5:0, 1:0 });
             setOpeningCoins(0);
-            setSalesData({ storeHubTotal: 0, refundTotal: 0, cash: 0, tng: 0, duitnow: 0, card: 0, grab: 0, panda: 0, shopee: 0, lalamove: 0 });
+            setSalesData({ storeHubTotal: 0, refundTotal: 0, cash: 0, tng: 0, duitnow: 0, card: 0, amex: 0, grab: 0, panda: 0, shopee: 0, lalamove: 0, grabGross: 0, pandaGross: 0, shopeeGross: 0 });
             setClosingCashInput(0);
             setShiftExpenses([]);
             setVarianceReason('');
@@ -690,20 +708,50 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                                 <div className="w-32 shrink-0 flex flex-col justify-center"><span className="text-xs font-bold text-gray-600 whitespace-nowrap">Credit Card</span></div>
                                                 <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-lg text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-[#FFD700]" value={salesData.card || ''} onChange={e => setSalesData({...salesData, card: parseFloat(e.target.value)})} /></div>
                                             </div>
+
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-500 shrink-0"><CreditCard size={16}/></div>
+                                                <div className="w-32 shrink-0 flex flex-col justify-center"><span className="text-xs font-bold text-blue-600 whitespace-nowrap">Amex</span></div>
+                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-lg text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-blue-300" value={salesData.amex || ''} onChange={e => setSalesData({...salesData, amex: parseFloat(e.target.value)})} /></div>
+                                            </div>
                                             <div className="pt-2 mt-2 border-t border-gray-100 flex justify-between items-center text-xs font-bold"><span>POS Total</span><span className="font-mono text-blue-600">RM {totals.posSales.toFixed(2)}</span></div>
                                         </div>
                                         
                                         <div className="space-y-3 bg-orange-50/50 p-4 rounded-2xl border border-orange-100 shadow-sm">
                                             <h4 className="text-xs font-bold text-orange-800 uppercase border-b border-orange-200 pb-2 mb-2">Delivery Platforms (Extra Income)</h4>
-                                            {[{ key: 'grab', label: 'GrabFood', color: 'text-green-600' }, { key: 'panda', label: 'FoodPanda', color: 'text-pink-600' }, { key: 'shopee', label: 'ShopeeFood', color: 'text-orange-600' }, { key: 'lalamove', label: 'Lalamove', color: 'text-orange-500' }].map(item => (
-                                                <div key={item.key} className="flex items-center gap-3">
-                                                    <span className={`text-xs font-black w-32 shrink-0 whitespace-nowrap ${item.color}`}>{item.label}</span>
-                                                    <div className="relative flex-grow">
-                                                        <input type="number" className="w-full p-3 bg-white rounded-lg text-right font-mono font-bold text-base outline-none focus:ring-2 focus:ring-orange-300 transition-all border border-orange-100" value={(salesData as any)[item.key] || ''} onChange={e => setSalesData({...salesData, [item.key]: parseFloat(e.target.value)})} />
+                                            <div className="flex items-center gap-2 text-[9px] font-bold text-gray-400 uppercase mb-1 px-1">
+                                                <span className="w-20 shrink-0"></span>
+                                                <span className="flex-1 text-center">原价 (Gross)</span>
+                                                <span className="flex-1 text-center">到手 (Net)</span>
+                                                <span className="w-16 text-center shrink-0">佣金</span>
+                                            </div>
+                                            {[
+                                                { key: 'grab', grossKey: 'grabGross', label: 'GrabFood', color: 'text-green-600', ring: 'focus:ring-green-300' },
+                                                { key: 'panda', grossKey: 'pandaGross', label: 'FoodPanda', color: 'text-pink-600', ring: 'focus:ring-pink-300' },
+                                                { key: 'shopee', grossKey: 'shopeeGross', label: 'ShopeeFood', color: 'text-orange-600', ring: 'focus:ring-orange-300' },
+                                            ].map(item => {
+                                                const gross = (salesData as any)[item.grossKey] || 0;
+                                                const net = (salesData as any)[item.key] || 0;
+                                                const commission = gross > 0 ? gross - net : 0;
+                                                return (
+                                                    <div key={item.key} className="flex items-center gap-2">
+                                                        <span className={`text-[10px] font-black w-20 shrink-0 whitespace-nowrap ${item.color}`}>{item.label}</span>
+                                                        <input type="number" placeholder="原价" className={`flex-1 p-2.5 bg-white rounded-lg text-right font-mono font-bold text-sm outline-none focus:ring-2 ${item.ring} border border-orange-100 min-w-0`} value={(salesData as any)[item.grossKey] || ''} onChange={e => setSalesData({...salesData, [item.grossKey]: parseFloat(e.target.value) || 0})} />
+                                                        <input type="number" placeholder="到手" className={`flex-1 p-2.5 bg-white rounded-lg text-right font-mono font-bold text-sm outline-none focus:ring-2 ${item.ring} border border-orange-100 min-w-0`} value={(salesData as any)[item.key] || ''} onChange={e => setSalesData({...salesData, [item.key]: parseFloat(e.target.value) || 0})} />
+                                                        <span className={`w-16 text-right text-[10px] font-mono font-bold shrink-0 ${commission > 0 ? 'text-red-500' : 'text-gray-300'}`}>{commission > 0 ? `-${commission.toFixed(0)}` : '-'}</span>
                                                     </div>
-                                                </div>
-                                            ))}
-                                            <div className="pt-2 mt-2 border-t border-orange-200 flex justify-between items-center text-xs font-bold"><span>Delivery Total</span><span className="font-mono text-orange-600">RM {totals.deliverySales.toFixed(2)}</span></div>
+                                                );
+                                            })}
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] font-black w-20 shrink-0 whitespace-nowrap text-orange-500">Lalamove</span>
+                                                <div className="flex-1"></div>
+                                                <input type="number" placeholder="净额" className="flex-1 p-2.5 bg-white rounded-lg text-right font-mono font-bold text-sm outline-none focus:ring-2 focus:ring-orange-300 border border-orange-100 min-w-0" value={salesData.lalamove || ''} onChange={e => setSalesData({...salesData, lalamove: parseFloat(e.target.value) || 0})} />
+                                                <span className="w-16 shrink-0"></span>
+                                            </div>
+                                            <div className="pt-2 mt-2 border-t border-orange-200 space-y-1">
+                                                <div className="flex justify-between items-center text-xs font-bold"><span>Delivery Net</span><span className="font-mono text-orange-600">RM {totals.deliverySales.toFixed(2)}</span></div>
+                                                {(() => { const tGross = (Number(salesData.grabGross)||0)+(Number(salesData.pandaGross)||0)+(Number(salesData.shopeeGross)||0); const tNet = (Number(salesData.grab)||0)+(Number(salesData.panda)||0)+(Number(salesData.shopee)||0); const tComm = tGross - tNet; return tGross > 0 ? (<div className="flex justify-between items-center text-[10px]"><span className="text-gray-400">Total Commission</span><span className="font-mono font-bold text-red-500">- RM {tComm.toFixed(2)} ({tGross > 0 ? ((tComm/tGross)*100).toFixed(1) : '0'}%)</span></div>) : null; })()}
+                                            </div>
                                         </div>
                                     </div>
                                     

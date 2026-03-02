@@ -328,11 +328,15 @@ export interface SettlementRecord {
         tng: number;
         duitnow: number;
         card: number;
+        amex?: number;
         deliveryBreakdown: {
             grab: number;
             panda: number;
             shopee: number;
             lalamove: number;
+            grabGross?: number;
+            pandaGross?: number;
+            shopeeGross?: number;
         };
     };
     expenses: ExpenseItem[];

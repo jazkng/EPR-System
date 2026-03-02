@@ -36,12 +36,6 @@ const ACCOUNTING_CATEGORIES: Record<string, { label: string, options: {id: strin
     'OPEX (营运开支 - 固定/半固定)': {
         label: 'OPEX (Operating Expenses)',
         options: [
-            { id: 'RENT', label: '租金 (Rent)' },
-            { id: 'UTILITIES_ELECTRIC', label: '电费 (Electricity)' },
-            { id: 'UTILITIES_WATER', label: '水费 (Water)' },
-            { id: 'UTILITIES_GAS', label: '管道煤气 (Piped Gas)' },
-            { id: 'UTILITIES', label: '水电杂费 (Utilities-Other)' },
-            { id: 'INTERNET', label: '网络/电话 (Internet/Telco)' },
             { id: 'SALARY', label: '薪资 (Salary)' },
             { id: 'STAFF_MEAL', label: '员工餐 (Staff Meal)' },
             { id: 'STAFF_ACCOMMODATION', label: '员工住宿 (Staff Housing)' },
@@ -54,7 +48,6 @@ const ACCOUNTING_CATEGORIES: Record<string, { label: string, options: {id: strin
             { id: 'ACCOUNTING', label: '会计服务 (Accounting)' },
             { id: 'INSURANCE', label: '保险 (Insurance)' },
             { id: 'SUPPLIES', label: '杂项耗材 (Supplies)' },
-            { id: 'LICENSE', label: '执照/订阅 (License/Sub)' },
             { id: 'LOGISTICS', label: '物流运输 (Logistics)' },
             { id: 'TRANSPORT', label: '交通/油费 (Transport/Fuel)' },
             { id: 'PRINTING', label: '印刷品 (Printing)' },
