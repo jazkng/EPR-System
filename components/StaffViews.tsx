@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Shield, ChevronRight, Briefcase, Lock, User, Crown, CheckCircle2, AlertOctagon, Zap, Briefcase as BriefcaseIcon, Check, ChevronDown, ChevronUp, Clock, Sun, Moon, CheckSquare, HelpCircle, FileText, AlertCircle, Info, Smartphone } from 'lucide-react';
 import { Employee, RoleGuide, AppModule, SOPItem } from '../types';
@@ -50,6 +49,35 @@ const BURMESE_DICT: Record<string, string> = {
     "Dishwasher (洗碗)": "Dishwasher (ပန်းကန်ဆေး)",
     "Water Bar (水吧)": "Water Bar (ရေဘား)",
     "Kitchen Apprentice (厨房学徒)": "Kitchen Apprentice (အလုပ်သင်)",
+
+    // --- MODULE CARD LABELS ---
+    "厨房库存 (Kitchen K)": "မီးဖိုချောင်ပစ္စည်း (Kitchen)",
+    "水吧库存 (Bar B)": "ရေဘားပစ္စည်း (Bar)",
+    "后勤物资 (Supply S)": "ထောက်ပံ့ရေးပစ္စည်း (Supply)",
+    "燃料管理 (Fuel F)": "လောင်စာ (Fuel)",
+    "库存总览 (View)": "ကုန်ပစ္စည်းကြည့်ရန် (View)",
+    "库存盘点 (Check)": "ကုန်ပစ္စည်းစစ်ရန် (Check)",
+    "智能订货 (Ordering)": "အမှာစာ (Ordering)",
+    "智能菜谱 (Smart Menu)": "မီနူး (Menu)",
+    "每日结算 (Settlement)": "နေ့စဉ်စာရင်း (Settlement)",
+    "排班管理 (Roster)": "အလှည့်ကျဇယား (Roster)",
+    "运营日志 (Logbook)": "မှတ်တမ်း (Logbook)",
+    "SOP 稽查 (SOP Inspect)": "SOP စစ်ဆေးခြင်း (Inspect)",
+    "排队叫号 (Queue)": "တန်းစီစနစ် (Queue)",
+    "考勤总控 (Attendance Console)": "တက်ရောက်မှု (Attendance)",
+    "供应商通讯录 (Suppliers)": "ကုန်သည်များ (Suppliers)",
+    "能力评测 (Assessment)": "စွမ်းဆောင်ရည်စစ်ဆေးခြင်း (Assessment)",
+    "管理权限控制台": "စီမံခန့်ခွဲမှုစင်တာ",
+    "Management & Admin Console": "Management & Admin Console",
+
+    // --- MODULE CARD DESCRIPTIONS ---
+    "生鲜 KF / 干货 KD / 酱料 KS": "KF / KD / KS",
+    "茶 BT / 罐装 BC / 水果 BF": "BT / BC / BF",
+    "打包 SP / 杂项 SG": "SP / SG",
+    "查看库存与价值": "ကုန်ပစ္စည်းတန်ဖိုးကြည့်ရန်",
+    "执行盘点任务": "စစ်ဆေးရန်",
+    "缺席记录与排班查看 (全员)": "အားလပ်ရက်နှင့်အလှည့်ကျကြည့်ရန်",
+    "客诉、维修与突发事件": "တိုင်ကြားချက်၊ ပြုပြင်ခြင်း",
 
     // ... (Keep existing translations for duties/troubleshooting/etc. as is to save space - Assuming previous file content here) ...
     // NOTE: In a real update, I would include the full dictionary. For this patch, I'm assuming the dictionary is unchanged.
@@ -168,7 +196,8 @@ export const ManagementView: React.FC<{
     guide: RoleGuide; 
     allowedModules: AppModule[];
     hasPendingTasks?: boolean; // NEW PROP
-}> = ({ employee, guide, allowedModules, hasPendingTasks }) => {
+    lang?: 'zh' | 'my';
+}> = ({ employee, guide, allowedModules, hasPendingTasks, lang = 'zh' }) => {
   const [selectedModule, setSelectedModule] = useState<AppModule | null>(null);
 
   // Dynamically calculate which modules to show
@@ -185,7 +214,8 @@ export const ManagementView: React.FC<{
             initialTab={MODULE_DEFINITIONS[selectedModule].tab as any} 
             onBack={() => setSelectedModule(null)} 
             currentEmployee={employee} 
-            isSingleMode={true} 
+            isSingleMode={true}
+            lang={lang}
         />
     );
   }
@@ -196,8 +226,8 @@ export const ManagementView: React.FC<{
         <div className="flex items-center gap-3 mb-6">
           <div className="w-12 h-12 rounded-full bg-brandRed flex items-center justify-center text-white shadow-md"><Briefcase size={24} /></div>
           <div>
-            <h2 className="text-xl font-serif font-bold text-[#1A1A1A]">管理权限控制台</h2>
-            <p className="text-xs text-gray-500">Management & Admin Console</p>
+            <h2 className="text-xl font-serif font-bold text-[#1A1A1A]">{t('管理权限控制台', lang)}</h2>
+            <p className="text-xs text-gray-500">{t('Management & Admin Console', lang)}</p>
           </div>
         </div>
 
@@ -223,10 +253,10 @@ export const ManagementView: React.FC<{
                   <ChevronRight size={16} className="text-gray-300 group-hover:text-brandRed" />
                 </div>
                 <h3 className="font-bold text-[#1A1A1A] group-hover:text-brandRed transition-colors flex items-center gap-2">
-                    {info.label}
+                    {t(info.label, lang)}
                     {isTempAccess && <span className="bg-blue-100 text-blue-600 text-[9px] px-1.5 py-0.5 rounded font-black uppercase">Task Assigned</span>}
                 </h3>
-                <p className="text-xs text-gray-400 mt-1">{info.desc}</p>
+                <p className="text-xs text-gray-400 mt-1">{t(info.desc, lang)}</p>
               </button>
             )
           })}

@@ -81,11 +81,44 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
     const [mode, setMode] = useState<'CHECK' | 'MASTER' | 'ASSIGN'>(lockedMode || initialMode);
     
     // Firebase-backed translations (loaded once, refreshed on lang change)
-    const [translations, setTranslations] = useState<Record<string, Record<string, string>>>({ items: {}, categories: {}, units: {}, ui: {} });
+    const [fbTranslations, setFbTranslations] = useState<Record<string, Record<string, string>>>({ items: {}, categories: {}, units: {}, ui: {} });
+    
+    // Built-in fallback translations (always available, no Firebase needed)
+    const FALLBACK_MY: Record<string, Record<string, string>> = {
+        ui: {
+            '厨房': 'မီးဖိုချောင်', '水吧': 'အချိုရည်ဆိုင်', '后勤': 'ထောက်ပံ့ရေး', '燃料': 'လောင်စာ',
+            '库存盘点': 'ကုန်ပစ္စည်းစစ်ဆေး', '库存总览': 'ကုန်ပစ္စည်းအနှစ်ချုပ်',
+            '搜索': 'ရှာဖွေရန်', '保存': 'သိမ်းဆည်းရန်', '当前': 'လက်ရှိ', '最低': 'အနိမ့်ဆုံး', '最高': 'အမြင့်ဆုံး',
+            '单位': 'ယူနစ်', '品名': 'ပစ္စည်းအမည်', '数量': 'အရေအတွက်',
+            '不足': 'မလုံလောက်', '正常': 'ပုံမှန်', '充足': 'လုံလောက်',
+        },
+        categories: {
+            'FRESH': 'လတ်ဆတ် (Fresh)', 'MEAT': 'အသား (Meat)', 'SEAFOOD': 'ပင်လယ်စာ (Seafood)',
+            'VEG': 'ဟင်းသီးဟင်းရွက် (Veg)', 'NOODLE': 'ခေါက်ဆွဲ (Noodle)', 'SAUCE': 'ဆီ/ငံပြာရည် (Sauce)',
+            'DRY': 'ခြောက်သွေ့ (Dry)', 'HQ': 'ရုံးချုပ် (HQ)',
+            'TEA': 'လက်ဖက်ရည် (Tea)', 'FRUIT': 'သစ်သီး (Fruit)', 'RTD': 'ဗူးသွတ် (Drinks)',
+            'MISC': 'အခြား (Misc)', 'DRINK': 'အချိုရည် (Drink)',
+            'PACKAGING': 'ထုပ်ပိုး (Pack)', 'CLEANING': 'သန့်ရှင်းရေး (Clean)',
+            'TOOLS': 'ကိရိယာ (Tools)', 'WASTE': 'စားသုံးကုန် (Waste)', 'GENERAL': 'အထွေထွေ (General)',
+            'GAS': 'ဓာတ်ငွေ့ (Gas)', 'CHARCOAL': 'မီးသွေး (Charcoal)', 'OIL': 'ဆီ (Oil)',
+        },
+        units: {
+            'kg': 'ကီလို', 'pkt': 'ထုပ်', 'btl': 'ပုလင်း', 'ctn': 'ပုံး',
+            'roll': 'လိပ်', 'box': 'သေတ္တာ', 'tank': 'တိုင်ကီ', 'tray': 'ခွက်', 'bag': 'အိတ်', 'pc': 'ခု',
+        },
+    };
+    
+    // Merge: Firebase overrides fallback
+    const translations = {
+        items: { ...fbTranslations.items },
+        categories: { ...(lang === 'my' ? FALLBACK_MY.categories : {}), ...fbTranslations.categories },
+        units: { ...(lang === 'my' ? FALLBACK_MY.units : {}), ...fbTranslations.units },
+        ui: { ...(lang === 'my' ? FALLBACK_MY.ui : {}), ...fbTranslations.ui },
+    };
     
     useEffect(() => {
         if (lang !== 'zh') {
-            DataManager.getTranslations(lang).then(setTranslations);
+            DataManager.getTranslations(lang).then(setFbTranslations);
         }
     }, [lang]);
     
@@ -595,7 +628,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                     className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex justify-between items-center ${isSelected ? 'bg-indigo-50 border-indigo-500' : 'bg-white border-gray-200'}`}
                 >
                     <div>
-                        <div className="font-bold text-sm text-[#1A1A1A]">{item.name}</div>
+                        <div className="font-bold text-sm text-[#1A1A1A]">{tItem(item)}</div>
                         <div className="text-[10px] text-gray-400 font-mono mt-0.5">#{item.id}</div>
                     </div>
                     <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-gray-300'}`}>
@@ -612,10 +645,10 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
             return (
                 <div key={item.id} className={`p-3 rounded-xl border flex justify-between items-center transition-all ${isChecked ? 'bg-green-50 border-green-300 opacity-80' : isOutOfStock ? 'border-red-300 bg-red-50' : isLowStock ? 'border-yellow-300 bg-yellow-50' : 'border-gray-200 bg-white'}`}>
                     <div className={isChecked ? 'opacity-50' : ''}>
-                        <div className="font-bold text-sm text-[#1A1A1A]">{item.name}</div>
+                        <div className="font-bold text-sm text-[#1A1A1A]">{tItem(item)}</div>
                         <div className="text-[10px] text-gray-400 font-mono mt-0.5 flex gap-2">
                             <span className="bg-white/50 px-1 rounded">#{item.id}</span>
-                            <span>Min: {item.minLevel} {item.unit}</span>
+                            <span>Min: {item.minLevel} {tUnit(item.unit)}</span>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -648,7 +681,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                 >
                     <div className="flex justify-between items-start mb-2">
                         <div>
-                            <div className="font-bold text-sm text-[#1A1A1A]">{item.name}</div>
+                            <div className="font-bold text-sm text-[#1A1A1A]">{tItem(item)}</div>
                             <div className="text-[10px] text-gray-400 font-mono font-bold bg-white/50 px-1.5 py-0.5 rounded w-fit mt-1 border border-black/5">#{item.id}</div>
                         </div>
                         <div className="p-1 bg-white/50 rounded-lg text-gray-400"><Edit3 size={14}/></div>
@@ -657,7 +690,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                         <div>Qty: <span className={`font-bold ${isOutOfStock ? 'text-red-600' : isLowStock ? 'text-yellow-600' : 'text-black'}`}>{item.currentQty}</span></div>
                         <div>Min: <span className="font-bold text-black">{item.minLevel}</span></div>
                         <div>Cost: <span className="font-bold text-black">RM {item.cost.toFixed(2)}</span></div>
-                        <div>Unit: <span className="font-bold text-black uppercase">{item.unit}</span></div>
+                        <div>Unit: <span className="font-bold text-black uppercase">{tUnit(item.unit)}</span></div>
                     </div>
                 </div>
             );
@@ -937,7 +970,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                                 <div onClick={() => toggleSection(section.id)} className={`px-3 md:px-4 py-3 md:py-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-between cursor-pointer transition-all shadow-sm ${section.color} hover:brightness-95 select-none active:scale-[0.98]`}>
                                     <div className="flex items-center gap-2">
                                         <Layers size={16}/> 
-                                        <span className="truncate max-w-[150px] md:max-w-[200px]">{section.label}</span>
+                                        <span className="truncate max-w-[150px] md:max-w-[200px]">{tCat(section.id)}</span>
                                         <span className="bg-white/30 px-2 py-0.5 rounded-full text-[9px] text-current">{sectionItems.length}</span>
                                         {outOfStockCount > 0 && <div className="flex items-center gap-1 bg-red-600 text-white px-2 py-0.5 rounded-full shadow-sm ml-1 animate-pulse border border-red-400"><AlertTriangle size={10} fill="currentColor" /><span className="text-[10px] font-black">{outOfStockCount}</span></div>}
                                         {lowStockCount > 0 && <div className="flex items-center gap-1 bg-yellow-400 text-black px-2 py-0.5 rounded-full shadow-sm ml-1 border border-yellow-500"><AlertTriangle size={10} fill="currentColor" /><span className="text-[10px] font-black">{lowStockCount}</span></div>}
