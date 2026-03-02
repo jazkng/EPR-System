@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     Search, Layers, AlertTriangle, ChevronUp, ChevronDown, 
@@ -18,7 +17,12 @@ interface InventoryModuleProps {
     lockedMode?: 'CHECK' | 'MASTER';
     initialMode?: 'CHECK' | 'MASTER';
     initialSearchTerm?: string;
+    isManagementStaff?: boolean;
+    lang?: 'zh' | 'my';
 }
+
+// Translation data is now stored in Firebase (collection: translations/{langCode})
+// Boss can manage translations via the Translation Manager in BossDashboard
 
 const CATEGORY_SECTIONS: Record<string, { id: string, label: string, color: string }[]> = {
     'KITCHEN': [
@@ -69,10 +73,44 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
     employee, 
     lockedMode, 
     initialMode = 'CHECK', 
-    initialSearchTerm 
+    initialSearchTerm,
+    isManagementStaff = false,
+    lang = 'zh'
 }) => {
     const [currentStockView, setCurrentStockView] = useState<'KITCHEN' | 'BAR' | 'GENERAL' | 'FUEL'>('KITCHEN');
     const [mode, setMode] = useState<'CHECK' | 'MASTER' | 'ASSIGN'>(lockedMode || initialMode);
+    
+    // Firebase-backed translations (loaded once, refreshed on lang change)
+    const [translations, setTranslations] = useState<Record<string, Record<string, string>>>({ items: {}, categories: {}, units: {}, ui: {} });
+    
+    useEffect(() => {
+        if (lang !== 'zh') {
+            DataManager.getTranslations(lang).then(setTranslations);
+        }
+    }, [lang]);
+    
+    // Translation helpers — read from Firebase translations
+    const t = (zh: string): string => {
+        if (lang === 'zh') return zh;
+        return translations.ui?.[zh] || zh;
+    };
+    const tCat = (catId: string): string => {
+        if (lang === 'zh') return getCategoryLabel(catId);
+        const translated = translations.categories?.[catId];
+        return translated ? `${translated}` : getCategoryLabel(catId);
+    };
+    const tItem = (item: StockItem): string => {
+        if (lang === 'zh') return item.name;
+        const translated = translations.items?.[item.id];
+        if (!translated) return item.name;
+        // Show: Burmese (English part from original)
+        const engPart = item.name.match(/\(([^)]+)\)/)?.[1];
+        return engPart ? `${translated} (${engPart})` : translated;
+    };
+    const tUnit = (unit: string): string => {
+        if (lang === 'zh') return unit;
+        return translations.units?.[unit] || unit;
+    };
     
     // View Switcher for Master Mode (List vs History vs Tasks)
     const [viewType, setViewType] = useState<'LIST' | 'HISTORY' | 'TASKS'>('LIST');
@@ -690,11 +728,11 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
             {!isRestrictedView && (
                 <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4 shrink-0">
                     <div className="flex items-center gap-2 bg-white p-1 rounded-xl shadow-sm border border-gray-200 w-full md:w-auto overflow-x-auto">
-                        <button onClick={() => handleViewChange('KITCHEN')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${currentStockView === 'KITCHEN' ? 'bg-[#1A1A1A] text-[#FFD700]' : 'text-gray-500 hover:bg-gray-50'}`}>Kitchen</button>
-                        <button onClick={() => handleViewChange('BAR')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${currentStockView === 'BAR' ? 'bg-[#1A1A1A] text-[#FFD700]' : 'text-gray-500 hover:bg-gray-50'}`}>Bar</button>
-                        <button onClick={() => handleViewChange('GENERAL')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${currentStockView === 'GENERAL' ? 'bg-[#1A1A1A] text-[#FFD700]' : 'text-gray-500 hover:bg-gray-50'}`}>General</button>
+                        <button onClick={() => handleViewChange('KITCHEN')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${currentStockView === 'KITCHEN' ? 'bg-[#1A1A1A] text-[#FFD700]' : 'text-gray-500 hover:bg-gray-50'}`}>{t('厨房')}</button>
+                        <button onClick={() => handleViewChange('BAR')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${currentStockView === 'BAR' ? 'bg-[#1A1A1A] text-[#FFD700]' : 'text-gray-500 hover:bg-gray-50'}`}>{t('水吧')}</button>
+                        <button onClick={() => handleViewChange('GENERAL')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${currentStockView === 'GENERAL' ? 'bg-[#1A1A1A] text-[#FFD700]' : 'text-gray-500 hover:bg-gray-50'}`}>{t('后勤')}</button>
                         {/* NEW: FUEL TAB */}
-                        <button onClick={() => handleViewChange('FUEL')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 ${currentStockView === 'FUEL' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}><Flame size={12}/> Fuel</button>
+                        <button onClick={() => handleViewChange('FUEL')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 ${currentStockView === 'FUEL' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}><Flame size={12}/> {t('燃料')}</button>
                     </div>
                     
                     <div className="flex items-center gap-2 w-full md:w-auto">

@@ -204,7 +204,14 @@ export class DataManager {
         if (type === 'KITCHEN') colName = 'stock_kitchen';
         if (type === 'BAR') colName = 'stock_bar';
         if (type === 'FUEL') colName = 'stock_fuel';
-        await setDoc(doc(db, colName, item.id), item);
+        
+        const docRef = doc(db, colName, item.id);
+        await runTransaction(db, async (transaction) => {
+            const snap = await transaction.get(docRef);
+            // Merge: preserve server fields not in our local object
+            const existingData = snap.exists() ? snap.data() : {};
+            transaction.set(docRef, { ...existingData, ...item });
+        });
     }
     static async deleteStockItem(type: 'KITCHEN' | 'BAR' | 'GENERAL' | 'FUEL', id: string): Promise<void> {
         let colName = 'stock_general';
@@ -218,12 +225,21 @@ export class DataManager {
         if (type === 'KITCHEN') colName = 'stock_kitchen';
         if (type === 'BAR') colName = 'stock_bar';
         if (type === 'FUEL') colName = 'stock_fuel';
-        const batch = writeBatch(db);
-        items.forEach(item => {
-            const ref = doc(db, colName, item.id);
-            batch.set(ref, item);
+        
+        // Use runTransaction for atomic batch updates to prevent concurrent overwrites
+        await runTransaction(db, async (transaction) => {
+            // Phase 1: Read all documents first (Firestore requirement)
+            const reads = await Promise.all(
+                items.map(item => transaction.get(doc(db, colName, item.id)))
+            );
+            
+            // Phase 2: Write all updates
+            items.forEach((item, idx) => {
+                const ref = doc(db, colName, item.id);
+                const existing = reads[idx].exists() ? reads[idx].data() : {};
+                transaction.set(ref, { ...existing, ...item });
+            });
         });
-        await batch.commit();
     }
 
     static async getInventoryTasks(): Promise<InventoryTask[]> {
@@ -232,6 +248,21 @@ export class DataManager {
         return snap.docs.map(d => d.data() as InventoryTask).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
     }
     static async saveInventoryTask(task: InventoryTask): Promise<void> { await setDoc(doc(db, 'inventory_tasks', task.id), task); }
+
+    // ==========================================
+    // 🟢 Translations
+    // ==========================================
+    static async getTranslations(lang: string): Promise<Record<string, Record<string, string>>> {
+        const snap = await getDoc(doc(db, 'translations', lang));
+        if (snap.exists()) {
+            return snap.data() as Record<string, Record<string, string>>;
+        }
+        return { items: {}, categories: {}, units: {}, ui: {} };
+    }
+
+    static async saveTranslations(lang: string, data: Record<string, Record<string, string>>): Promise<void> {
+        await setDoc(doc(db, 'translations', lang), data);
+    }
     static async deleteInventoryTask(id: string): Promise<void> { await deleteDoc(doc(db, 'inventory_tasks', id)); }
 
     static async getInventoryLogs(): Promise<InventoryLog[]> {

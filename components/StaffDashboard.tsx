@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { ClipboardList, Shield, Crown, BookOpen, Languages, AlertTriangle } from 'lucide-react';
 import { SOPItem, Employee, RoleGuide } from '../types';
@@ -293,7 +292,8 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({ employee }) => {
                 employee={employee} 
                 guide={currentGuide} 
                 allowedModules={allowedModules} 
-                hasPendingTasks={hasPendingTasks} 
+                hasPendingTasks={hasPendingTasks}
+                lang={lang}
             />
          )}
       </div>

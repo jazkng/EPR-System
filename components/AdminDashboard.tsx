@@ -1,9 +1,9 @@
-
 // components/AdminDashboard.tsx
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Calculator, BookOpen, CalendarOff, ClipboardCheck, Package, ArrowLeft, Truck, Armchair, Eye, CheckSquare, Clock, ShoppingCart, Utensils, Award } from 'lucide-react';
 import { StoreConfig, AppModule, Employee } from '../types';
+import { DataManager } from '../utils/dataManager';
 
 // --- NEW GENERIC IMPORTS ---
 import { SettlementModule } from './features/SettlementModule';
@@ -25,9 +25,11 @@ interface ManagerDashboardProps {
     isSingleMode?: boolean;
     onOpenTV?: () => void;
     currentEmployee?: Employee; 
+    isManagementStaff?: boolean;
+    lang?: 'zh' | 'my';
 }
 
-export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allowedModules, initialTab, isSingleMode = false, onOpenTV, currentEmployee }) => {
+export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allowedModules, initialTab, isSingleMode = false, onOpenTV, currentEmployee, isManagementStaff = false, lang = 'zh' }) => {
   const [activeTab, setActiveTab] = useState<'SETTLEMENT' | 'ROSTER' | 'LOGBOOK' | 'LOGBOOK_VIEW' | 'SOP_INSPECT' | 'INVENTORY_CHECK' | 'INVENTORY_VIEW' | 'SUPPLIER_CONTACTS' | 'QUEUE' | 'ATTENDANCE_CONSOLE' | 'PROCUREMENT' | 'MENU_MANAGEMENT' | 'ASSESSMENT'>('SETTLEMENT');
   const [storeConfig, setStoreConfig] = useState<StoreConfig>({ 
       businessDayCutoff: 4,
@@ -37,6 +39,34 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allo
 
   // State to hold a target stock ID for deep linking navigation
   const [targetStockId, setTargetStockId] = useState('');
+
+  // Management stats state
+  const [mgmtStats, setMgmtStats] = useState({ lowStock: 0, todayLogs: 0, absences: 0, pendingTasks: 0 });
+  const [statsLoading, setStatsLoading] = useState(isManagementStaff);
+
+  // Load Management Stats
+  useEffect(() => {
+      if (!isManagementStaff) return;
+      const loadStats = async () => {
+          setStatsLoading(true);
+          try {
+              const [kStock, bStock, gStock, logs, rosterData, tasks] = await Promise.all([
+                  DataManager.getStock('KITCHEN'), DataManager.getStock('BAR'), DataManager.getStock('GENERAL'),
+                  DataManager.getLogs(), DataManager.getRosterData(), DataManager.getInventoryTasks()
+              ]);
+              const allStock = [...kStock, ...bStock, ...gStock];
+              const lowItems = allStock.filter(i => i.currentQty <= i.minLevel).length;
+              const now = new Date(); if (now.getHours() < 4) now.setDate(now.getDate() - 1);
+              const dateStr = now.toISOString().split('T')[0];
+              const todayLogs = logs.filter(l => l.date === dateStr).length;
+              const todayRoster = rosterData.roster?.[dateStr] || {};
+              const absences = Object.values(todayRoster).filter(s => s === 'MC' || s === 'ABSENT').length;
+              const pending = tasks.filter(t => t.status === 'PENDING').length;
+              setMgmtStats({ lowStock: lowItems, todayLogs: todayLogs, absences: absences, pendingTasks: pending });
+          } catch (e) { console.error("Stats load failed", e); } finally { setStatsLoading(false); }
+      };
+      loadStats();
+  }, [isManagementStaff]);
 
   // Load Store Config
   useEffect(() => {
@@ -162,10 +192,59 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allo
       }
   };
 
+  // Permission helper - check if user has permission for an action
+  const hasPermission = (module: AppModule): boolean => {
+      if (!allowedModules || allowedModules.length === 0) return true; // Boss mode - all access
+      return allowedModules.includes(module);
+  };
+
   return (
-    <div className="max-w-5xl mx-auto pb-32">
+    <div className={`${isManagementStaff ? 'min-h-screen bg-[#0D0D0D]' : 'max-w-5xl mx-auto'} pb-32`}>
+      {/* MANAGEMENT STATS PANEL (Only for management staff) */}
+      {isManagementStaff && currentEmployee && (
+          <div className="bg-gradient-to-br from-[#1A1A1A] via-[#111] to-[#0A0A0A] pt-6 pb-10 px-4 md:px-6 border-b-2 border-[#FFD700]/30 relative overflow-hidden">
+              <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'url("https://www.transparenttextures.com/patterns/dark-geometric.png")' }}></div>
+              <div className="relative z-10 max-w-5xl mx-auto">
+                  <div className="flex items-center justify-between mb-5">
+                      <div className="flex items-center gap-3">
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-black shadow-lg border-2 border-[#FFD700]/50 overflow-hidden ${currentEmployee.avatar ? '' : 'bg-[#FFD700] text-black'}`}>
+                              {currentEmployee.avatar ? <img src={currentEmployee.avatar} className="w-full h-full object-cover"/> : currentEmployee.name.charAt(0)}
+                          </div>
+                          <div>
+                              <h2 className="text-lg font-black text-white tracking-wide">{currentEmployee.name}</h2>
+                              <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-[#FFD700] font-bold uppercase tracking-widest">{currentEmployee.role?.split('(')[0]}</span>
+                                  {currentEmployee.rank && <span className="bg-[#FFD700]/20 text-[#FFD700] text-[9px] px-2 py-0.5 rounded-full font-bold border border-[#FFD700]/30">{currentEmployee.rank}</span>}
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+                  
+                  {/* Stats Row */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {[
+                          { label: '库存告急', value: mgmtStats.lowStock, icon: '📉', color: mgmtStats.lowStock > 0 ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 bg-white/5', textColor: mgmtStats.lowStock > 0 ? 'text-red-400' : 'text-white/50' },
+                          { label: '今日日志', value: mgmtStats.todayLogs, icon: '📝', color: 'border-white/10 bg-white/5', textColor: 'text-blue-400' },
+                          { label: '员工缺席', value: mgmtStats.absences, icon: '🤒', color: mgmtStats.absences > 0 ? 'border-orange-500/50 bg-orange-500/10' : 'border-white/10 bg-white/5', textColor: mgmtStats.absences > 0 ? 'text-orange-400' : 'text-white/50' },
+                          { label: '待办任务', value: mgmtStats.pendingTasks, icon: '📋', color: mgmtStats.pendingTasks > 0 ? 'border-[#FFD700]/50 bg-[#FFD700]/10' : 'border-white/10 bg-white/5', textColor: mgmtStats.pendingTasks > 0 ? 'text-[#FFD700]' : 'text-white/50' }
+                      ].map(stat => (
+                          <div key={stat.label} className={`rounded-xl border p-3 ${stat.color} transition-all`}>
+                              <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-sm">{stat.icon}</span>
+                                  <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">{stat.label}</span>
+                              </div>
+                              <div className={`text-2xl font-mono font-black ${stat.textColor}`}>
+                                  {statsLoading ? '...' : stat.value}
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          </div>
+      )}
+      
       {/* HEADER */}
-      <div className="bg-[#1A1A1A] text-white p-4 md:p-6 sticky top-[64px] md:top-[72px] z-30 shadow-lg border-b-4 border-[#FFD700]">
+      <div className={`${isManagementStaff ? 'bg-[#1A1A1A] border-b border-[#FFD700]/20' : 'bg-[#1A1A1A] border-b-4 border-[#FFD700]'} text-white p-4 md:p-6 sticky ${isManagementStaff ? 'top-[64px] md:top-[72px]' : 'top-[64px] md:top-[72px]'} z-30 shadow-lg`}>
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2 md:gap-3">
             {onBack && (
@@ -175,9 +254,9 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allo
             )}
             <div>
                 <h2 className="text-lg md:text-xl font-serif font-bold text-[#FFD700] tracking-wide">
-                    {isSingleMode ? getPageTitle() : '管理层控制台'}
+                    {isSingleMode ? getPageTitle() : isManagementStaff ? '管理层控制台' : '管理层控制台'}
                 </h2>
-                {!isSingleMode && <p className="text-[10px] md:text-xs text-gray-400 font-mono tracking-widest uppercase">MANAGEMENT CONSOLE</p>}
+                {!isSingleMode && <p className="text-[10px] md:text-xs text-gray-400 font-mono tracking-widest uppercase">{isManagementStaff ? `${currentEmployee?.name || ''} • MANAGEMENT` : 'MANAGEMENT CONSOLE'}</p>}
             </div>
           </div>
         </div>
@@ -185,16 +264,23 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allo
 
       {/* TAB NAVIGATION - HIDDEN IN SINGLE MODE */}
       {!isSingleMode && availableTabs.length > 0 ? (
-        <div className="flex p-3 md:p-4 gap-2 overflow-x-auto bg-[#F5F5F5] border-b border-gray-200 scrollbar-hide">
-            {availableTabs.map(tab => (
+        <div className={`flex p-3 md:p-4 gap-2 overflow-x-auto ${isManagementStaff ? 'bg-[#111] border-b border-white/10' : 'bg-[#F5F5F5] border-b border-gray-200'} scrollbar-hide`}>
+            {availableTabs.map(tab => {
+                const isPermitted = hasPermission(tab.key as AppModule);
+                return (
                 <button 
                     key={tab.key}
                     onClick={() => setActiveTab(tab.key as any)} 
-                    className={`flex-none min-w-[80px] md:min-w-[100px] py-2.5 md:py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 md:gap-1.5 font-bold transition-all active:scale-95 text-[10px] md:text-xs ${activeTab === tab.key ? 'bg-[#1A1A1A] text-[#FFD700] shadow-md border-b-4 border-[#C70000]' : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-100'}`}
+                    className={`flex-none min-w-[80px] md:min-w-[100px] py-2.5 md:py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 md:gap-1.5 font-bold transition-all active:scale-95 text-[10px] md:text-xs ${
+                        activeTab === tab.key 
+                            ? (isManagementStaff ? 'bg-[#FFD700] text-black shadow-md shadow-[#FFD700]/20' : 'bg-[#1A1A1A] text-[#FFD700] shadow-md border-b-4 border-[#C70000]') 
+                            : (isManagementStaff ? 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10' : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-100')
+                    }`}
                 >
                     {tab.icon} <span className="truncate w-full text-center">{tab.label}</span>
                 </button>
-            ))}
+                );
+            })}
         </div>
       ) : (
         // Spacer for Single Mode
@@ -207,7 +293,7 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allo
       )}
 
       {/* TAB CONTENT (ROUTER) */}
-      <div className="min-h-[50vh]">
+      <div className={`min-h-[50vh] ${isManagementStaff ? 'max-w-5xl mx-auto' : ''}`}>
          {activeTab === 'SETTLEMENT' && (
              <SettlementModule 
                 storeConfig={storeConfig} 
@@ -230,7 +316,9 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allo
                 allowedModules={allowedModules} 
                 employee={currentEmployee} 
                 lockedMode="CHECK" 
-                initialSearchTerm={targetStockId} 
+                initialSearchTerm={targetStockId}
+                isManagementStaff={isManagementStaff}
+                lang={lang}
              />
          )}
          {/* UNLOCK MASTER MODE FOR VIEW TAB */}
@@ -240,6 +328,8 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allo
                 employee={currentEmployee} 
                 initialMode="MASTER" 
                 initialSearchTerm={targetStockId}
+                isManagementStaff={isManagementStaff}
+                lang={lang}
              />
          )}
          {activeTab === 'SOP_INSPECT' && <SOPInspection />}

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { UserRole, Employee } from '../types';
 import { DataManager } from '../utils/dataManager';
@@ -310,7 +309,22 @@ export const Login: React.FC<LoginProps> = ({ onLogin, portalMode, onSwitchPorta
 
   const performLogin = (emp: Employee) => {
       const role = (emp.role.includes('Owner') || emp.role.includes('老板')) ? UserRole.BOSS : UserRole.STAFF;
-      setPendingLogin({ role, emp });
+      
+      // AUTO-ROUTE: Detect management-level staff to upgrade their experience
+      const roleTitle = emp.role.toLowerCase();
+      const isManagementStaff = 
+          roleTitle.includes('主管') || roleTitle.includes('supervisor') ||
+          roleTitle.includes('店长') || roleTitle.includes('manager') ||
+          roleTitle.includes('经理') || 
+          roleTitle.includes('头手') || roleTitle.includes('head chef') ||
+          emp.rank === 'MANAGEMENT' || emp.rank === 'HEAD' || emp.rank === 'TOP';
+      
+      if (isManagementStaff && role !== UserRole.BOSS) {
+          // Upgrade to MANAGEMENT role for enhanced dashboard
+          setPendingLogin({ role: UserRole.MANAGEMENT, emp });
+      } else {
+          setPendingLogin({ role, emp });
+      }
       setGateState('CLOSED');
   };
 

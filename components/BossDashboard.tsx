@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
     Users, Settings, Crown, 
@@ -20,6 +19,7 @@ import { WarrantyModule } from './features/WarrantyModule';
 import { EventsPlanningModule } from './features/EventsPlanningModule';
 import { PriceMonitorModule } from './features/PriceMonitorModule'; 
 import { EmployeeAssessmentModule } from './features/EmployeeAssessmentModule'; // NEW IMPORT
+import { TranslationManager } from './features/TranslationManager'; // TRANSLATION IMPORT
 import { DataManager } from '../utils/dataManager'; 
 
 interface BossDashboardProps {
@@ -30,7 +30,7 @@ interface BossDashboardProps {
 
 export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, currentEmployee, onOpenConfig }) => {
     // Modal State
-    const [activeModal, setActiveModal] = useState<'NONE' | 'HR' | 'MENU' | 'BILLS' | 'ORG' | 'REPORTS' | 'ATTENDANCE' | 'AP' | 'TREASURY' | 'WARRANTY' | 'PLANNING' | 'PRICE_MONITOR' | 'ASSESSMENT'>('NONE');
+    const [activeModal, setActiveModal] = useState<'NONE' | 'HR' | 'MENU' | 'BILLS' | 'ORG' | 'REPORTS' | 'ATTENDANCE' | 'AP' | 'TREASURY' | 'WARRANTY' | 'PLANNING' | 'PRICE_MONITOR' | 'ASSESSMENT' | 'TRANSLATION'>('NONE');
     
     // Alert States
     const [billAlertCount, setBillAlertCount] = useState(0);
@@ -276,6 +276,14 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
                             alertCount={lowStockCount}
                         />
                         <DashboardCard 
+                            title="翻译管理" 
+                            sub="TRANSLATION" 
+                            icon={Layout} 
+                            colorClass="bg-orange-50" 
+                            iconColor="text-orange-600"
+                            onClick={() => setActiveModal('TRANSLATION')}
+                        />
+                        <DashboardCard 
                             title="智能菜谱" 
                             sub="SMART RECIPE" 
                             icon={Coffee} 
@@ -398,6 +406,7 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
             {activeModal === 'PLANNING' && <EventsPlanningModule onClose={() => setActiveModal('NONE')} currentEmployee={currentEmployee} />}
             {activeModal === 'PRICE_MONITOR' && <PriceMonitorModule onClose={() => setActiveModal('NONE')} />}
             {activeModal === 'ASSESSMENT' && <EmployeeAssessmentModule onClose={() => setActiveModal('NONE')} currentEmployee={currentEmployee} />}
+            {activeModal === 'TRANSLATION' && <TranslationManager onClose={() => setActiveModal('NONE')} />}
         </div>
     );
 };

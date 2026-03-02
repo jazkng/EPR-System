@@ -1,13 +1,24 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Building, Zap, Trash2, Plus, DollarSign, X, CheckCircle2, History, AlertTriangle, FileCheck, Home, Banknote, Droplets, Wifi, Gauge, CalendarDays, TrendingUp, ArrowRight, Clock, Edit3, Calculator, BadgeAlert, Layers, ShieldCheck, Copy, AlertOctagon, Link as LinkIcon, PiggyBank, Archive, ArchiveRestore, Loader2, Clipboard, ExternalLink } from 'lucide-react';
-import { RecurringBill, BillPaymentRecord, RecurringBillCategory, RecurringBillType } from '../../types';
+import { Calendar, Building, Zap, Trash2, Plus, DollarSign, X, CheckCircle2, History, AlertTriangle, FileCheck, Home, Banknote, Droplets, Wifi, Gauge, CalendarDays, TrendingUp, ArrowRight, Clock, Edit3, Calculator, BadgeAlert, Layers, ShieldCheck, Copy, AlertOctagon, Link as LinkIcon, PiggyBank, Archive, ArchiveRestore, Loader2, Clipboard, ExternalLink, ChevronLeft, ChevronRight, Filter, Search } from 'lucide-react';
+import { RecurringBill, BillPaymentRecord, RecurringBillCategory, RecurringBillType, ExpenseItem } from '../../types';
 import { DataManager } from '../../utils/dataManager';
 import { ModuleGuideButton } from '../ui/ModuleGuide';
 
 interface RecurringBillsModuleProps {
     onClose: () => void;
 }
+
+// === CATEGORY MAP: RecurringBill → AP ExpenseItem ===
+const BILL_TO_AP_CATEGORY: Record<RecurringBillCategory, string> = {
+    'RENT': 'RENT',
+    'ELECTRICITY': 'UTILITIES_ELECTRIC',
+    'WATER': 'UTILITIES_WATER',
+    'INTERNET': 'INTERNET',
+    'WASTE': 'WASTE',
+    'LICENSE': 'LICENSE',
+    'SUBSCRIPTION': 'LICENSE',
+    'OTHER': 'SUPPLIES',
+};
 
 const CATEGORY_CONFIG: Record<RecurringBillCategory, { label: string, icon: any, color: string, unit?: string, text: string }> = {
     'RENT': { label: '租金', text: 'RENT', icon: Building, color: 'bg-blue-50 text-blue-600 border-blue-200' },
@@ -43,6 +54,15 @@ export const RecurringBillsModule: React.FC<RecurringBillsModuleProps> = ({ onCl
     const [meterReadings, setMeterReadings] = useState<{ prev: string, curr: string }>({ prev: '', curr: '' });
     const [payUsage, setPayUsage] = useState<string>('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    
+    // EDIT MODE: editing an existing payment record
+    const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+    
+    // HISTORY FILTER: month filter + search + pagination
+    const [historyMonth, setHistoryMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
+    const [historySearch, setHistorySearch] = useState('');
+    const [historyLimit, setHistoryLimit] = useState(50);
+    const [showAllHistory, setShowAllHistory] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -139,6 +159,22 @@ export const RecurringBillsModule: React.FC<RecurringBillsModuleProps> = ({ onCl
         setPayLink(''); // Reset Link
         setMeterReadings({ prev: '', curr: '' });
         setPayUsage('');
+        setEditingPaymentId(null); // New payment mode
+        setIsPayModalOpen(true);
+    };
+
+    // EDIT existing payment — prefill modal with existing data
+    const openEditPayment = (payment: BillPaymentRecord) => {
+        const bill = bills.find(b => b.id === payment.billId);
+        setPayingBill(bill || { id: payment.billId, name: payment.name, amount: payment.amount, type: 'MONTHLY', dueDay: 1, category: payment.category, isActive: true, reminderDays: 3, isArchived: false } as RecurringBill);
+        setPayAmount(payment.amount);
+        setPayDate(payment.date);
+        setPayMethod(payment.method as any);
+        setPayRef(payment.referenceNo || '');
+        setPayLink(payment.linkUrl || '');
+        setPayUsage(payment.usage?.toString() || '');
+        setMeterReadings({ prev: '', curr: '' }); // Can't restore meter readings
+        setEditingPaymentId(payment.id); // Edit mode
         setIsPayModalOpen(true);
     };
 
@@ -156,8 +192,10 @@ export const RecurringBillsModule: React.FC<RecurringBillsModuleProps> = ({ onCl
         
         setIsSubmitting(true);
         try {
+            const paymentId = editingPaymentId || `pay_${Date.now()}`;
+            
             const rawRecord: BillPaymentRecord = {
-                id: `pay_${Date.now()}`,
+                id: paymentId,
                 billId: payingBill.id,
                 name: payingBill.name,
                 amount: payAmount || 0,
@@ -167,23 +205,43 @@ export const RecurringBillsModule: React.FC<RecurringBillsModuleProps> = ({ onCl
                 referenceNo: payRef,
                 usage: payUsage ? parseFloat(payUsage) : undefined,
                 usageUnit: CATEGORY_CONFIG[payingBill.category]?.unit,
-                linkUrl: payLink // Save Link
+                linkUrl: payLink
             };
 
-            // Firestore hates undefined values. We strip them out using JSON parse/stringify.
             const record = JSON.parse(JSON.stringify(rawRecord));
-
             await DataManager.saveBillPayment(record);
             
-            // Update last paid date
-            const rawUpdatedBill = { ...payingBill, lastPaidDate: payDate };
-            const updatedBill = JSON.parse(JSON.stringify(rawUpdatedBill));
+            // === AP SYNC: Create/Update matching ExpenseItem in standalone_expenses ===
+            const apId = `bill_sync_${paymentId}`;
+            const apCategory = BILL_TO_AP_CATEGORY[payingBill.category] || 'SUPPLIES';
+            const rawExpense: ExpenseItem = {
+                id: apId,
+                category: apCategory,
+                expenseType: 'RECURRING',
+                company: payingBill.payableTo || payingBill.name,
+                amount: payAmount || 0,
+                paymentStatus: 'PAID',
+                paymentMethod: payMethod as any,
+                time: payDate,
+                note: `[固定支出] ${payingBill.name}${payRef ? ` | Ref: ${payRef}` : ''}${payUsage ? ` | Usage: ${payUsage} ${CATEGORY_CONFIG[payingBill.category]?.unit || ''}` : ''}`,
+                paidBy: payMethod === 'CASH' ? 'SHOP_CASH' : 'COMPANY',
+                linkUrl: payLink || undefined,
+                tags: ['RECURRING_BILL'],
+            };
+            const expense = JSON.parse(JSON.stringify(rawExpense));
+            await DataManager.saveStandaloneExpense(expense);
             
-            await DataManager.saveRecurringBill(updatedBill);
+            // Update last paid date on the bill itself
+            if (!editingPaymentId) {
+                const rawUpdatedBill = { ...payingBill, lastPaidDate: payDate };
+                const updatedBill = JSON.parse(JSON.stringify(rawUpdatedBill));
+                await DataManager.saveRecurringBill(updatedBill);
+            }
             
             setIsPayModalOpen(false);
             setPayingBill(null);
-            alert("✅ 支付已记录 (Payment Recorded)");
+            setEditingPaymentId(null);
+            alert(editingPaymentId ? "✅ 已更新支付记录 (Payment Updated)" : "✅ 支付已记录 (Payment Recorded)");
             loadData();
         } catch (error: any) {
             console.error("Payment failed", error);
@@ -194,8 +252,18 @@ export const RecurringBillsModule: React.FC<RecurringBillsModuleProps> = ({ onCl
     };
 
     const handleDeletePayment = async (id: string) => {
-        if(!confirm("Delete payment record?")) return;
+        if(!confirm("确认删除此支付记录？\n(AP同步记录也会一并删除)")) return;
+        
+        // Delete the payment record
         await DataManager.deleteBillPayment(id);
+        
+        // Also delete the synced AP expense
+        try {
+            const { deleteDoc: delDoc, doc: docRef } = await import('firebase/firestore');
+            const { db: fireDb } = await import('../../firebaseConfig');
+            await delDoc(docRef(fireDb, 'standalone_expenses', `bill_sync_${id}`));
+        } catch (e) { console.warn("AP sync cleanup skipped", e); }
+        
         loadData();
     };
 
@@ -216,6 +284,60 @@ export const RecurringBillsModule: React.FC<RecurringBillsModuleProps> = ({ onCl
     };
 
     const filteredBills = bills.filter(b => b.type === activeTab);
+
+    // HISTORY: Filtered + paginated payments
+    const filteredPayments = useMemo(() => {
+        let list = payments;
+        
+        // Month filter (unless showing all)
+        if (!showAllHistory && historyMonth) {
+            list = list.filter(p => p.date.startsWith(historyMonth));
+        }
+        
+        // Search filter
+        if (historySearch) {
+            const q = historySearch.toLowerCase();
+            list = list.filter(p => p.name.toLowerCase().includes(q) || p.referenceNo?.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+        }
+        
+        return list;
+    }, [payments, historyMonth, historySearch, showAllHistory]);
+    
+    const displayedPayments = filteredPayments.slice(0, historyLimit);
+    const hasMorePayments = filteredPayments.length > historyLimit;
+    
+    // History month totals
+    const historyMonthTotal = filteredPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    
+    const handleHistoryMonthChange = (delta: number) => {
+        const [y, m] = historyMonth.split('-').map(Number);
+        const d = new Date(y, m - 1 + delta, 1);
+        setHistoryMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+        setHistoryLimit(50);
+    };
+    
+    // Purge old records (archive)
+    const handlePurgeOld = async () => {
+        const cutoff = prompt("删除多久以前的记录？\n请输入月数 (例如: 12 = 一年前)", "12");
+        if (!cutoff) return;
+        const months = parseInt(cutoff);
+        if (isNaN(months) || months < 3) return alert("最少保留3个月");
+        
+        const cutDate = new Date();
+        cutDate.setMonth(cutDate.getMonth() - months);
+        const cutStr = cutDate.toISOString().split('T')[0];
+        
+        const toDelete = payments.filter(p => p.date < cutStr);
+        if (toDelete.length === 0) return alert("没有需要清理的旧记录");
+        
+        if (!confirm(`确认删除 ${toDelete.length} 条 ${cutStr} 之前的记录？\n\n⚠️ 此操作不可撤销！\n(已同步到应付账款的记录不受影响)`)) return;
+        
+        for (const p of toDelete) {
+            await DataManager.deleteBillPayment(p.id);
+        }
+        alert(`✅ 已清理 ${toDelete.length} 条旧记录`);
+        loadData();
+    };
 
     return (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-0 md:p-4 backdrop-blur-sm animate-in zoom-in duration-200">
@@ -304,43 +426,130 @@ export const RecurringBillsModule: React.FC<RecurringBillsModuleProps> = ({ onCl
                         </div>
                     )}
 
-                    {/* HISTORY LIST */}
+                    {/* HISTORY LIST - ENHANCED */}
                     {activeTab === 'HISTORY' && (
-                        <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
-                            <table className="w-full text-left">
-                                <thead className="bg-gray-50 text-xs text-gray-500 font-bold uppercase border-b border-gray-200">
-                                    <tr>
-                                        <th className="p-4">Date</th>
-                                        <th className="p-4">Bill Name</th>
-                                        <th className="p-4 text-right">Amount</th>
-                                        <th className="p-4 text-center">Ref/Link</th>
-                                        <th className="p-4 text-center">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="text-sm divide-y divide-gray-100">
-                                    {payments.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-gray-400 italic">No records</td></tr> : 
-                                    payments.map(p => (
-                                        <tr key={p.id} className="hover:bg-gray-50">
-                                            <td className="p-4 font-mono text-xs">{p.date}</td>
-                                            <td className="p-4 font-bold text-[#1A1A1A]">{p.name} <span className="text-[10px] text-gray-400 font-normal uppercase bg-gray-100 px-1.5 py-0.5 rounded ml-2">{p.category}</span></td>
-                                            <td className="p-4 text-right font-mono font-bold">RM {p.amount.toFixed(2)}</td>
-                                            <td className="p-4 text-center text-xs text-gray-500">
-                                                <div className="flex items-center justify-center gap-2">
-                                                    {p.referenceNo || '-'}
-                                                    {p.linkUrl && (
-                                                        <a href={p.linkUrl} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-700 bg-blue-50 p-1 rounded transition-colors" title="View Receipt">
-                                                            <ExternalLink size={12}/>
-                                                        </a>
-                                                    )}
+                        <div className="space-y-4">
+                            {/* History Controls */}
+                            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    {/* Month Navigator */}
+                                    <button onClick={() => handleHistoryMonthChange(-1)} className="p-2 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 active:scale-95"><ChevronLeft size={16}/></button>
+                                    <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200">
+                                        <CalendarDays size={14} className="text-gray-400"/>
+                                        <input type="month" value={historyMonth} onChange={e => { setHistoryMonth(e.target.value); setHistoryLimit(50); }} className="bg-transparent font-bold text-sm outline-none w-32 text-center"/>
+                                    </div>
+                                    <button onClick={() => handleHistoryMonthChange(1)} className="p-2 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 active:scale-95"><ChevronRight size={16}/></button>
+                                    <button onClick={() => setShowAllHistory(!showAllHistory)} className={`px-3 py-2 rounded-lg text-[10px] font-bold border transition-all ${showAllHistory ? 'bg-[#1A1A1A] text-[#FFD700] border-black' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+                                        {showAllHistory ? '全部' : '按月'}
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-2 w-full sm:w-auto">
+                                    <div className="relative flex-grow sm:w-48">
+                                        <Search className="absolute left-3 top-2.5 text-gray-400" size={14}/>
+                                        <input type="text" placeholder="搜索..." value={historySearch} onChange={e => setHistorySearch(e.target.value)} className="w-full pl-8 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-[#FFD700]"/>
+                                    </div>
+                                    <button onClick={handlePurgeOld} className="p-2 bg-red-50 text-red-500 rounded-lg border border-red-100 hover:bg-red-100 transition-colors" title="清理旧记录">
+                                        <Trash2 size={14}/>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {/* Month Summary */}
+                            <div className="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between">
+                                <div className="text-xs font-bold text-gray-400">{showAllHistory ? '全部记录' : `${historyMonth} 月度支出`}</div>
+                                <div className="flex items-center gap-4">
+                                    <span className="text-xs text-gray-400">{filteredPayments.length} 条</span>
+                                    <span className="text-sm font-mono font-black text-[#1A1A1A]">RM {historyMonthTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                </div>
+                            </div>
+
+                            {/* Table */}
+                            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                                {/* Mobile: Card layout */}
+                                <div className="md:hidden divide-y divide-gray-100">
+                                    {displayedPayments.length === 0 ? (
+                                        <div className="p-8 text-center text-gray-400 italic text-sm">本月暂无支付记录</div>
+                                    ) : displayedPayments.map(p => (
+                                        <div key={p.id} className="p-4 flex justify-between items-start gap-3">
+                                            <div className="flex-grow min-w-0">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="font-bold text-sm text-[#1A1A1A] truncate">{p.name}</span>
+                                                    <span className="text-[9px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded uppercase shrink-0">{p.category}</span>
                                                 </div>
-                                            </td>
-                                            <td className="p-4 text-center">
-                                                <button onClick={() => handleDeletePayment(p.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
-                                            </td>
-                                        </tr>
+                                                <div className="text-[10px] text-gray-400 font-mono">{p.date} • {p.method?.replace('_', ' ')}</div>
+                                                {p.referenceNo && <div className="text-[10px] text-gray-400 mt-0.5">Ref: {p.referenceNo}</div>}
+                                                {p.usage && <div className="text-[10px] text-blue-500 mt-0.5">Usage: {p.usage} {p.usageUnit}</div>}
+                                            </div>
+                                            <div className="flex flex-col items-end gap-1 shrink-0">
+                                                <span className="font-mono font-black text-sm">RM {p.amount.toFixed(2)}</span>
+                                                <div className="flex gap-1">
+                                                    {p.linkUrl && <a href={p.linkUrl} target="_blank" rel="noreferrer" className="p-1.5 bg-blue-50 text-blue-500 rounded hover:bg-blue-100"><ExternalLink size={12}/></a>}
+                                                    <button onClick={() => openEditPayment(p)} className="p-1.5 bg-gray-50 text-gray-400 rounded hover:bg-gray-100 hover:text-blue-600"><Edit3 size={12}/></button>
+                                                    <button onClick={() => handleDeletePayment(p.id)} className="p-1.5 bg-gray-50 text-gray-300 rounded hover:bg-red-50 hover:text-red-500"><Trash2 size={12}/></button>
+                                                </div>
+                                            </div>
+                                        </div>
                                     ))}
-                                </tbody>
-                            </table>
+                                </div>
+                                
+                                {/* Desktop: Table layout */}
+                                <table className="w-full text-left hidden md:table">
+                                    <thead className="bg-gray-50 text-xs text-gray-500 font-bold uppercase border-b border-gray-200">
+                                        <tr>
+                                            <th className="p-4">Date</th>
+                                            <th className="p-4">Bill Name</th>
+                                            <th className="p-4 text-center">Method</th>
+                                            <th className="p-4 text-right">Amount</th>
+                                            <th className="p-4 text-center">Ref/Link</th>
+                                            <th className="p-4 text-center">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-sm divide-y divide-gray-100">
+                                        {displayedPayments.length === 0 ? <tr><td colSpan={6} className="p-8 text-center text-gray-400 italic">本月暂无支付记录</td></tr> : 
+                                        displayedPayments.map(p => (
+                                            <tr key={p.id} className="hover:bg-gray-50 group">
+                                                <td className="p-4 font-mono text-xs text-gray-500">{p.date}</td>
+                                                <td className="p-4">
+                                                    <span className="font-bold text-[#1A1A1A]">{p.name}</span>
+                                                    <span className="text-[10px] text-gray-400 font-normal uppercase bg-gray-100 px-1.5 py-0.5 rounded ml-2">{p.category}</span>
+                                                    {p.usage && <span className="text-[10px] text-blue-500 ml-2">{p.usage} {p.usageUnit}</span>}
+                                                </td>
+                                                <td className="p-4 text-center text-[10px] font-bold text-gray-400 uppercase">{p.method?.replace('_', ' ')}</td>
+                                                <td className="p-4 text-right font-mono font-bold">RM {p.amount.toFixed(2)}</td>
+                                                <td className="p-4 text-center text-xs text-gray-500">
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        {p.referenceNo || '-'}
+                                                        {p.linkUrl && (
+                                                            <a href={p.linkUrl} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-700 bg-blue-50 p-1 rounded transition-colors" title="View Receipt">
+                                                                <ExternalLink size={12}/>
+                                                            </a>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 text-center">
+                                                    <div className="flex items-center justify-center gap-1">
+                                                        <button onClick={() => openEditPayment(p)} className="p-1.5 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑"><Edit3 size={14}/></button>
+                                                        <button onClick={() => handleDeletePayment(p.id)} className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors" title="删除"><Trash2 size={14}/></button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            {/* Load More */}
+                            {hasMorePayments && (
+                                <button onClick={() => setHistoryLimit(prev => prev + 50)} className="w-full py-3 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-50 transition-colors">
+                                    加载更多 ({filteredPayments.length - historyLimit} remaining)
+                                </button>
+                            )}
+                            
+                            {/* AP Sync Indicator */}
+                            <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-3">
+                                <CheckCircle2 size={16} className="text-green-600 shrink-0"/>
+                                <p className="text-[10px] text-green-700 font-bold">支付记录已自动同步至应付账款 (AP) 模块，分类标记为 <span className="bg-green-100 px-1.5 py-0.5 rounded">RECURRING_BILL</span></p>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -381,7 +590,7 @@ export const RecurringBillsModule: React.FC<RecurringBillsModuleProps> = ({ onCl
                 {isPayModalOpen && payingBill && (
                     <div className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                         <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
-                            <h3 className="font-black text-xl text-[#1A1A1A] mb-1">支付账单 (Pay Bill)</h3>
+                            <h3 className="font-black text-xl text-[#1A1A1A] mb-1">{editingPaymentId ? '编辑支付记录 (Edit Payment)' : '支付账单 (Pay Bill)'}</h3>
                             <p className="text-sm font-bold text-gray-500 mb-6">{payingBill.name}</p>
                             
                             <div className="space-y-4">
@@ -444,7 +653,7 @@ export const RecurringBillsModule: React.FC<RecurringBillsModuleProps> = ({ onCl
                                         className="py-3 bg-green-500 text-white font-bold rounded-xl text-sm shadow-lg hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-2"
                                     >
                                         {isSubmitting ? <Loader2 size={16} className="animate-spin"/> : null}
-                                        {isSubmitting ? 'Processing...' : 'Confirm Pay'}
+                                        {isSubmitting ? 'Processing...' : editingPaymentId ? 'Update Payment' : 'Confirm Pay'}
                                     </button>
                                 </div>
                             </div>
