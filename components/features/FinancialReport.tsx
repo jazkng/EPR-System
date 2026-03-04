@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Calendar, Search, ArrowDown, ArrowUp, ArrowRight, Filter, PieChart, TrendingUp, DollarSign, Download, Printer, Loader2, ChevronRight, BarChart3, AlertCircle, ListChecks, ArrowDownLeft, ChevronDown, ChevronUp, Percent, LayoutList, Info, Users, HelpCircle, Eye, EyeOff, ArrowRightLeft, FileText, Banknote, Landmark, RefreshCw, CalendarRange, Wallet, CreditCard, Truck, Calculator, Coins, ShoppingBag, Receipt, UserMinus, UserCheck, Briefcase } from 'lucide-react';
+import { X, Calendar, ArrowRight, PieChart, TrendingUp, Download, Loader2, ListChecks, Info, Users, HelpCircle, Receipt, UserMinus, Briefcase, Calculator, Wallet, Banknote, CreditCard, Truck, ShoppingBag, BarChart3, ChevronRight, AlertCircle, Percent, LayoutList } from 'lucide-react';
 import { SettlementRecord, ExpenseItem, BillPaymentRecord, FundTransfer, TreasuryConfig, PayrollRecord } from '../../types';
 import { DataManager } from '../../utils/dataManager';
 import { jsPDF } from "jspdf";
@@ -20,7 +20,6 @@ interface AuditLogItem {
     description: string;
     amount: number;
     account: string;
-    tag?: string;
     balance: number; 
 }
 
@@ -35,60 +34,24 @@ interface DetailedExpenseItem {
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
-    'INGREDIENT_MEAT': '食材-肉类 (Meat)',
-    'INGREDIENT_SEAFOOD': '食材-海鲜 (Seafood)',
-    'INGREDIENT_VEG': '食材-蔬果 (Veg)',
-    'INGREDIENT_DRY': '食材-干货 (Dry)',
-    'INGREDIENT_SAUCE': '食材-酱料 (Sauce)',
-    'INGREDIENT_NOODLE': '食材-面条 (Noodle)',
-    'INGREDIENT_OIL': '食材-油类 (Oil)',
-    'INGREDIENT_EGG': '食材-蛋类 (Eggs)',
-    'INGREDIENT_FROZEN': '食材-冷冻品 (Frozen)',
-    'BEVERAGE': '水吧原料 (Beverage)',
-    'PACKAGING': '包装材料 (Packaging)',
-    'GAS_COGS': '烹饪煤气 (Gas)',
-    'SUPPLIER': '一般进货 (General)',
-    'SUPPLIER_HQ': '总店进货 (HQ)',
-    'SALARY': '薪资支出 (Salary)',
-    'RENT': '租金 (Rent)',
-    'UTILITIES': '水电杂费 (Utilities)',
-    'UTILITIES_ELECTRIC': '电费 (Electricity)',
-    'UTILITIES_WATER': '水费 (Water)',
-    'UTILITIES_GAS': '管道煤气 (Piped Gas)',
-    'INTERNET': '网络/电话 (Internet)',
-    'SALES': '营业收入 (Sales)',
-    'TRANSFER': '资金转账 (Transfer)',
-    'BILL': '固定账单 (Bill)',
-    'EXPENSE': '杂项支出 (Expense)',
-    'ADJUSTMENT': '现金调整 (Adjustment)',
-    'FUND': '资金注入/提取 (Fund)',
-    'STAFF_ADVANCE': '员工预支 (Advance)',
-    'STAFF_MEAL': '员工餐 (Staff Meal)',
-    'STAFF_ACCOMMODATION': '员工住宿 (Housing)',
-    'PAYROLL': '月度薪资 (Payroll)',
-    'EPF': '公积金 (EPF)',
-    'SOCSO': '社险 (SOCSO)',
-    'RENOVATION': '装修 (Renovation)',
-    'EQUIPMENT': '设备 (Equipment)',
-    'KITCHEN_EQUIPMENT': '厨房设备 (Kitchen)',
-    'FURNITURE': '家具/桌椅 (Furniture)',
-    'IT_SYSTEM': '电脑/系统 (IT/POS)',
-    'SIGNAGE': '招牌/装饰 (Signage)',
-    'MAINTENANCE': '维修 (Maintenance)',
-    'PEST_CONTROL': '虫害防治 (Pest)',
-    'CLEANING': '清洁服务 (Cleaning)',
-    'WASTE': '垃圾处理 (Waste)',
-    'MARKETING': '营销 (Marketing)',
-    'PROFESSIONAL': '专业服务 (Professional)',
-    'ACCOUNTING': '会计服务 (Accounting)',
-    'INSURANCE': '保险 (Insurance)',
-    'LICENSE': '执照 (License)',
-    'LOGISTICS': '物流 (Logistics)',
-    'TRANSPORT': '交通/油费 (Transport)',
-    'PRINTING': '印刷品 (Printing)',
-    'MISC_OPEX': '其他杂费 (Misc)',
-    'MBB_COMM': '银行手续费 (Maybank)',
-    'DIVIDEND': '股东分红 (Dividend)',
+    'INGREDIENT_MEAT': '食材-肉类 (Meat)', 'INGREDIENT_SEAFOOD': '食材-海鲜 (Seafood)', 'INGREDIENT_VEG': '食材-蔬果 (Veg)',
+    'INGREDIENT_DRY': '食材-干货 (Dry)', 'INGREDIENT_SAUCE': '食材-酱料 (Sauce)', 'INGREDIENT_NOODLE': '食材-面条 (Noodle)',
+    'INGREDIENT_OIL': '食材-油类 (Oil)', 'INGREDIENT_EGG': '食材-蛋类 (Eggs)', 'INGREDIENT_FROZEN': '食材-冷冻品 (Frozen)',
+    'BEVERAGE': '水吧原料 (Beverage)', 'PACKAGING': '包装材料 (Packaging)', 'GAS_COGS': '烹饪煤气 (Gas)',
+    'SUPPLIER': '一般进货 (General)', 'SUPPLIER_HQ': '总店进货 (HQ)', 'SALARY': '薪资支出 (Salary)',
+    'RENT': '租金 (Rent)', 'UTILITIES': '水电杂费 (Utilities)', 'UTILITIES_ELECTRIC': '电费 (Electricity)',
+    'UTILITIES_WATER': '水费 (Water)', 'UTILITIES_GAS': '管道煤气 (Piped Gas)', 'INTERNET': '网络/电话 (Internet)',
+    'SALES': '营业收入 (Sales)', 'TRANSFER': '资金转账 (Transfer)', 'BILL': '固定账单 (Bill)',
+    'EXPENSE': '杂项支出 (Expense)', 'ADJUSTMENT': '现金调整 (Adjustment)', 'FUND': '资金注入/提取 (Fund)',
+    'STAFF_ADVANCE': '员工预支 (Advance)', 'STAFF_MEAL': '员工餐 (Staff Meal)', 'STAFF_ACCOMMODATION': '员工住宿 (Housing)',
+    'PAYROLL': '月度薪资 (Payroll)', 'EPF': '公积金 (EPF)', 'SOCSO': '社险 (SOCSO)',
+    'RENOVATION': '装修 (Renovation)', 'EQUIPMENT': '设备 (Equipment)', 'KITCHEN_EQUIPMENT': '厨房设备 (Kitchen)',
+    'FURNITURE': '家具/桌椅 (Furniture)', 'IT_SYSTEM': '电脑/系统 (IT/POS)', 'SIGNAGE': '招牌/装饰 (Signage)',
+    'MAINTENANCE': '维修 (Maintenance)', 'PEST_CONTROL': '虫害防治 (Pest)', 'CLEANING': '清洁服务 (Cleaning)',
+    'WASTE': '垃圾处理 (Waste)', 'MARKETING': '营销 (Marketing)', 'PROFESSIONAL': '专业服务 (Professional)',
+    'ACCOUNTING': '会计服务 (Accounting)', 'INSURANCE': '保险 (Insurance)', 'LICENSE': '执照 (License)',
+    'LOGISTICS': '物流 (Logistics)', 'TRANSPORT': '交通/油费 (Transport)', 'PRINTING': '印刷品 (Printing)',
+    'MISC_OPEX': '其他杂费 (Misc)', 'MBB_COMM': '银行手续费 (Maybank)', 'DIVIDEND': '股东分红 (Dividend)',
     'DEPOSIT': '押金 (Deposit)'
 };
 
@@ -123,17 +86,12 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
     const getMonthStartStr = () => {
         const date = new Date();
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        return `${year}-${month}-01`; 
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`; 
     };
     
     const getTodayStr = () => {
         const date = new Date();
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     };
     
     const [startDate, setStartDate] = useState(getMonthStartStr()); 
@@ -144,6 +102,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
     const [retentionRate, setRetentionRate] = useState(20); 
     const [detailView, setDetailView] = useState<{ title: string, type: string, items: DetailedExpenseItem[] } | null>(null);
 
+    // 核心改造点 1：限定日期查询，防止无意义的全量拉取导致的性能和计费灾难
     useEffect(() => {
         const loadData = async () => {
             setLoading(true);
@@ -155,21 +114,18 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                     DataManager.getPayrollRecords()
                 ]);
 
-                const configStart = config?.initialDate || '2000-01-01';
-
                 const settlementsRef = collection(db, 'settlements'); 
                 const expensesRef = collection(db, 'standalone_expenses');
 
+                // 只拉取当前选定日期范围内的数据
                 const [setSnap, expSnap] = await Promise.all([
-                    getDocs(query(settlementsRef, where("date", ">=", configStart))),
-                    getDocs(query(expensesRef, where("time", ">=", configStart)))
+                    getDocs(query(settlementsRef, where("date", ">=", startDate), where("date", "<=", endDate))),
+                    getDocs(query(expensesRef, where("time", ">=", startDate), where("time", "<=", endDate)))
                 ]);
 
-                const settlements = setSnap.docs.map(d => ({ id: d.id, ...d.data() } as SettlementRecord));
-                const expenses = expSnap.docs.map(d => ({ id: d.id, ...d.data() } as ExpenseItem));
-
-                setSettlementRecords(settlements);
-                setStandaloneExpenses(expenses);
+                setSettlementRecords(setSnap.docs.map(d => ({ id: d.id, ...d.data() } as SettlementRecord)));
+                setStandaloneExpenses(expSnap.docs.map(d => ({ id: d.id, ...d.data() } as ExpenseItem)));
+                
                 setBillPayments(bills);
                 setTransfers(funds);
                 setTreasuryConfig(config);
@@ -182,7 +138,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             }
         };
         loadData();
-    }, []);
+    }, [startDate, endDate]); // 依赖项包含起止日期
 
     const setQuickDate = (type: 'TODAY' | 'YESTERDAY' | 'WEEK' | 'MONTH' | 'LAST_MONTH') => {
         const now = new Date();
@@ -210,16 +166,14 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         }
 
         const formatLocal = (d: Date) => {
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${y}-${m}-${day}`;
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         };
 
         setStartDate(formatLocal(start));
         setEndDate(formatLocal(end));
     };
 
+    // 核心改造点 2：以 settlement 集合为主，不再重复用 Math.max(POS, 实际) 平衡数据
     const analytics = useMemo(() => {
         const isInRange = (dateStr: string) => {
             if (!dateStr) return false;
@@ -228,37 +182,8 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         };
 
         const revenueDetails = {
-            cash: 0, tng: 0, debitCard: 0, creditCard: 0, delivery: 0, totalRevenue: 0, variance: 0 
+            cash: 0, tng: 0, debitCard: 0, creditCard: 0, amex: 0, delivery: 0, totalRevenue: 0, variance: 0 
         };
-
-        settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
-            const cashAmt = Number(s.sales?.cash || 0);
-            const tngAmt = Number(s.sales?.tng || 0);
-            const duitnowAmt = Number(s.sales?.duitnow || 0);
-            const cardAmt = Number(s.sales?.card || 0);
-            const varianceAmt = Number(s.variance || 0);
-
-            const del = s.sales?.deliveryBreakdown 
-                ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0)
-                : 0;
-            const deliveryAmt = Number(del);
-
-            const posTotal = Number(s.sales?.total || 0);
-            const posCalculated = cashAmt + tngAmt + duitnowAmt + cardAmt;
-            const storeSales = Math.max(posTotal, posCalculated);
-            
-            revenueDetails.totalRevenue += storeSales + deliveryAmt;
-            revenueDetails.cash += cashAmt;
-            revenueDetails.tng += tngAmt; 
-            revenueDetails.debitCard += duitnowAmt;
-            revenueDetails.creditCard += cardAmt;
-            revenueDetails.delivery += deliveryAmt;
-            revenueDetails.variance += varianceAmt;
-        });
-
-        const totalPaymentMethodVolume = revenueDetails.cash + revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard; 
-        const cashPercentage = totalPaymentMethodVolume > 0 ? (revenueDetails.cash / totalPaymentMethodVolume) * 100 : 0;
-        const ewalletPercentage = totalPaymentMethodVolume > 0 ? ((revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard) / totalPaymentMethodVolume) * 100 : 0;
 
         let totalCOGS = 0, totalLabor = 0, totalOPEX = 0, totalDeposits = 0, totalCapex = 0;
         const groups: Record<string, CostGroup> = {};
@@ -292,8 +217,44 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             groups[catKey].amount += amount;
         };
 
+        const dailySalesMap: Record<string, number> = {};
+        const dailyExpenseMap: Record<string, number> = {};
+
+        // 统一从快照获取
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
-            s.expenses?.forEach(e => addCost(Number(e.amount || 0), e.category));
+            const cashAmt = Number(s.sales?.cash || 0);
+            const tngAmt = Number(s.sales?.tng || 0);
+            const duitnowAmt = Number(s.sales?.duitnow || 0);
+            const cardAmt = Number(s.sales?.card || 0);
+            const amexAmt = Number(s.sales?.amex || 0);
+            const varianceAmt = Number(s.variance || 0);
+
+            const deliveryAmt = s.sales?.deliveryBreakdown 
+                ? (Number(s.sales.deliveryBreakdown.grab || 0) + Number(s.sales.deliveryBreakdown.panda || 0) + Number(s.sales.deliveryBreakdown.shopee || 0) + Number(s.sales.deliveryBreakdown.lalamove || 0))
+                : 0;
+
+            // 严格采用确认后的实收款作为营业额基础
+            const storeSales = cashAmt + tngAmt + duitnowAmt + cardAmt + amexAmt;
+            
+            revenueDetails.totalRevenue += storeSales + deliveryAmt;
+            revenueDetails.cash += cashAmt;
+            revenueDetails.tng += tngAmt; 
+            revenueDetails.debitCard += duitnowAmt;
+            revenueDetails.creditCard += cardAmt;
+            revenueDetails.amex += amexAmt;
+            revenueDetails.delivery += deliveryAmt;
+            revenueDetails.variance += varianceAmt;
+
+            const dStr = s.date.split('T')[0];
+            dailySalesMap[dStr] = (dailySalesMap[dStr] || 0) + storeSales + deliveryAmt;
+            
+            let dayExp = 0;
+            s.expenses?.forEach(e => {
+                const amt = Number(e.amount || 0);
+                addCost(amt, e.category);
+                dayExp += amt;
+            });
+            dailyExpenseMap[dStr] = (dailyExpenseMap[dStr] || 0) + dayExp;
         });
 
         standaloneExpenses.forEach(e => {
@@ -338,6 +299,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             addCost(totalCommission, 'MBB_COMM');
         }
 
+        const totalPaymentMethodVolume = revenueDetails.cash + revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard + revenueDetails.amex; 
+        const cashPercentage = totalPaymentMethodVolume > 0 ? (revenueDetails.cash / totalPaymentMethodVolume) * 100 : 0;
+        const ewalletPercentage = totalPaymentMethodVolume > 0 ? ((revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard + revenueDetails.amex) / totalPaymentMethodVolume) * 100 : 0;
+
         const totalExpenses = totalCOGS + totalLabor + totalOPEX;
         const grossProfit = revenueDetails.totalRevenue - totalCOGS;
         const netProfit = grossProfit - (totalLabor + totalOPEX);
@@ -349,17 +314,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const opexMargin = revenueDetails.totalRevenue > 0 ? (totalOPEX / revenueDetails.totalRevenue) * 100 : 0;
         const netMargin = revenueDetails.totalRevenue > 0 ? (netProfit / revenueDetails.totalRevenue) * 100 : 0;
 
-        const dailySalesMap: Record<string, number> = {};
-        const dailyExpenseMap: Record<string, number> = {};
-        settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
-            const d = s.date.split('T')[0];
-            const posTotal = Number(s.sales?.total || 0);
-            const posCal = Number(s.sales?.cash || 0) + Number(s.sales?.tng || 0) + Number(s.sales?.duitnow || 0) + Number(s.sales?.card || 0);
-            const delivery = s.sales?.deliveryBreakdown ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0) : 0;
-            dailySalesMap[d] = (dailySalesMap[d] || 0) + Math.max(posTotal, posCal) + Number(delivery);
-            const dayExp = s.expenses?.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0) || 0;
-            dailyExpenseMap[d] = (dailyExpenseMap[d] || 0) + dayExp;
-        });
         const dailySales = Object.entries(dailySalesMap)
             .map(([date, sales]) => ({ date, sales, expenses: dailyExpenseMap[date] || 0 }))
             .sort((a, b) => a.date.localeCompare(b.date));
@@ -404,7 +358,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
             s.expenses?.forEach((e, idx) => {
-                addItem({ id: `${s.id}_${idx}`, date: s.date, category: e.category, desc: `${e.company || 'Petty Cash'} (from Daily Settlement)`, amount: Number(e.amount || 0), source: 'Settlement', type: '' });
+                addItem({ id: `${s.id}_${idx}`, date: s.date.split('T')[0], category: e.category, desc: `${e.company || 'Petty Cash'} (from Daily Settlement)`, amount: Number(e.amount || 0), source: 'Settlement', type: '' });
             });
         });
 
@@ -466,18 +420,18 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             if (s.date >= configStart) {
                 const actualCash = Number(s.sales?.cash || 0) + Number(s.variance || 0);
                 if (actualCash !== 0) {
-                    allTransactions.push({ id: `cash_${s.id}`, date: s.date, time: s.timestamp, type: 'IN', category: 'SALES', description: 'Cash Sales (Net)', amount: actualCash, account: 'CASH' });
+                    allTransactions.push({ id: `cash_${s.id}`, date: s.date.split('T')[0], time: s.timestamp || `${s.date.split('T')[0]}T12:00:00`, type: 'IN', category: 'SALES', description: 'Cash Sales (Net)', amount: actualCash, account: 'CASH' });
                 }
 
                 const bankIncome = Number(s.sales?.tng || 0) + Number(s.sales?.duitnow || 0) + Number(s.sales?.card || 0);
                 const delivery = s.sales?.deliveryBreakdown ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0) : 0;
                 
                 if (bankIncome + delivery > 0) {
-                    allTransactions.push({ id: `bank_${s.id}`, date: s.date, time: s.timestamp, type: 'IN', category: 'SALES', description: 'Digital/Delivery Sales', amount: bankIncome + delivery, account: 'BANK' });
+                    allTransactions.push({ id: `bank_${s.id}`, date: s.date.split('T')[0], time: s.timestamp || `${s.date.split('T')[0]}T12:00:00`, type: 'IN', category: 'SALES', description: 'Digital/Delivery Sales', amount: bankIncome + delivery, account: 'BANK' });
                 }
                 
                 s.expenses?.forEach((e, idx) => { 
-                    allTransactions.push({ id: `${s.id}_e_${idx}`, date: s.date, time: s.timestamp, type: 'OUT', category: e.category, description: `Petty: ${e.company || ''}`, amount: Number(e.amount || 0), account: 'CASH' }); 
+                    allTransactions.push({ id: `${s.id}_e_${idx}`, date: s.date.split('T')[0], time: s.timestamp || `${s.date.split('T')[0]}T12:00:00`, type: 'OUT', category: e.category, description: `Petty: ${e.company || ''}`, amount: Number(e.amount || 0), account: 'CASH' }); 
                 });
             }
         });
@@ -502,25 +456,11 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
             if (t.fromAccount === 'SHAREHOLDER' as any || t.fromAccount === 'OTHER' as any) {
                 allTransactions.push({ 
-                    id: t.id, 
-                    date: dateStr, 
-                    time: t.date, 
-                    type: 'IN', 
-                    category: 'FUND', 
-                    description: t.note || 'Injection / Extra Income', 
-                    amount: Number(t.amount || 0), 
-                    account: t.toAccount 
+                    id: t.id, date: dateStr, time: t.date, type: 'IN', category: 'FUND', description: t.note || 'Injection / Extra Income', amount: Number(t.amount || 0), account: t.toAccount 
                 });
             } else {
                 allTransactions.push({ 
-                    id: `trf_out_${t.id}`, 
-                    date: dateStr, 
-                    time: t.date, 
-                    type: 'TRANSFER', 
-                    category: 'TRANSFER', 
-                    description: `${t.fromAccount} → ${t.toAccount}${t.note ? ` (${t.note})` : ''}`, 
-                    amount: Number(t.amount || 0), 
-                    account: t.fromAccount 
+                    id: `trf_out_${t.id}`, date: dateStr, time: t.date, type: 'TRANSFER', category: 'TRANSFER', description: `${t.fromAccount} → ${t.toAccount}${t.note ? ` (${t.note})` : ''}`, amount: Number(t.amount || 0), account: t.fromAccount 
                 });
             }
         });
@@ -579,9 +519,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 </div>
 
                 <div className="bg-white border-b border-gray-200 p-3 md:p-4 flex flex-col gap-3 md:gap-4 shrink-0 shadow-sm z-10 touch-manipulation">
-                    {/* 1. 顶部：日期筛选栏 (独立一行，占满宽度) */}
                     <div className="flex flex-col md:flex-row justify-between items-center gap-2 md:gap-3 w-full">
-                        {/* 左侧：日历 */}
                         <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-1.5 px-3 w-full md:w-auto justify-center shrink-0">
                             <Calendar size={14} className="text-gray-400 shrink-0"/>
                             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-xs md:text-sm font-bold outline-none w-28 md:w-32 cursor-pointer text-center"/>
@@ -589,7 +527,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                             <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-xs md:text-sm font-bold outline-none w-28 md:w-32 cursor-pointer text-center"/>
                         </div>
                         
-                        {/* 右侧：全中文快捷日期 */}
                         <div className="flex gap-1.5 md:gap-2 bg-gray-100 p-1 rounded-xl overflow-x-auto w-full md:w-auto scrollbar-hide shrink-0 border border-gray-200/50">
                             {[
                                 { key: 'YESTERDAY', label: '昨日' },
@@ -609,7 +546,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                         </div>
                     </div>
 
-                    {/* 2. 底部：功能 Tab 栏 (采用 App 底部导航栏设计：上图标、下文字) */}
                     <div className="flex bg-[#E2E8F0]/60 p-1 md:p-1.5 rounded-2xl w-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.06)] border border-gray-200">
                         {[
                             { id: 'OVERVIEW', label: '损益', en: 'P&L', icon: LayoutList },
@@ -624,24 +560,18 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 <button 
                                     key={tab.id}
                                     onClick={() => setActiveTab(tab.id as any)} 
-                                    /* 核心样式：手机端 flex-col，电脑端 flex-row。flex-1 保证五等分不滑动 */
                                     className={`group flex-1 py-1.5 md:py-2.5 rounded-xl transition-all duration-300 flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 active:scale-95 relative overflow-hidden ${
                                         isActive 
                                             ? 'bg-[#1A1A1A] text-[#FFD700] shadow-[0_4px_12px_rgba(0,0,0,0.15)] ring-1 ring-black/50' 
                                             : 'text-gray-500 hover:text-[#1A1A1A] hover:bg-white/80'
                                     }`}
                                 >
-                                    {/* 激活状态：拉丝光效 */}
                                     {isActive && (
                                         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#FFD700]/20 to-transparent opacity-50 translate-x-[-100%] animate-[pulse_2s_infinite]"></div>
                                     )}
-                                    
-                                    {/* 激活状态：图标微放大 */}
                                     <Icon className={`relative z-10 transition-transform duration-300 w-4 h-4 md:w-[18px] md:h-[18px] shrink-0 ${isActive ? 'text-[#FFD700] scale-110' : 'text-gray-400 group-hover:text-gray-600'}`}/> 
-                                    
                                     <div className="relative z-10 flex flex-col lg:flex-row items-center lg:gap-1 leading-none mt-0.5 md:mt-0">
                                         <span className="text-[10px] md:text-sm font-black tracking-wide">{tab.label}</span>
-                                        {/* 仅在电脑宽屏显示英文，保持手机端极致简约 */}
                                         <span className="hidden lg:inline-block font-mono text-[10px] opacity-70">({tab.en})</span>
                                     </div>
                                 </button>
@@ -649,7 +579,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                         })}
                     </div>
                     
-                    {/* 3. 会计模式切换 */}
                     {(activeTab === 'OVERVIEW' || activeTab === 'COST' || activeTab === 'DIVIDEND') && (
                         <div className="flex items-center justify-between bg-gray-50/80 border-t border-gray-100 px-2 md:px-4 pt-3 pb-1 -mx-2 md:mx-0">
                             <div className="flex items-center gap-1.5 md:gap-2">
@@ -705,19 +634,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             <p className="text-[9px] text-red-400 font-bold mt-1 relative z-10">占营收 {analytics.revenueDetails.totalRevenue > 0 ? ((analytics.costs.totalExpenses / analytics.revenueDetails.totalRevenue) * 100).toFixed(1) : '0'}%</p>
                                         </div>
                                         
-                                        {/* 毛利润带智能预警红绿灯 */}
                                         <div className={`${analytics.netProfit >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-200'} p-4 md:p-5 rounded-2xl border shadow-sm relative group flex flex-col justify-between`}>
                                             <div>
                                                 <div className="flex justify-between items-start">
                                                     <p className="text-[9px] md:text-[10px] font-bold text-emerald-700 uppercase mb-1 tracking-wider">毛利润 (Gross)</p>
-                                                    <div className="relative group/tip cursor-help">
-                                                        <Info size={14} className="text-emerald-600/60 hover:text-emerald-800 transition-colors" />
-                                                        <div className="absolute z-[100] right-0 top-full mt-2 w-56 p-3 bg-[#1A1A1A] border border-[#FFD700]/30 shadow-2xl rounded-xl text-[10px] text-gray-300 opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all pointer-events-none">
-                                                            <div className="font-bold text-[#FFD700] mb-1.5 border-b border-white/10 pb-1 text-xs">💡 核心指标实战意义</div>
-                                                            <p className="mb-1"><strong className="text-emerald-400">65% - 70%</strong>: 菜单定价健康，后厨食材把控极佳。</p>
-                                                            <p><strong className="text-red-400">&lt; 50% (报警)</strong>: 需高度警惕食材涨价、严重浪费损耗，或有人偷吃漏单！</p>
-                                                        </div>
-                                                    </div>
                                                 </div>
                                                 <p className={`text-xl md:text-2xl font-black font-mono ${analytics.grossProfit >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>
                                                     {formatMoney(analytics.grossProfit)}
@@ -730,17 +650,11 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             {analytics.revenueDetails.totalRevenue > 0 && (
                                                 <div className="mt-3 pt-2 border-t border-emerald-200/50">
                                                     {((analytics.grossProfit / analytics.revenueDetails.totalRevenue) * 100) >= 65 ? (
-                                                        <span className="inline-block bg-emerald-100 text-emerald-700 text-[9px] px-2 py-0.5 rounded-md font-black tracking-wide shadow-sm">
-                                                            ✅ 定价与损耗健康
-                                                        </span>
+                                                        <span className="inline-block bg-emerald-100 text-emerald-700 text-[9px] px-2 py-0.5 rounded-md font-black tracking-wide shadow-sm">✅ 定价与损耗健康</span>
                                                     ) : ((analytics.grossProfit / analytics.revenueDetails.totalRevenue) * 100) < 50 ? (
-                                                        <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 text-[9px] px-2 py-0.5 rounded-md font-black tracking-wide shadow-sm animate-pulse">
-                                                            <AlertCircle size={10}/> 报警: 查损耗/涨价/偷窃
-                                                        </span>
+                                                        <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 text-[9px] px-2 py-0.5 rounded-md font-black tracking-wide shadow-sm animate-pulse"><AlertCircle size={10}/> 报警: 查损耗/涨价/偷窃</span>
                                                     ) : (
-                                                        <span className="inline-block bg-orange-100 text-orange-700 text-[9px] px-2 py-0.5 rounded-md font-black tracking-wide shadow-sm">
-                                                            ⚠️ 毛利偏低需优化
-                                                        </span>
+                                                        <span className="inline-block bg-orange-100 text-orange-700 text-[9px] px-2 py-0.5 rounded-md font-black tracking-wide shadow-sm">⚠️ 毛利偏低需优化</span>
                                                     )}
                                                 </div>
                                             )}
@@ -829,86 +743,81 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                         <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
-    <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><PieChart size={16}/> 资金流出结构 (Outflow Structure)</h4>
-    {(analytics.costs.totalExpenses + analytics.costs.totalCapex) > 0 ? (
-        <div>
-            {/* 重新计算包含 CAPEX 的总流出分母 */}
-            {(() => {
-                const totalOutflow = analytics.costs.totalExpenses + analytics.costs.totalCapex;
-                return (
-                    <>
-                        {/* 包含 CAPEX 的四色堆叠进度条 */}
-                        <div className="flex h-8 rounded-full overflow-hidden mb-4 bg-gray-100">
-                            <div className="bg-red-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCOGS / totalOutflow) * 100}%` }} title={`COGS: ${formatMoney(analytics.costs.totalCOGS)}`}></div>
-                            <div className="bg-purple-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalLabor / totalOutflow) * 100}%` }} title={`Labor: ${formatMoney(analytics.costs.totalLabor)}`}></div>
-                            <div className="bg-orange-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalOPEX / totalOutflow) * 100}%` }} title={`OPEX: ${formatMoney(analytics.costs.totalOPEX)}`}></div>
-                            {/* 新增：CAPEX 蓝色色块 */}
-                            {analytics.costs.totalCapex > 0 && (
-                                <div className="bg-blue-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCapex / totalOutflow) * 100}%` }} title={`CAPEX: ${formatMoney(analytics.costs.totalCapex)}`}></div>
-                            )}
-                        </div>
+                                            <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><PieChart size={16}/> 资金流出结构 (Outflow Structure)</h4>
+                                            {(analytics.costs.totalExpenses + analytics.costs.totalCapex) > 0 ? (
+                                                <div>
+                                                    {(() => {
+                                                        const totalOutflow = analytics.costs.totalExpenses + analytics.costs.totalCapex;
+                                                        return (
+                                                            <>
+                                                                <div className="flex h-8 rounded-full overflow-hidden mb-4 bg-gray-100">
+                                                                    <div className="bg-red-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCOGS / totalOutflow) * 100}%` }} title={`COGS: ${formatMoney(analytics.costs.totalCOGS)}`}></div>
+                                                                    <div className="bg-purple-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalLabor / totalOutflow) * 100}%` }} title={`Labor: ${formatMoney(analytics.costs.totalLabor)}`}></div>
+                                                                    <div className="bg-orange-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalOPEX / totalOutflow) * 100}%` }} title={`OPEX: ${formatMoney(analytics.costs.totalOPEX)}`}></div>
+                                                                    {analytics.costs.totalCapex > 0 && (
+                                                                        <div className="bg-blue-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCapex / totalOutflow) * 100}%` }} title={`CAPEX: ${formatMoney(analytics.costs.totalCapex)}`}></div>
+                                                                    )}
+                                                                </div>
 
-                        <div className="space-y-2">
-                            {/* 原有的 COGS, LABOR, OPEX 保持不变，但占比改为占“总流出”的比例 */}
-                            <button onClick={() => handleDrillDown({ type: 'COGS' }, '销货成本 (COGS)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-red-50 transition-colors active:scale-[0.99] group">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 bg-red-400 rounded-sm shrink-0"></div>
-                                    <span className="text-xs font-bold text-gray-600 group-hover:text-red-700">COGS 食材成本</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCOGS)}</span>
-                                    <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCOGS / totalOutflow) * 100).toFixed(1)}%</span>
-                                    <ChevronRight size={12} className="text-gray-300"/>
-                                </div>
-                            </button>
-                            
-                            <button onClick={() => handleDrillDown({ type: 'LABOR' }, '人工薪资 (Labor)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-purple-50 transition-colors active:scale-[0.99] group">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 bg-purple-400 rounded-sm shrink-0"></div>
-                                    <span className="text-xs font-bold text-gray-600 group-hover:text-purple-700">Labor 人工成本</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalLabor)}</span>
-                                    <span className="text-[10px] font-bold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalLabor / totalOutflow) * 100).toFixed(1)}%</span>
-                                    <ChevronRight size={12} className="text-gray-300"/>
-                                </div>
-                            </button>
-                            
-                            <button onClick={() => handleDrillDown({ type: 'OPEX' }, '运营支出 (OPEX)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-orange-50 transition-colors active:scale-[0.99] group">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 bg-orange-400 rounded-sm shrink-0"></div>
-                                    <span className="text-xs font-bold text-gray-600 group-hover:text-orange-700">OPEX 运营支出</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalOPEX)}</span>
-                                    <span className="text-[10px] font-bold text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalOPEX / totalOutflow) * 100).toFixed(1)}%</span>
-                                    <ChevronRight size={12} className="text-gray-300"/>
-                                </div>
-                            </button>
+                                                                <div className="space-y-2">
+                                                                    <button onClick={() => handleDrillDown({ type: 'COGS' }, '销货成本 (COGS)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-red-50 transition-colors active:scale-[0.99] group">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="w-3 h-3 bg-red-400 rounded-sm shrink-0"></div>
+                                                                            <span className="text-xs font-bold text-gray-600 group-hover:text-red-700">COGS 食材成本</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCOGS)}</span>
+                                                                            <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCOGS / totalOutflow) * 100).toFixed(1)}%</span>
+                                                                            <ChevronRight size={12} className="text-gray-300"/>
+                                                                        </div>
+                                                                    </button>
+                                                                    
+                                                                    <button onClick={() => handleDrillDown({ type: 'LABOR' }, '人工薪资 (Labor)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-purple-50 transition-colors active:scale-[0.99] group">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="w-3 h-3 bg-purple-400 rounded-sm shrink-0"></div>
+                                                                            <span className="text-xs font-bold text-gray-600 group-hover:text-purple-700">Labor 人工成本</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalLabor)}</span>
+                                                                            <span className="text-[10px] font-bold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalLabor / totalOutflow) * 100).toFixed(1)}%</span>
+                                                                            <ChevronRight size={12} className="text-gray-300"/>
+                                                                        </div>
+                                                                    </button>
+                                                                    
+                                                                    <button onClick={() => handleDrillDown({ type: 'OPEX' }, '运营支出 (OPEX)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-orange-50 transition-colors active:scale-[0.99] group">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="w-3 h-3 bg-orange-400 rounded-sm shrink-0"></div>
+                                                                            <span className="text-xs font-bold text-gray-600 group-hover:text-orange-700">OPEX 运营支出</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalOPEX)}</span>
+                                                                            <span className="text-[10px] font-bold text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalOPEX / totalOutflow) * 100).toFixed(1)}%</span>
+                                                                            <ChevronRight size={12} className="text-gray-300"/>
+                                                                        </div>
+                                                                    </button>
 
-                            {/* 新增：CAPEX 独立按钮入口 */}
-                            {analytics.costs.totalCapex > 0 && (
-                                <button onClick={() => handleDrillDown({ type: 'CAPEX' }, '资本支出 (CAPEX)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-blue-50 transition-colors active:scale-[0.99] group border-t border-dashed border-gray-200 mt-1 pt-3">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-3 h-3 bg-blue-400 rounded-sm shrink-0"></div>
-                                        <span className="text-xs font-bold text-gray-600 group-hover:text-blue-700">CAPEX 资本支出</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCapex)}</span>
-                                        <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCapex / totalOutflow) * 100).toFixed(1)}%</span>
-                                        <ChevronRight size={12} className="text-gray-300"/>
-                                    </div>
-                                </button>
-                            )}
-                        </div>
-                    </>
-                );
-            })()}
-        </div>
-    ) : (
-        <div className="text-center py-10 text-gray-400 text-xs">暂无支出数据</div>
-    )}
-</div>
+                                                                    {analytics.costs.totalCapex > 0 && (
+                                                                        <button onClick={() => handleDrillDown({ type: 'CAPEX' }, '资本支出 (CAPEX)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-blue-50 transition-colors active:scale-[0.99] group border-t border-dashed border-gray-200 mt-1 pt-3">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <div className="w-3 h-3 bg-blue-400 rounded-sm shrink-0"></div>
+                                                                                <span className="text-xs font-bold text-gray-600 group-hover:text-blue-700">CAPEX 资本支出</span>
+                                                                            </div>
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCapex)}</span>
+                                                                                <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCapex / totalOutflow) * 100).toFixed(1)}%</span>
+                                                                                <ChevronRight size={12} className="text-gray-300"/>
+                                                                            </div>
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            ) : (
+                                                <div className="text-center py-10 text-gray-400 text-xs">暂无支出数据</div>
+                                            )}
+                                        </div>
 
                                         <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
                                             <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><TrendingUp size={16}/> 利润瀑布图 (Profit Waterfall)</h4>
@@ -1041,10 +950,11 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                     <span className="text-xs font-bold text-blue-700 flex items-center gap-2"><CreditCard size={14}/> Digital (Bank/QR)</span>
                                                     <span className="text-lg font-black text-blue-800">{analytics.percentages.ewallet.toFixed(1)}%</span>
                                                 </div>
-                                                <div className="text-xl font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.tng + analytics.revenueDetails.debitCard + analytics.revenueDetails.creditCard)}</div>
+                                                <div className="text-xl font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.tng + analytics.revenueDetails.debitCard + analytics.revenueDetails.creditCard + analytics.revenueDetails.amex)}</div>
                                                 <div className="mt-2 text-[10px] text-blue-600 space-y-0.5">
                                                     <div className="flex justify-between"><span>Debit Card:</span><span>{formatMoney(analytics.revenueDetails.debitCard)}</span></div>
                                                     <div className="flex justify-between"><span>Credit Card:</span><span>{formatMoney(analytics.revenueDetails.creditCard)}</span></div>
+                                                    <div className="flex justify-between"><span>Amex:</span><span>{formatMoney(analytics.revenueDetails.amex)}</span></div>
                                                     <div className="flex justify-between"><span>TNG eWallet:</span><span>{formatMoney(analytics.revenueDetails.tng)}</span></div>
                                                 </div>
                                             </div>
@@ -1431,7 +1341,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             <p className="text-xs font-black uppercase mb-2">REVENUE (总营收)</p>
                                             <div className="flex justify-between text-sm mb-1"><span>Total Revenue</span><span className="font-mono font-bold">RM {Number(analytics.revenueDetails.totalRevenue || 0).toFixed(2)}</span></div>
                                             <div className="flex justify-between text-xs text-gray-500"><span>- Cash</span><span className="font-mono">RM {Number(analytics.revenueDetails.cash || 0).toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-xs text-gray-500"><span>- Digital/Card</span><span className="font-mono">RM {Number((analytics.revenueDetails.tng || 0) + (analytics.revenueDetails.creditCard || 0) + (analytics.revenueDetails.debitCard || 0)).toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-xs text-gray-500"><span>- Digital/Card</span><span className="font-mono">RM {Number((analytics.revenueDetails.tng || 0) + (analytics.revenueDetails.creditCard || 0) + (analytics.revenueDetails.debitCard || 0) + (analytics.revenueDetails.amex || 0)).toFixed(2)}</span></div>
                                         </div>
                                         <div>
                                             <p className="text-xs font-black uppercase mb-2">EXPENSES (经营支出)</p>

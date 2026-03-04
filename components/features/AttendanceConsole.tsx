@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Clock, LogIn, LogOut, User, Search, CheckCircle2, AlertCircle, Calendar, X, History, Briefcase, Coffee, Edit3, Lock, AlertTriangle, ListChecks, FileBarChart, CheckSquare, XCircle, TrendingUp, ChefHat, Utensils, Trash2, Check, ArrowRight, CalendarOff, Palmtree, Home, Zap, ChevronDown, Users, FileDown, Loader2 } from 'lucide-react';
+import { Clock, LogIn, LogOut, User, Search, CheckCircle2, AlertCircle, Calendar, X, History, Briefcase, Coffee, Edit3, Lock, AlertTriangle, ListChecks, FileBarChart, CheckSquare, XCircle, TrendingUp, ChefHat, Utensils, Trash2, Check, ArrowRight, CalendarOff, Palmtree, Home, Zap, ChevronDown, Users, FileDown, Loader2, Droplets } from 'lucide-react';
 import { Employee, AttendanceRecord, RosterStatus } from '../../types';
 import { DataManager } from '../../utils/dataManager';
 import { jsPDF } from "jspdf";
@@ -16,7 +15,6 @@ const STANDARD_WORK_HOURS = 10;
 const DEFAULT_LOCAL_REST = 4;
 const DEFAULT_FOREIGN_REST = 2;
 
-// ... (Roster Status Badges Helper remains same) ...
 const getRosterBadge = (status: RosterStatus) => {
     switch (status) {
         case 'OFF': return { label: '休息 (OFF)', color: 'bg-gray-100 text-gray-500 border-gray-200', icon: Home };
@@ -28,7 +26,6 @@ const getRosterBadge = (status: RosterStatus) => {
     }
 };
 
-// ... (RollCallModal Component remains same) ...
 const RollCallModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
@@ -83,10 +80,9 @@ const RollCallModal: React.FC<{
             ruleDate.setHours(16, 0, 0, 0);
             const isLate = clockInDate > ruleDate;
 
-            // Auto calculate Out Time (Next Day 2 AM)
             const targetOutTime = new Date(dateStr);
-            targetOutTime.setDate(targetOutTime.getDate() + 1); // Next day
-            targetOutTime.setHours(2, 0, 0, 0); // 02:00:00
+            targetOutTime.setDate(targetOutTime.getDate() + 1); 
+            targetOutTime.setHours(2, 0, 0, 0); 
 
             const durationMinutes = Math.floor((targetOutTime.getTime() - clockInDate.getTime()) / 60000);
 
@@ -96,9 +92,9 @@ const RollCallModal: React.FC<{
                 employeeName: emp.name,
                 date: dateStr,
                 clockIn: clockInDate.toISOString(),
-                clockOut: targetOutTime.toISOString(), // Auto set
+                clockOut: targetOutTime.toISOString(), 
                 durationMinutes: Math.max(0, durationMinutes),
-                status: isLate ? 'LATE' : 'COMPLETED', // Directly completed
+                status: isLate ? 'LATE' : 'COMPLETED', 
                 notes: 'Manual Time In (Auto-out @ 2AM)'
             };
 
@@ -209,9 +205,7 @@ const RollCallModal: React.FC<{
     );
 };
 
-// --- COMPLIANCE REPORT MODAL (UPDATED FOR PDF EXPORT & CUSTOM REST DAYS) ---
 const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; staffList: Employee[]; }> = ({ isOpen, onClose, staffList }) => {
-    // ... (No changes here, keeping existing code logic)
     const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
     const [records, setRecords] = useState<AttendanceRecord[]>([]);
     const [loading, setLoading] = useState(false);
@@ -236,7 +230,6 @@ const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; st
             const lateCount = empRecords.filter(r => r.status === 'LATE').length;
             const isLocal = emp.nationality.includes('Malaysian') || emp.nationality.includes('🇲🇾');
             
-            // PRIORITY: Check employee profile settings first, fallback to nationality default
             const restDaysQuota = emp.monthlyRestDays ?? (isLocal ? DEFAULT_LOCAL_REST : DEFAULT_FOREIGN_REST);
             const targetDays = daysInMonth - restDaysQuota;
             
@@ -248,11 +241,10 @@ const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; st
         if (!printRef.current) return;
         setIsGeneratingPdf(true);
         try {
-            await new Promise(r => setTimeout(r, 500)); // Allow render
+            await new Promise(r => setTimeout(r, 500)); 
             const canvas = await html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
             const imgData = canvas.toDataURL('image/jpeg', 1.0);
             
-            // A4 Portrait
             const pdf = new jsPDF('p', 'mm', 'a4'); 
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
@@ -365,7 +357,6 @@ const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; st
     );
 }
 
-// ... (SecurityPinModal, EditRecordModal remain same) ...
 const SecurityPinModal: React.FC<{ isOpen: boolean; onClose: () => void; onSuccess: () => void; employeeName: string; targetPin: string; }> = ({ isOpen, onClose, onSuccess, employeeName, targetPin }) => {
     const [pin, setPin] = useState('');
     const [error, setError] = useState('');
@@ -467,11 +458,9 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
 
     const initiateClockAction = (employee: Employee, type: 'IN' | 'OUT') => { 
         if (type === 'IN') {
-             // For IN, we require PIN
              setPendingAction({ type, employee }); 
              setSecurityModalOpen(true); 
         } else {
-             // Should not happen as 'OUT' is disabled in new logic, but safe to keep
              setPendingAction({ type, employee });
              setSecurityModalOpen(true);
         }
@@ -487,13 +476,9 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
             const ruleDate = new Date(dateStr); ruleDate.setHours(16, 0, 0, 0);
             const isLate = now > ruleDate;
             
-            // AUTO CALCULATE OUT TIME TO 2AM NEXT DAY
             const targetOutTime = new Date(dateStr);
-            targetOutTime.setDate(targetOutTime.getDate() + 1); // Next day
-            targetOutTime.setHours(2, 0, 0, 0); // 02:00:00
-
-            // If current time is past 2AM already (e.g. they clocked in at 3 AM), treat as late arrival for previous day but out immediately?
-            // Assuming standard flow: clocking in between 4PM and 2AM.
+            targetOutTime.setDate(targetOutTime.getDate() + 1); 
+            targetOutTime.setHours(2, 0, 0, 0); 
             
             const durationMinutes = Math.floor((targetOutTime.getTime() - now.getTime()) / 60000);
 
@@ -503,16 +488,15 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 employeeName: employee.name, 
                 date: dateStr, 
                 clockIn: now.toISOString(), 
-                clockOut: targetOutTime.toISOString(), // Auto set
+                clockOut: targetOutTime.toISOString(), 
                 durationMinutes: Math.max(0, durationMinutes), 
-                status: isLate ? 'LATE' : 'COMPLETED', // Directly COMPLETED or LATE (which implies completed)
+                status: isLate ? 'LATE' : 'COMPLETED', 
                 notes: 'Auto-Clocked Out @ 2AM'
             };
             
             await DataManager.saveAttendance(newRecord);
             setTodayRecords(prev => [...prev, newRecord]);
         } else {
-            // Deprecated path but kept for safety
             const record = todayRecords.find(r => r.employeeId === employee.id);
             if (!record) return;
             const duration = Math.floor((now.getTime() - new Date(record.clockIn).getTime()) / 60000);
@@ -523,8 +507,6 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
         setPendingAction(null);
     };
 
-    // --- HELPER FOR BATCH GROUPS ---
-    // Specifically separates FLOOR (FOH + Bar + Dish) from KITCHEN (Rest of BOH)
     const getBatchGroup = (role: string): 'FLOOR' | 'KITCHEN' => {
         const r = role.toUpperCase();
         if (['MANAGER', 'SUPERVISOR', 'COUNTER', 'CAPTAIN', 'WAITER', 'CLEANER', 'PART_TIME', 'BAR', 'DISH', '水吧', '洗碗'].some(k => r.includes(k))) {
@@ -533,20 +515,16 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
         return 'KITCHEN';
     };
 
-    // --- UPDATED BATCH CLOCK IN FEATURE ---
     const handleBatchClockIn = async (targetGroup: 'FLOOR' | 'KITCHEN' | 'ALL') => {
-        setShowBatchMenu(false); // Close menu
+        setShowBatchMenu(false); 
 
         const eligibleStaff = staffList.filter(staff => {
-            // 1. Check if already has record
             const hasRecord = todayRecords.some(r => r.employeeId === staff.id);
             if (hasRecord) return false;
 
-            // 2. Check Roster Status (Skip if explicitly OFF/MC/LEAVE/ABSENT)
             const status = dailyRoster[staff.id];
             if (status && ['OFF', 'MC', 'LEAVE', 'ABSENT', 'ANNUAL'].includes(status)) return false;
 
-            // 3. Check Group Membership
             if (targetGroup !== 'ALL') {
                 const staffGroup = getBatchGroup(staff.role);
                 if (staffGroup !== targetGroup) return false;
@@ -560,16 +538,14 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
             return;
         }
 
-        const groupName = targetGroup === 'FLOOR' ? '楼面+水吧+洗碗' : targetGroup === 'KITCHEN' ? '厨房团队' : '全员';
+        const groupName = targetGroup === 'FLOOR' ? '楼面+水吧+洗碗' : targetGroup === 'KITCHEN' ? '厨房核心' : '全员';
         if (!confirm(`确定要为 ${eligibleStaff.length} 位 [${groupName}] 员工一键打卡吗？\n(Batch Clock In for ${eligibleStaff.length} staff?)`)) return;
 
         setIsLoading(true);
         try {
-            // Use 16:00 as standard start time
             const clockInTime = new Date(selectedDate);
             clockInTime.setHours(16, 0, 0, 0); 
             
-            // Auto Out at 2AM next day
             const clockOutTime = new Date(selectedDate);
             clockOutTime.setDate(clockOutTime.getDate() + 1);
             clockOutTime.setHours(2, 0, 0, 0);
@@ -582,7 +558,7 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                     date: selectedDate,
                     clockIn: clockInTime.toISOString(),
                     clockOut: clockOutTime.toISOString(),
-                    durationMinutes: 600, // 10 hours
+                    durationMinutes: 600, 
                     status: 'COMPLETED',
                     notes: `Batch Auto-In (${groupName})`
                 };
@@ -613,9 +589,16 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
 
     const filteredStaff = staffList.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.id.includes(searchTerm));
     
-    const isFOH = (role: string) => ['MANAGER', 'SUPERVISOR', 'COUNTER', 'CAPTAIN', 'WAITER', 'CLEANER', 'PART_TIME'].some(r => role.toUpperCase().includes(r));
+    // --- UPDATED FOUR-TIER ROLE CLASSIFICATION ---
+    const isWaterBar = (role: string) => ['BAR', '水吧'].some(r => role.toUpperCase().includes(r));
+    const isDishwasher = (role: string) => ['DISH', '洗碗', 'CLEANER', '清洁', '后勤'].some(r => role.toUpperCase().includes(r));
+    const isFOH = (role: string) => ['MANAGER', 'SUPERVISOR', 'COUNTER', 'CAPTAIN', 'WAITER', 'PART_TIME'].some(r => role.toUpperCase().includes(r)) && !isWaterBar(role) && !isDishwasher(role);
+    const isBOH = (role: string) => !isFOH(role) && !isWaterBar(role) && !isDishwasher(role); // Everyone else defaults to Kitchen/BOH
+
     const fohStaff = filteredStaff.filter(s => isFOH(s.role));
-    const bohStaff = filteredStaff.filter(s => !isFOH(s.role));
+    const waterBarStaff = filteredStaff.filter(s => isWaterBar(s.role));
+    const dishwasherStaff = filteredStaff.filter(s => isDishwasher(s.role));
+    const bohStaff = filteredStaff.filter(s => isBOH(s.role));
 
     const sortStaff = (list: Employee[]) => {
         return list.sort((a, b) => {
@@ -628,15 +611,15 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
     };
 
     const sortedFOH = sortStaff(fohStaff);
+    const sortedWaterBar = sortStaff(waterBarStaff);
+    const sortedDishwasher = sortStaff(dishwasherStaff);
     const sortedBOH = sortStaff(bohStaff);
 
     const renderStaffCard = (staff: Employee) => {
         const record = todayRecords.find(r => r.employeeId === staff.id);
-        const isWorking = record && !record.clockOut; // Should basically never happen now with auto-out logic unless manual edit removal
-        const isCompleted = !!(record && record.clockOut); // Main "Active" state now
-        const isLate = record && (record.status === 'LATE' || record.status === 'COMPLETED_LATE'); // Adjust if needed
+        const isCompleted = !!(record && record.clockOut); 
+        const isLate = record && (record.status === 'LATE' || record.status === 'COMPLETED_LATE'); 
         
-        // Determine if it's currently within the shift
         const now = new Date();
         const isActiveShift = isCompleted && new Date(record.clockOut).getTime() > now.getTime();
 
@@ -673,7 +656,6 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 </div>
 
                 <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
-                    {/* AUTO COMPLETED / WORKING STATE */}
                     {isCompleted ? (
                         <>
                             <div className="flex flex-col">
@@ -709,7 +691,6 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
 
     return (
         <div className="fixed inset-0 bg-[#F5F7FA] z-[100] flex flex-col animate-in fade-in duration-200 font-sans">
-            {/* Header - iPad Optimized */}
             <div className="bg-[#1A1A1A] p-5 flex flex-col md:flex-row justify-between items-center text-white shrink-0 shadow-xl z-20 border-b-4 border-[#FFD700]">
                 <div className="flex items-center gap-5 w-full md:w-auto mb-4 md:mb-0">
                     <div className="bg-[#FFD700] text-black p-3 rounded-2xl shadow-gold"><Briefcase size={28} /></div>
@@ -720,7 +701,6 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 </div>
                 <div className="flex items-center gap-3 w-full md:w-auto justify-end">
                     
-                    {/* BATCH CLOCK IN DROPDOWN */}
                     <div className="relative" ref={batchMenuRef}>
                         <button 
                             onClick={() => setShowBatchMenu(!showBatchMenu)} 
@@ -755,7 +735,6 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 </div>
             </div>
 
-            {/* Sub-Header Stats & Filter */}
             <div className="bg-white px-6 py-4 border-b border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0 z-10 shadow-sm">
                 <div className="flex items-center gap-3 w-full md:w-auto bg-gray-50 p-1.5 rounded-2xl border border-gray-200">
                     <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()-1); setSelectedDate(d.toISOString().split('T')[0]); loadData(d.toISOString().split('T')[0]); }} className="p-3 hover:bg-white rounded-xl text-gray-500 transition-colors shadow-sm"><TrendingUp size={20} className="rotate-180"/></button>
@@ -765,7 +744,6 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 
                 <div className="flex gap-6 text-sm font-bold text-gray-500">
                     <span className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1 rounded-lg"><div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></div> Active: {todayRecords.filter(r => {
-                        // Considered active if completed but clockOut time is in the future relative to now
                         return r.clockOut && new Date(r.clockOut).getTime() > new Date().getTime();
                     }).length}</span>
                     <span className="flex items-center gap-2 bg-gray-100 text-gray-600 px-3 py-1 rounded-lg"><div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div> Total: {todayRecords.length}</span>
@@ -777,7 +755,6 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 </div>
             </div>
 
-            {/* Split View Content - Optimized Grid */}
             <div className="flex-grow overflow-y-auto bg-[#F5F7FA]">
                 <div className="p-4 md:p-8 grid grid-cols-1 gap-8">
                     {isLoading ? <div className="text-center py-20 text-gray-400 font-bold animate-pulse text-lg">Loading Staff Data...</div> : (
@@ -785,7 +762,7 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                             {/* FOH Section */}
                             <div className="space-y-4">
                                 <div className="flex items-center gap-3 mb-2 pb-2 border-b-2 border-gray-100">
-                                    <div className="p-2.5 bg-blue-100 text-blue-600 rounded-xl"><Coffee size={24}/></div>
+                                    <div className="p-2.5 bg-yellow-100 text-yellow-700 rounded-xl"><Briefcase size={24}/></div>
                                     <h3 className="font-black text-gray-800 text-xl tracking-tight">楼面团队 (FOH)</h3>
                                     <span className="bg-gray-200 text-gray-600 text-xs font-black px-3 py-1 rounded-full">{sortedFOH.length}</span>
                                 </div>
@@ -794,6 +771,36 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                                     {sortedFOH.length === 0 && <div className="text-center py-12 text-gray-400 text-sm font-bold italic col-span-full bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">No FOH Staff Found</div>}
                                 </div>
                             </div>
+
+                            {/* Water Bar Section */}
+                            {(sortedWaterBar.length > 0 || searchTerm) && (
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 mb-2 pb-2 border-b-2 border-gray-100 mt-4">
+                                        <div className="p-2.5 bg-blue-100 text-blue-600 rounded-xl"><Coffee size={24}/></div>
+                                        <h3 className="font-black text-gray-800 text-xl tracking-tight">水吧团队 (Water Bar)</h3>
+                                        <span className="bg-gray-200 text-gray-600 text-xs font-black px-3 py-1 rounded-full">{sortedWaterBar.length}</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                        {sortedWaterBar.map(renderStaffCard)}
+                                        {sortedWaterBar.length === 0 && <div className="text-center py-12 text-gray-400 text-sm font-bold italic col-span-full bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">No Water Bar Staff Found</div>}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Dishwasher / Support Section */}
+                            {(sortedDishwasher.length > 0 || searchTerm) && (
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 mb-2 pb-2 border-b-2 border-gray-100 mt-4">
+                                        <div className="p-2.5 bg-teal-100 text-teal-600 rounded-xl"><Droplets size={24}/></div>
+                                        <h3 className="font-black text-gray-800 text-xl tracking-tight">后勤与洗碗 (Support/Dish)</h3>
+                                        <span className="bg-gray-200 text-gray-600 text-xs font-black px-3 py-1 rounded-full">{sortedDishwasher.length}</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                        {sortedDishwasher.map(renderStaffCard)}
+                                        {sortedDishwasher.length === 0 && <div className="text-center py-12 text-gray-400 text-sm font-bold italic col-span-full bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">No Support/Dish Staff Found</div>}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* BOH Section */}
                             <div className="space-y-4">
@@ -812,7 +819,6 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 </div>
             </div>
 
-            {/* Modals */}
             <SecurityPinModal isOpen={securityModalOpen} onClose={() => setSecurityModalOpen(false)} onSuccess={executeClockAction} employeeName={pendingAction?.employee.name || ''} targetPin={pendingAction?.employee.pin || '0000'} />
             {editingRecord && <EditRecordModal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} record={editingRecord} onSave={saveEditedRecord} />}
             <RollCallModal isOpen={showRollCall} onClose={() => setShowRollCall(false)} staffList={staffList} todayRecords={todayRecords} dateStr={selectedDate} onUpdate={() => loadData(selectedDate)} dailyRoster={dailyRoster} />

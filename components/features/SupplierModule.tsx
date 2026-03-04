@@ -1,12 +1,19 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Truck, Plus, Search, Phone, MapPin, Edit3, Trash2, X, Save, FileText, Package, Link, CheckCircle2, Calendar, Send, ArrowLeft, Box, Calculator, Grid, Globe, CreditCard, Building2, Mail, Clock, AlertCircle, Tag as TagIcon, FileDown, MoreHorizontal, Receipt, UserCircle, ChevronUp, ChevronDown, Hash, DollarSign, Layers, User, RefreshCw, TrendingUp, ClipboardCheck, ArrowDownToLine, Link as LinkIcon, Unlink, ExternalLink, Loader2, MessageCircle, Info, ShoppingBag, Zap, Scale, Star, CalendarOff } from 'lucide-react';
+import { 
+    Truck, Plus, Search, Phone, MapPin, Edit3, Trash2, X, Save, FileText, 
+    Package, Link, CheckCircle2, Calendar, Send, ArrowLeft, Box, Calculator, 
+    Grid, Globe, CreditCard, Building2, Mail, Clock, AlertCircle, Tag as TagIcon, 
+    FileDown, MoreHorizontal, Receipt, UserCircle, ChevronUp, ChevronDown, Hash, 
+    DollarSign, Layers, User, RefreshCw, TrendingUp, ClipboardCheck, ArrowDownToLine, 
+    Link as LinkIcon, Unlink, ExternalLink, Loader2, MessageCircle, Info, 
+    ShoppingBag, Zap, Scale, Star, CalendarOff 
+} from 'lucide-react';
 import { Supplier, CatalogItem, PurchaseOrder, StockItem, PurchaseOrderItem, UomOption, ExpenseItem, SettlementRecord } from '../../types';
 import { DataManager } from '../../utils/dataManager';
 import { SUPPLIER_TAG_OPTIONS } from '../constants';
 import { jsPDF } from "jspdf";
 import html2canvas from 'html2canvas';
-import { collection, getDocs, writeBatch, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from '../../firebaseConfig';
 import { ModuleGuideButton } from '../ui/ModuleGuide';
 
@@ -58,7 +65,6 @@ const INVENTORY_CATEGORIES = [
     }
 ];
 
-// --- SYNCED WITH ACCOUNTS PAYABLE ---
 const ACCOUNTING_CATEGORIES_OPTIONS = {
     'COGS (销货成本)': [
         { id: 'INGREDIENT_MEAT', label: '食材-肉类 (Meat)' },
@@ -86,11 +92,10 @@ const ACCOUNTING_CATEGORIES_OPTIONS = {
     ]
 };
 
-// Modern Light Theme Input Style
-const INPUT_STYLE = "w-full p-3 bg-white border border-gray-300 rounded-xl text-sm font-bold text-[#1A1A1A] outline-none focus:border-[#8B0000] focus:ring-1 focus:ring-[#8B0000]/20 transition-all placeholder:font-normal placeholder:text-gray-400";
+// 样式：黑金体系下的现代输入框
+const INPUT_STYLE = "w-full p-2.5 bg-gray-50/50 border border-gray-200 rounded-xl text-sm font-bold text-[#1A1A1A] outline-none focus:bg-white focus:border-[#FFD700] focus:ring-4 focus:ring-[#FFD700]/10 transition-all placeholder:font-normal placeholder:text-gray-400";
 const LABEL_STYLE = "text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5 block ml-1";
 
-// Extended Interface for Catch Weight
 interface SupplierReceivedItem extends PurchaseOrderItem {
     receivedQty: number;
     finalCost: number;
@@ -99,7 +104,6 @@ interface SupplierReceivedItem extends PurchaseOrderItem {
 }
 
 export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal = false, onNavigateToStock }) => {
-    // --- MAIN STATE ---
     const [mainTab, setMainTab] = useState<'SUPPLIERS' | 'POS'>('SUPPLIERS');
     const [view, setView] = useState<'LIST' | 'DETAIL'>('LIST');
     
@@ -109,17 +113,14 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
     const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
 
-    // --- EXPENSES STATE ---
     const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
     const [activeDetailTab, setActiveDetailTab] = useState<'CATALOG' | 'BILLS'>('CATALOG');
     const [isBillFormOpen, setIsBillFormOpen] = useState(false);
     const [newBill, setNewBill] = useState<Partial<ExpenseItem>>({});
 
-    // --- TAGS STATE ---
     const [availableTags, setAvailableTags] = useState(SUPPLIER_TAG_OPTIONS);
     const [newTagName, setNewTagName] = useState('');
 
-    // --- FORMS STATE ---
     const [isEditingSupplier, setIsEditingSupplier] = useState(false);
     const [supplierForm, setSupplierForm] = useState<Partial<Supplier>>({});
     
@@ -128,29 +129,24 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
     const [productUoms, setProductUoms] = useState<UomOption[]>(DEFAULT_UOMS);
     const [stockSearchTerm, setStockSearchTerm] = useState('');
 
-    // --- PO CART STATE ---
     const [isCreatingPO, setIsCreatingPO] = useState(false);
     const [cart, setCart] = useState<PurchaseOrderItem[]>([]);
     const [isCartExpanded, setIsCartExpanded] = useState(true);
 
-    // --- RECEIVE PO STATE ---
     const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
     const [receivingPO, setReceivingPO] = useState<PurchaseOrder | null>(null);
     const [receivedItems, setReceivedItems] = useState<SupplierReceivedItem[]>([]); 
     const [isProcessingReceive, setIsProcessingReceive] = useState(false);
 
-    // --- CONFIRMATION STATE ---
     const [deleteProductCandidate, setDeleteProductCandidate] = useState<Partial<CatalogItem> | null>(null);
     const [deletePOCandidate, setDeletePOCandidate] = useState<string | null>(null);
     const [deleteSupplierId, setDeleteSupplierId] = useState<string | null>(null);
 
-    // --- PRINTING STATE ---
     const printRef = useRef<HTMLDivElement>(null);
     const [printingPO, setPrintingPO] = useState<PurchaseOrder | null>(null);
     const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
     const [isSyncingName, setIsSyncingName] = useState(false);
 
-    // --- INITIAL LOAD ---
     useEffect(() => {
         loadData();
     }, []);
@@ -211,19 +207,12 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
             total += billTotal;
             outstanding += billOutstanding;
         });
-        return {
-            total,
-            outstanding,
-            paid: total - outstanding
-        };
+        return { total, outstanding, paid: total - outstanding };
     }, [supplierExpenses]);
-
-    // --- ACTIONS ---
 
     const handleAddCustomTag = () => {
         if (!newTagName.trim()) return;
         const newId = newTagName.toUpperCase().replace(/\s+/g, '_');
-        
         if (!availableTags.find(t => t.id === newId)) {
             const newTagOption = { id: newId, label: newTagName };
             setAvailableTags([...availableTags, newTagOption]);
@@ -254,7 +243,7 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                 tags: supplierForm.tags || [],
                 contact: supplierForm.contact || '',
                 category: supplierForm.category || 'SUPPLIER',
-                restDayNote: supplierForm.restDayNote || '', // Save Rest Day Note
+                restDayNote: supplierForm.restDayNote || '', 
                 isFavorite: supplierForm.isFavorite || false
             };
             const newSup = JSON.parse(JSON.stringify(rawSup)); 
@@ -273,22 +262,13 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
     const handleToggleFavorite = async (e: React.MouseEvent, sup: Supplier) => {
         e.stopPropagation();
         const updatedSup = { ...sup, isFavorite: !sup.isFavorite };
-        
-        // Optimistic update
         setSuppliers(prev => prev.map(s => s.id === sup.id ? updatedSup : s));
-        
         try {
             await DataManager.saveSupplier(updatedSup);
         } catch (err) {
             console.error(err);
-            // Revert on fail
             setSuppliers(prev => prev.map(s => s.id === sup.id ? sup : s));
         }
-    };
-
-    const handleEditSupplier = (sup: Supplier) => {
-        setSupplierForm(sup);
-        setIsEditingSupplier(true);
     };
 
     const executeDeleteSupplier = async () => {
@@ -344,6 +324,7 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
         if (finalBill.outstandingAmount! <= 0) finalBill.paymentStatus = 'PAID';
         else if (finalBill.outstandingAmount! < (finalBill.totalBillAmount || 0)) finalBill.paymentStatus = 'PARTIAL';
         else finalBill.paymentStatus = 'UNPAID';
+        
         await DataManager.saveStandaloneExpense(finalBill);
         await loadExpenses();
         setIsBillFormOpen(false);
@@ -424,7 +405,6 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
     const updateUomOption = (idx: number, field: keyof UomOption, value: any) => { const c = [...productUoms]; c[idx] = { ...c[idx], [field]: value }; setProductUoms(c); };
     const removeUomOption = (idx: number) => { const c = [...productUoms]; c.splice(idx, 1); setProductUoms(c); };
 
-    // --- PO CART LOGIC ---
     const addToCart = (item: CatalogItem, selectedUom?: UomOption) => {
         const orderUnit = selectedUom ? selectedUom.value : item.unit;
         const orderRatio = selectedUom ? selectedUom.ratio : 1;
@@ -477,7 +457,7 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
         };
 
         await DataManager.savePurchaseOrder(newPO);
-        alert(`✅ 采购单 ${newPO.id} 已生成 (Created)`);
+        alert(`✅ 采购单 ${newPO.id} 已生成`);
         
         setCart([]);
         setIsCreatingPO(false);
@@ -489,7 +469,6 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
         if (!deletePOCandidate) return;
         try {
             await DataManager.deletePurchaseOrder(deletePOCandidate);
-            alert("✅ 采购单已删除");
             await loadData();
         } catch (e) {
             console.error(e);
@@ -501,7 +480,6 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
 
     const initiateReceivePO = (po: PurchaseOrder) => {
         setReceivingPO(po);
-        // Map to SupplierReceivedItem with defaults for Catch Weight
         const itemsToCheck: SupplierReceivedItem[] = po.items.map(i => ({ 
             ...i, 
             receivedQty: i.orderQty, 
@@ -524,20 +502,17 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
         setIsProcessingReceive(true);
 
         try {
-            // NEW CALCULATION LOGIC FOR CATCH WEIGHT
             const finalTotal = receivedItems.reduce((sum, item) => {
                 if (item.billByWeight && item.receivedWeight) {
-                    return sum + (item.receivedWeight * item.finalCost); // Price is per KG
+                    return sum + (item.receivedWeight * item.finalCost);
                 } else {
-                    return sum + (item.receivedQty * item.finalCost); // Price is per Unit
+                    return sum + (item.receivedQty * item.finalCost);
                 }
             }, 0);
 
             const stockUpdates = new Map<string, { qtyDelta: number, newCost: number }>();
             
-            // 1. Get supplier to find Category
             const supplier = suppliers.find(s => s.id === receivingPO.supplierId);
-            // Default to SUPPLIER but try to match AP Categories if available
             const billCategory = supplier?.category || 'SUPPLIER';
 
             receivedItems.forEach((item) => {
@@ -546,11 +521,9 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                     const inventoryId = catalogItem.linkedStockId;
                     const baseQtyDelta = item.receivedQty * item.ratio;
                     
-                    // COST RECALCULATION:
                     let baseUnitCost = 0;
                     if (item.billByWeight && item.receivedWeight && item.receivedQty > 0) {
                         const totalLineCost = item.receivedWeight * item.finalCost;
-                        // Cost per unit = Total Cost / Total Units / Unit Ratio
                         baseUnitCost = (totalLineCost / item.receivedQty) / item.ratio;
                     } else {
                         baseUnitCost = item.finalCost / item.ratio;
@@ -582,7 +555,6 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
             const updatedPO = { ...receivingPO, status: 'RECEIVED' as const };
             await DataManager.savePurchaseOrder(updatedPO);
 
-            // Create Expense with Correct Category
             const newBill: ExpenseItem = {
                 id: `exp_${Date.now()}`,
                 category: billCategory, 
@@ -599,7 +571,7 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
             };
             await DataManager.saveStandaloneExpense(newBill);
 
-            alert(`✅ 入库成功！应付账款: RM ${finalTotal.toFixed(2)}\n分类: ${billCategory}\n库存成本已根据实重调整。`);
+            alert(`✅ 入库成功！应付: RM ${finalTotal.toFixed(2)}\n分类: ${billCategory}`);
             setIsReceiveModalOpen(false);
             setReceivingPO(null);
             loadData(); 
@@ -611,7 +583,6 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
         }
     };
 
-    // --- UPDATED MULTI-PAGE PDF EXPORT ---
     const handleExportPO_PDF = async (po: PurchaseOrder) => {
         setPrintingPO(po);
         setIsGeneratingPdf(true);
@@ -631,7 +602,7 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                         scale: 2, 
                         useCORS: true, 
                         backgroundColor: '#ffffff',
-                        windowWidth: 794 // Fix to standard A4 pixel width approx
+                        windowWidth: 794 
                     });
 
                     const imgData = canvas.toDataURL('image/jpeg', 1.0);
@@ -657,7 +628,7 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
         const phone = targetSup.contact.replace(/\D/g, ''); 
         if (!phone) return alert("供应商无联系电话");
         let text = `*PURCHASE ORDER: ${po.id}*\nTo: ${po.supplierName}\nDate: ${po.date.split('T')[0]}\n\n*ITEMS:*\n`;
-        po.items.forEach((item, i) => { text += `${i+1}. ${item.name} [${item.supplierCode || ''}]\n   Qty: ${item.orderQty} ${item.unit}\n`; });
+        po.items.forEach((item, i) => { text += `${i+1}. ${item.name} [${item.supplierCode || ''}]\n  Qty: ${item.orderQty} ${item.unit}\n`; });
         text += `\nPlease confirm delivery. Thanks!`;
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
     };
@@ -669,309 +640,274 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
             s.tags?.some(t => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
             s.id.includes(searchTerm)
         )
-        // Sort logic: Favorites first, then alphabetical
         .sort((a, b) => {
             if (a.isFavorite && !b.isFavorite) return -1;
             if (!a.isFavorite && b.isFavorite) return 1;
             return a.name.localeCompare(b.name);
         });
 
+    // 核心渲染区
     const MainContent = (
-        <div className={`flex flex-col bg-[#F5F7FA] h-full ${isModal ? 'md:max-h-[95vh] md:rounded-[2rem] overflow-hidden shadow-2xl border border-gray-100' : ''} font-sans`}>
-            {/* --- TOP BAR --- */}
-            <div className="bg-[#1A1A1A] text-white shrink-0 border-b-4 border-[#FFD700] p-4 md:px-6 md:py-5 flex flex-col md:flex-row justify-between items-center z-10 shadow-md gap-4 md:gap-0">
-                <div className="flex items-center justify-between w-full md:w-auto">
-                    <div className="flex items-center gap-4">
-                        {view !== 'LIST' && (
-                            <button onClick={() => { setView('LIST'); setSelectedSupplier(null); setIsCreatingPO(false); }} className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors text-white">
-                                <ArrowLeft size={20}/>
-                            </button>
-                        )}
-                        <div>
-                            <h3 className="font-serif font-black text-lg md:text-xl tracking-wide flex items-center gap-2 text-white">
-                                <Truck className="text-[#FFD700]" size={24}/> <span className="truncate">供应商管理</span>
-                            </h3>
-                            <p className="text-[9px] md:text-[10px] text-gray-400 font-mono uppercase tracking-widest mt-0.5">Supplier Management</p>
+        <div className={`flex flex-col bg-[#F5F7FA] h-full ${isModal ? 'md:max-h-[92vh] md:rounded-[2rem] overflow-hidden shadow-2xl border border-gray-100' : ''} font-sans relative`}>
+            
+            {/* 顶部黑金毛玻璃导航栏 */}
+            <div className="bg-[#1A1A1A]/95 backdrop-blur-md text-white shrink-0 border-b border-[#FFD700]/50 px-4 py-3 md:px-6 md:py-4 flex justify-between items-center z-20 sticky top-0 shadow-lg">
+                <div className="flex items-center gap-3 md:gap-4">
+                    {view !== 'LIST' && (
+                        <button onClick={() => { setView('LIST'); setSelectedSupplier(null); setIsCreatingPO(false); }} className="p-2 bg-white/10 hover:bg-[#FFD700] hover:text-black rounded-xl transition-all shadow-sm">
+                            <ArrowLeft size={18}/>
+                        </button>
+                    )}
+                    <div className="flex items-center gap-3">
+                        <div className="bg-[#FFD700] text-black p-2 rounded-lg shadow-sm hidden md:block">
+                            <Truck size={20}/> 
                         </div>
-                    </div>
-                    
-                    {/* Mobile Actions (Close/Help) */}
-                    <div className="flex items-center gap-2 md:hidden">
-                         <ModuleGuideButton module="SUPPLIER" />
-                         {onClose && <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white"><X size={20}/></button>}
+                        <div>
+                            <h3 className="font-serif font-black text-sm md:text-lg tracking-wide text-white flex items-center gap-2">
+                                <Truck size={16} className="md:hidden text-[#FFD700]"/> 供应商与采购
+                            </h3>
+                            <p className="text-[9px] text-gray-400 font-mono uppercase tracking-widest mt-0.5">Supplier Management</p>
+                        </div>
                     </div>
                 </div>
 
-                {/* Desktop Actions */}
+                {/* 桌面端 Tabs & Actions */}
                 <div className="hidden md:flex gap-3 items-center">
-                     {/* Tab Switcher */}
-                     <div className="flex bg-white/10 p-1 rounded-xl">
-                        <button onClick={() => { setMainTab('SUPPLIERS'); setView('LIST'); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${mainTab === 'SUPPLIERS' ? 'bg-[#FFD700] text-black shadow-sm' : 'text-gray-300 hover:text-white'}`}>
-                            <UserCircle size={14}/> 供应商
+                     <div className="flex bg-white/10 p-1 rounded-xl backdrop-blur-sm border border-white/5">
+                        <button onClick={() => { setMainTab('SUPPLIERS'); setView('LIST'); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${mainTab === 'SUPPLIERS' ? 'bg-[#FFD700] text-[#1A1A1A] shadow-md scale-100' : 'text-gray-300 hover:text-white hover:bg-white/5'}`}>
+                            <UserCircle size={16}/> 供应商
                         </button>
-                        <button onClick={() => { setMainTab('POS'); setView('LIST'); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${mainTab === 'POS' ? 'bg-[#FFD700] text-black shadow-sm' : 'text-gray-300 hover:text-white'}`}>
-                            <FileText size={14}/> 采购单
+                        <button onClick={() => { setMainTab('POS'); setView('LIST'); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${mainTab === 'POS' ? 'bg-[#FFD700] text-[#1A1A1A] shadow-md scale-100' : 'text-gray-300 hover:text-white hover:bg-white/5'}`}>
+                            <FileText size={16}/> 采购单
                         </button>
                     </div>
                     <div className="w-px h-8 bg-white/20 mx-2"></div>
                     <ModuleGuideButton module="SUPPLIER" />
-                    {onClose && <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white"><X size={20}/></button>}
+                    {onClose && <button onClick={onClose} className="p-2 hover:bg-red-500 hover:text-white rounded-xl transition-colors text-gray-300"><X size={20}/></button>}
+                </div>
+                
+                {/* 手机端 Close */}
+                <div className="md:hidden flex items-center gap-2">
+                     <ModuleGuideButton module="SUPPLIER" />
+                     {onClose && <button onClick={onClose} className="p-1.5 hover:bg-red-500 hover:text-white rounded-lg transition-colors text-gray-300"><X size={18}/></button>}
                 </div>
             </div>
 
-            {/* MOBILE TAB SWITCHER (Visible only on mobile list view) */}
-            <div className="md:hidden bg-white border-b border-gray-200 p-2 flex gap-2 shrink-0">
-                <button onClick={() => { setMainTab('SUPPLIERS'); setView('LIST'); }} className={`flex-1 py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${mainTab === 'SUPPLIERS' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-md' : 'bg-gray-100 text-gray-500'}`}>
+            {/* 手机端标签切换 */}
+            <div className="md:hidden bg-white border-b border-gray-200 p-2 flex gap-2 shrink-0 z-10 shadow-sm relative">
+                <button onClick={() => { setMainTab('SUPPLIERS'); setView('LIST'); }} className={`flex-1 py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${mainTab === 'SUPPLIERS' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-md' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>
                     <UserCircle size={14}/> 供应商列表
                 </button>
-                <button onClick={() => { setMainTab('POS'); setView('LIST'); }} className={`flex-1 py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${mainTab === 'POS' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-md' : 'bg-gray-100 text-gray-500'}`}>
+                <button onClick={() => { setMainTab('POS'); setView('LIST'); }} className={`flex-1 py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${mainTab === 'POS' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-md' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>
                     <FileText size={14}/> 采购单记录
                 </button>
             </div>
 
-            {/* --- CONTENT AREA --- */}
-            <div className="flex-grow overflow-y-auto bg-[#F5F7FA] p-4 md:p-6 pb-32">
+            {/* 主内容区 */}
+            <div className="flex-grow overflow-y-auto p-4 md:p-6 pb-24 md:pb-8 scroll-smooth relative z-0">
                 
-                {/* 1. SUPPLIER LIST VIEW */}
+                {/* 1. 供应商列表（高定版网格） */}
                 {mainTab === 'SUPPLIERS' && view === 'LIST' && (
-                    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                        {/* Search & Actions Bar */}
-                        <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                    <div className="max-w-7xl mx-auto space-y-5 animate-in fade-in slide-in-from-bottom-4">
+                        
+                        <div className="flex flex-col md:flex-row justify-between items-center gap-3 bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
                             <div className="relative w-full md:w-96">
-                                <Search className="absolute left-4 top-3.5 text-gray-400" size={18}/>
+                                <Search className="absolute left-3 top-2.5 text-gray-400" size={16}/>
                                 <input 
                                     type="text" 
-                                    placeholder="搜索供应商 / ID / 标签..." 
+                                    placeholder="搜索供应商名称 / 编号 / 标签..." 
                                     value={searchTerm}
                                     onChange={e => setSearchTerm(e.target.value)}
-                                    className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#FFD700] transition-all outline-none"
+                                    className="w-full pl-9 pr-4 py-2 bg-gray-50/80 border border-gray-200 rounded-xl text-sm font-bold focus:bg-white focus:border-[#FFD700] focus:ring-4 focus:ring-[#FFD700]/10 transition-all outline-none"
                                 />
                             </div>
-                            <button onClick={handleOpenAddSupplier} className="w-full md:w-auto bg-[#1A1A1A] text-[#FFD700] px-6 py-3 rounded-xl font-bold text-xs shadow-lg flex items-center justify-center gap-2 hover:bg-black transition-transform active:scale-95">
-                                <Plus size={16}/> 新增供应商 (New Supplier)
+                            <button onClick={handleOpenAddSupplier} className="w-full md:w-auto bg-[#1A1A1A] text-[#FFD700] px-5 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(0,0,0,0.15)] flex items-center justify-center gap-2 hover:bg-black transition-all active:scale-95 min-h-[44px]">
+                                <Plus size={16}/> 录入新供应商
                             </button>
                         </div>
 
-                        {/* Grid */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {/* 自适应瀑布流网格 */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                             {filteredSuppliers.map(sup => (
-                                <div key={sup.id} onClick={() => { setSelectedSupplier(sup); setView('DETAIL'); setActiveDetailTab('CATALOG'); }} className="bg-white rounded-[1.5rem] p-5 shadow-sm border border-gray-200 hover:border-[#FFD700] hover:shadow-md transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity"><Truck size={80}/></div>
+                                <div 
+                                    key={sup.id} 
+                                    onClick={() => { setSelectedSupplier(sup); setView('DETAIL'); setActiveDetailTab('CATALOG'); }} 
+                                    className="relative bg-white rounded-[1.5rem] p-4 border border-gray-100 shadow-sm hover:shadow-[0_8px_30px_rgba(255,215,0,0.15)] hover:border-[#FFD700]/60 transition-all duration-300 cursor-pointer group flex flex-col h-full overflow-hidden"
+                                >
+                                    <div className="absolute -top-4 -right-4 w-24 h-24 bg-gradient-to-br from-gray-50 to-gray-100 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500 pointer-events-none"></div>
+                                    <div className="absolute top-2 right-2 p-2 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none"><Truck size={48}/></div>
                                     
-                                    {/* Favorite Toggle Button */}
                                     <button 
                                         onClick={(e) => handleToggleFavorite(e, sup)}
-                                        className="absolute top-4 right-4 z-10 p-1.5 rounded-full bg-white/80 hover:bg-white shadow-sm border border-gray-100 transition-all hover:scale-110 active:scale-95"
+                                        className="absolute top-3 right-3 z-10 p-1.5 rounded-full bg-white/80 backdrop-blur-sm border border-gray-100 hover:bg-gray-50 transition-all hover:scale-110 active:scale-95"
                                     >
-                                        <Star size={18} className={sup.isFavorite ? "fill-[#FFD700] text-[#FFD700]" : "text-gray-300"} />
+                                        <Star size={16} className={sup.isFavorite ? "fill-[#FFD700] text-[#FFD700]" : "text-gray-200 drop-shadow-sm"} />
                                     </button>
 
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="w-12 h-12 rounded-2xl bg-gray-100 text-[#1A1A1A] flex items-center justify-center font-black text-sm border border-gray-200 shadow-inner group-hover:bg-[#FFD700] group-hover:border-[#FFD700] transition-colors">
+                                    <div className="flex items-center gap-3 mb-3 relative z-10">
+                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-b from-[#1A1A1A] to-gray-800 text-[#FFD700] flex items-center justify-center font-black text-[10px] shadow-md group-hover:shadow-[#FFD700]/20 transition-all shrink-0">
                                             {sup.id}
                                         </div>
-                                        <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide border mr-8 ${sup.status === 'ACTIVE' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                                            {sup.status}
-                                        </span>
+                                        <div className="flex-1 min-w-0 pr-8">
+                                            <h4 className="font-black text-base text-[#1A1A1A] truncate group-hover:text-[#8B0000] transition-colors">{sup.name}</h4>
+                                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest mt-1 ${sup.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-600/20'}`}>
+                                                <span className={`w-1 h-1 rounded-full ${sup.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                                                {sup.status}
+                                            </span>
+                                        </div>
                                     </div>
                                     
-                                    <h4 className="font-black text-lg text-[#1A1A1A] mb-1 line-clamp-1 group-hover:text-blue-700 transition-colors pr-6">{sup.name}</h4>
-                                    <p className="text-xs text-gray-500 font-bold mb-2 flex items-center gap-1"><User size={12}/> {sup.contactPerson || 'General'}</p>
-                                    
-                                    {/* Rest Day Indicator */}
                                     {sup.restDayNote && (
-                                        <div className="mb-4 bg-orange-50 border border-orange-100 rounded-lg px-2 py-1.5 flex items-start gap-1.5">
-                                            <CalendarOff size={12} className="text-orange-500 mt-0.5 shrink-0"/>
-                                            <p className="text-[10px] font-bold text-orange-800 leading-tight">{sup.restDayNote}</p>
+                                        <div className="mb-3 bg-orange-50/80 border border-orange-100/50 rounded-lg px-2 py-1.5 flex items-start gap-1.5 relative z-10">
+                                            <CalendarOff size={12} className="text-orange-500 mt-px shrink-0"/>
+                                            <p className="text-[10px] font-bold text-orange-800 leading-tight line-clamp-1">{sup.restDayNote}</p>
                                         </div>
                                     )}
                                     
-                                    <div className="mt-auto space-y-3">
-                                        <div className="flex gap-2 flex-wrap">
-                                            {sup.category && <span className="text-[9px] font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded-md border border-blue-100">{sup.category}</span>}
-                                            {sup.tags?.slice(0,2).map(t => <span key={t} className="text-[9px] font-bold bg-gray-50 text-gray-600 px-2 py-1 rounded-md border border-gray-100">#{t}</span>)}
+                                    <div className="space-y-2 mt-auto relative z-10">
+                                        <p className="text-[11px] text-gray-500 font-medium flex items-center gap-1.5 truncate">
+                                            <User size={12} className="text-gray-400 shrink-0"/> {sup.contactPerson || 'General Contact'}
+                                        </p>
+                                        <div className="flex gap-1.5 flex-wrap">
+                                            {sup.category && <span className="text-[9px] font-bold bg-[#1A1A1A]/5 text-gray-700 px-2 py-0.5 rounded-md border border-gray-200/50 truncate max-w-full">{sup.category}</span>}
+                                            {sup.tags?.slice(0,2).map(t => <span key={t} className="text-[9px] font-bold bg-gray-50 text-gray-500 px-2 py-0.5 rounded-md border border-gray-100 truncate">#{t}</span>)}
                                         </div>
-                                        <div className="pt-3 border-t border-gray-100 flex justify-between items-center text-xs font-bold text-gray-400">
+                                        <div className="pt-3 mt-1 border-t border-gray-100/80 flex justify-between items-center text-[10px] font-bold text-gray-400">
                                             <span>{sup.catalog?.length || 0} Products</span>
-                                            <div className="flex items-center gap-1 text-[#1A1A1A] group-hover:translate-x-1 transition-transform">View <ArrowLeft size={12} className="rotate-180"/></div>
+                                            <div className="flex items-center gap-0.5 text-[#1A1A1A] group-hover:translate-x-1 transition-transform">Details <ArrowLeft size={10} className="rotate-180"/></div>
                                         </div>
                                     </div>
                                 </div>
                             ))}
-                            {filteredSuppliers.length === 0 && (
-                                <div className="col-span-full py-20 text-center text-gray-400 flex flex-col items-center">
-                                    <div className="bg-gray-100 p-4 rounded-full mb-4"><Search size={32} className="opacity-50"/></div>
-                                    <p className="font-bold">未找到相关供应商</p>
-                                </div>
-                            )}
                         </div>
+
+                        {/* 空状态精美引导 */}
+                        {filteredSuppliers.length === 0 && (
+                            <div className="col-span-full py-20 text-center flex flex-col items-center justify-center bg-white rounded-[2rem] border border-gray-100 shadow-sm mt-4">
+                                <div className="bg-gray-50 p-6 rounded-full mb-4 ring-8 ring-gray-50/50"><Truck size={48} className="text-gray-300"/></div>
+                                <h3 className="font-black text-lg text-[#1A1A1A] mb-1">未找到相关供应商</h3>
+                                <p className="text-sm text-gray-400 font-medium mb-6">您可以尝试更换搜索词，或立即新增一个。</p>
+                                <button onClick={handleOpenAddSupplier} className="bg-[#1A1A1A] text-[#FFD700] px-6 py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-black transition-transform active:scale-95 flex items-center gap-2">
+                                    <Plus size={16}/> 立即录入
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 
-                {/* 2. DETAIL VIEW */}
+                {/* 2. 供应商详情页（完美防挤压 + 垃圾桶加回） */}
                 {view === 'DETAIL' && selectedSupplier && (
-                    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-right-8">
-                        {/* HERO HEADER */}
-                        <div className="bg-white rounded-[2rem] p-5 md:p-8 border border-gray-200 shadow-lg relative overflow-hidden group">
-                            {/* Decorative Background */}
-                            <div className="absolute top-0 right-0 w-64 h-64 bg-[#FFD700] opacity-10 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/2"></div>
+                    <div className="max-w-6xl mx-auto space-y-5 animate-in fade-in slide-in-from-right-8">
+                        
+                        <div className="bg-white rounded-[2rem] p-5 md:p-6 border border-gray-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-[#FFD700]/10 to-transparent rounded-full blur-3xl pointer-events-none -translate-y-1/4 translate-x-1/4"></div>
                             
-                            <div className="relative z-10 flex flex-col md:flex-row justify-between items-start gap-6 mb-8">
-                                <div className="flex gap-5 w-full">
-                                    <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gray-50 border border-gray-200 flex items-center justify-center shadow-inner text-[#1A1A1A] shrink-0">
-                                        <Truck size={36} className="text-[#8B0000]" />
+                            {/* 完美修复的 Header */}
+                            <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                                <div className="flex gap-4 w-full md:flex-1 min-w-0 items-center">
+                                    <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 shadow-inner flex items-center justify-center text-[#1A1A1A] shrink-0">
+                                        <Truck size={28} className="text-[#8B0000]" />
                                     </div>
-                                    
                                     <div className="min-w-0 flex-1">
-                                        <div className="flex flex-wrap items-center gap-2 mb-2">
-                                            <span className="px-2 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 text-[10px] font-mono tracking-widest whitespace-nowrap">
-                                                ID: {selectedSupplier.id}
-                                            </span>
-                                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide border whitespace-nowrap ${selectedSupplier.status === 'ACTIVE' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                                                <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 mb-0.5 ${selectedSupplier.status === 'ACTIVE' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 text-[10px] font-mono tracking-widest shrink-0 border border-gray-200/50">{selectedSupplier.id}</span>
+                                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-widest shrink-0 ${selectedSupplier.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-600/20'}`}>
+                                                <span className={`w-1 h-1 rounded-full ${selectedSupplier.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
                                                 {selectedSupplier.status}
                                             </span>
-                                            {/* Rest Day Tag in Detail View */}
                                             {selectedSupplier.restDayNote && (
-                                                <span className="px-2 py-0.5 rounded-md bg-orange-50 border border-orange-200 text-orange-800 text-[10px] font-bold flex items-center gap-1">
+                                                <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-50 border border-orange-200 text-orange-800 text-[9px] font-bold shrink-0">
                                                     <CalendarOff size={10}/> {selectedSupplier.restDayNote}
                                                 </span>
                                             )}
                                         </div>
-                                        <h1 className="text-2xl md:text-4xl font-black text-[#1A1A1A] tracking-tight mb-2 truncate">
-                                            {selectedSupplier.name}
-                                        </h1>
-                                        
-                                        <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs font-medium text-gray-500">
-                                            <div className="flex items-center gap-2">
-                                                <User size={14} />
-                                                {selectedSupplier.contactPerson || 'N/A'}
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <Phone size={14} />
-                                                {selectedSupplier.contact}
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-px h-3 bg-gray-300"></div>
-                                                <span className="text-blue-600 font-bold tracking-wider uppercase">{selectedSupplier.category || 'GENERAL'}</span>
-                                            </div>
+                                        <h1 className="text-xl md:text-3xl font-black text-[#1A1A1A] truncate group-hover:text-[#8B0000] transition-colors" title={selectedSupplier.name}>{selectedSupplier.name}</h1>
+                                        <div className="text-[11px] md:text-xs text-gray-500 flex items-center gap-4 truncate mt-1.5 font-medium">
+                                            <span className="flex items-center gap-1.5 shrink-0"><User size={14} className="text-gray-400"/>{selectedSupplier.contactPerson || 'N/A'}</span>
+                                            <span className="flex items-center gap-1.5 shrink-0"><Phone size={14} className="text-gray-400"/>{selectedSupplier.contact}</span>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-3 w-full md:w-auto">
-                                    <button 
-                                        onClick={() => window.open(`https://wa.me/${selectedSupplier.contact.replace(/\D/g,'')}`, '_blank')}
-                                        className="h-10 flex-1 md:flex-none px-6 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 group/btn"
-                                    >
-                                        <MessageCircle size={16} className="group-hover/btn:animate-bounce" />
-                                        <span>WhatsApp</span>
+                                {/* 操作按钮组 - shrink-0 绝对防挤压 */}
+                                <div className="flex items-center gap-2.5 w-full md:w-auto shrink-0 mt-2 md:mt-0">
+                                    <button onClick={() => window.open(`https://wa.me/${selectedSupplier.contact.replace(/\D/g,'')}`, '_blank')} className="flex-1 md:flex-none min-h-[44px] md:min-h-0 md:h-10 px-5 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-[0_4px_12px_rgba(22,163,74,0.3)] active:scale-95">
+                                        <MessageCircle size={16} /> WhatsApp
                                     </button>
-                                    <div className="h-8 w-px bg-gray-200 mx-1 hidden md:block"></div>
-                                    <button onClick={() => { setSupplierForm(selectedSupplier); setIsEditingSupplier(true); }} className="p-2.5 text-gray-400 hover:text-black hover:bg-gray-100 rounded-xl transition-all border border-gray-200 md:border-0"><Edit3 size={18}/></button>
-                                    <button onClick={() => setDeleteSupplierId(selectedSupplier.id)} className="md:hidden p-2.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all border border-gray-200"><Trash2 size={18}/></button>
+                                    <button onClick={() => { setSupplierForm(selectedSupplier); setIsEditingSupplier(true); }} className="min-h-[44px] w-[44px] md:min-h-0 md:h-10 md:w-10 flex items-center justify-center text-gray-500 hover:bg-white hover:text-blue-600 hover:shadow-md rounded-xl border border-gray-200 transition-all bg-gray-50/50" title="编辑供应商">
+                                        <Edit3 size={16}/>
+                                    </button>
+                                    <button onClick={() => setDeleteSupplierId(selectedSupplier.id)} className="min-h-[44px] w-[44px] md:min-h-0 md:h-10 md:w-10 flex items-center justify-center text-red-400 hover:bg-rose-500 hover:text-white hover:shadow-md rounded-xl border border-rose-100 transition-all bg-rose-50/50" title="删除供应商">
+                                        <Trash2 size={16}/>
+                                    </button>
                                 </div>
                             </div>
 
-                            {/* Data Grid */}
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 relative">
-                                <div className="p-4 rounded-xl bg-gray-50 border border-gray-100 group/stat hover:border-[#FFD700] transition-colors">
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Payment Term</p>
-                                    <p className="text-sm font-bold text-[#1A1A1A] flex items-center gap-2">
-                                        <FileText size={14} className="text-gray-400" />
-                                        {selectedSupplier.paymentTerm || 'COD'}
-                                    </p>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-4 border-t border-gray-100">
+                                <div className="p-3 rounded-xl bg-gray-50 border border-gray-100/50 hover:border-gray-200 transition-colors">
+                                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Payment</p>
+                                    <p className="font-black text-sm text-[#1A1A1A]">{selectedSupplier.paymentTerm || 'COD'}</p>
                                 </div>
-
-                                <div className="p-4 rounded-xl bg-gray-50 border border-gray-100 group/stat hover:border-[#FFD700] transition-colors">
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Min Order</p>
-                                    <p className="text-sm font-mono font-bold text-[#1A1A1A]">
-                                        RM {selectedSupplier.minOrderValue || 0}
-                                    </p>
+                                <div className="p-3 rounded-xl bg-gray-50 border border-gray-100/50 hover:border-gray-200 transition-colors">
+                                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Min Order</p>
+                                    <p className="font-mono font-black text-sm text-[#1A1A1A]">RM {selectedSupplier.minOrderValue || 0}</p>
                                 </div>
-
-                                <div className="p-4 rounded-xl bg-gray-50 border border-gray-100 group/stat hover:border-blue-300 transition-colors relative overflow-hidden">
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Spent</p>
-                                    <p className="text-lg font-mono font-black text-blue-600">
-                                        RM {billStats.total.toFixed(2)}
-                                    </p>
+                                <div className="p-3 rounded-xl bg-blue-50/50 border border-blue-100/50 hover:border-blue-200 transition-colors">
+                                    <p className="text-[9px] font-bold text-blue-400 uppercase tracking-widest mb-1">Total Spent</p>
+                                    <p className="font-mono font-black text-base text-blue-700">RM {billStats.total.toFixed(2)}</p>
                                 </div>
-
-                                <div className={`p-4 rounded-xl border transition-all relative overflow-hidden ${billStats.outstanding > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-                                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${billStats.outstanding > 0 ? 'text-red-500' : 'text-green-600'}`}>Outstanding</p>
-                                    <p className={`text-lg font-mono font-black ${billStats.outstanding > 0 ? 'text-red-600' : 'text-green-700'}`}>
-                                        RM {billStats.outstanding.toFixed(2)}
-                                    </p>
+                                <div className={`p-3 rounded-xl border transition-colors ${billStats.outstanding > 0 ? 'bg-rose-50/50 border-rose-200' : 'bg-emerald-50/50 border-emerald-200'}`}>
+                                    <p className={`text-[9px] font-bold uppercase tracking-widest mb-1 ${billStats.outstanding > 0 ? 'text-rose-500' : 'text-emerald-600'}`}>Outstanding</p>
+                                    <p className={`font-mono font-black text-base ${billStats.outstanding > 0 ? 'text-rose-600' : 'text-emerald-700'}`}>RM {billStats.outstanding.toFixed(2)}</p>
                                 </div>
-                            </div>
-
-                            <div className="mt-6 pt-6 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-medium text-gray-500">
-                                <div className="flex items-start gap-3">
-                                    <MapPin size={16} className="text-gray-400 mt-0.5 shrink-0" />
-                                    <span className="leading-relaxed">{selectedSupplier.address || 'No Address Recorded'}</span>
-                                </div>
-                                {selectedSupplier.bankAccount && (
-                                    <div className="flex items-center gap-3 md:justify-end">
-                                        <CreditCard size={16} className="text-gray-400 shrink-0" />
-                                        <span className="font-mono tracking-wide text-gray-700 break-all">{selectedSupplier.bankAccount}</span>
-                                    </div>
-                                )}
                             </div>
                         </div>
 
-                        {/* CONTENT TABS */}
-                        <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-200 overflow-hidden min-h-[500px]">
-                            <div className="flex border-b border-gray-100 bg-gray-50/50 p-2 gap-2">
-                                <button onClick={() => setActiveDetailTab('CATALOG')} className={`flex-1 py-3 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${activeDetailTab === 'CATALOG' ? 'bg-white text-[#1A1A1A] shadow-sm ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}>
+                        {/* Tabs 内容区 */}
+                        <div className="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden min-h-[500px]">
+                            <div className="flex border-b border-gray-100 bg-gray-50/80 p-1.5 gap-1.5">
+                                <button onClick={() => setActiveDetailTab('CATALOG')} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${activeDetailTab === 'CATALOG' ? 'bg-white text-[#1A1A1A] shadow-sm ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100/50'}`}>
                                     <Package size={16}/> 产品目录 (Catalog)
                                 </button>
-                                <button onClick={() => setActiveDetailTab('BILLS')} className={`flex-1 py-3 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${activeDetailTab === 'BILLS' ? 'bg-white text-[#1A1A1A] shadow-sm ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}>
-                                    <Receipt size={16}/> 账单记录 (History)
+                                <button onClick={() => setActiveDetailTab('BILLS')} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${activeDetailTab === 'BILLS' ? 'bg-white text-[#1A1A1A] shadow-sm ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100/50'}`}>
+                                    <Receipt size={16}/> 历史账单 (Bills)
                                 </button>
                             </div>
 
                             {activeDetailTab === 'CATALOG' && (
-                                <div className="p-6">
+                                <div className="p-4 md:p-6">
                                     <div className="flex justify-between items-center mb-6">
-                                        <h3 className="font-black text-lg text-[#1A1A1A] flex items-center gap-2">
-                                            <div className="w-8 h-8 rounded-lg bg-[#1A1A1A] text-[#FFD700] flex items-center justify-center">
-                                                <ShoppingBag size={16}/>
-                                            </div>
-                                            供应目录 (Catalog)
+                                        <h3 className="font-black text-base md:text-lg text-[#1A1A1A] flex items-center gap-2">
+                                            <div className="w-8 h-8 rounded-lg bg-[#1A1A1A] text-[#FFD700] flex items-center justify-center shadow-md"><ShoppingBag size={16}/></div>
+                                            供应目录
                                         </h3>
-                                        <button onClick={handleAddProduct} className="group relative px-5 py-2.5 bg-[#1A1A1A] text-white rounded-xl text-xs font-bold shadow-lg overflow-hidden">
-                                            <div className="absolute inset-0 w-full h-full bg-[#FFD700] translate-x-[-100%] group-hover:translate-x-0 transition-transform duration-300 ease-out"></div>
-                                            <span className="relative flex items-center gap-2 group-hover:text-black transition-colors">
-                                                <Plus size={14}/> Add Item
-                                            </span>
+                                        <button onClick={handleAddProduct} className="px-4 py-2.5 bg-[#1A1A1A] text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-[0_4px_12px_rgba(0,0,0,0.15)] hover:bg-black active:scale-95 transition-all">
+                                            <Plus size={14}/> 添加商品
                                         </button>
                                     </div>
                                     
                                     {(!selectedSupplier.catalog || selectedSupplier.catalog.length === 0) ? (
-                                        <div className="py-20 text-center border-2 border-dashed border-gray-100 rounded-3xl">
-                                            <Package size={48} className="mx-auto text-gray-200 mb-2"/>
-                                            <p className="text-gray-400 font-bold text-sm">目录为空 (Empty Catalog)</p>
+                                        <div className="py-16 text-center border-2 border-dashed border-gray-100 rounded-2xl bg-gray-50/50">
+                                            <Package size={40} className="mx-auto text-gray-300 mb-3"/>
+                                            <p className="text-gray-400 font-bold text-sm">目录为空，暂无供应商品</p>
                                         </div>
                                     ) : (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                                             {selectedSupplier.catalog.map(item => (
-                                                <div key={item.id} className="bg-white border border-gray-200 rounded-2xl p-4 hover:border-blue-400 hover:shadow-md transition-all group relative flex flex-col">
+                                                <div key={item.id} className="bg-white border border-gray-200 rounded-2xl p-4 hover:border-[#FFD700] hover:shadow-md transition-all flex flex-col group relative">
                                                     <div className="flex justify-between items-start mb-2">
-                                                        <div className="bg-gray-100 text-gray-500 px-2 py-1 rounded text-[10px] font-mono font-bold">{item.supplierCode || 'NO CODE'}</div>
-                                                        <button onClick={() => { setProductForm(item); setProductUoms(item.uomOptions || DEFAULT_UOMS); setIsEditingProduct(true); }} className="p-1.5 bg-gray-50 text-gray-400 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors"><Edit3 size={12}/></button>
+                                                        <div className="text-[10px] text-gray-500 font-mono bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{item.supplierCode || 'NO-CODE'}</div>
+                                                        <button onClick={() => { setProductForm(item); setProductUoms(item.uomOptions || DEFAULT_UOMS); setIsEditingProduct(true); }} className="text-gray-400 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"><Edit3 size={12}/></button>
                                                     </div>
-                                                    <h4 className="font-bold text-sm text-[#1A1A1A] mb-1 line-clamp-2 min-h-[2.5em]">{item.name}</h4>
-                                                    <div className="flex items-end gap-1 mb-4">
-                                                        <span className="text-lg font-black font-mono text-blue-900">RM {item.price.toFixed(2)}</span>
-                                                        <span className="text-xs text-gray-400 font-bold mb-0.5">/ {item.unit}</span>
-                                                    </div>
+                                                    <h4 className="font-bold text-sm text-[#1A1A1A] mb-1 line-clamp-2 min-h-[2.5em] leading-snug group-hover:text-blue-700 transition-colors">{item.name}</h4>
+                                                    <div className="font-mono text-base font-black text-[#1A1A1A] mb-4">RM {item.price.toFixed(2)}<span className="text-[10px] text-gray-400 ml-1 font-bold">/{item.unit}</span></div>
                                                     
-                                                    <div className="mt-auto pt-3 border-t border-gray-100 flex flex-wrap gap-2">
-                                                        <button onClick={() => addToCart(item)} className="flex-grow bg-[#1A1A1A] text-white py-2 rounded-lg text-xs font-bold hover:bg-black active:scale-95 transition-transform flex items-center justify-center gap-1 shadow-sm">
-                                                            <Plus size={12}/> Add 1 {item.unit}
+                                                    <div className="mt-auto pt-3 border-t border-gray-100 flex gap-2 flex-wrap">
+                                                        <button onClick={() => addToCart(item)} className="flex-1 bg-[#1A1A1A] text-white py-2 rounded-xl text-xs font-bold hover:bg-[#FFD700] hover:text-black active:scale-95 transition-all flex items-center justify-center gap-1 shadow-sm min-h-[36px]">
+                                                            <Plus size={12}/> 1 {item.unit}
                                                         </button>
                                                         {item.uomOptions?.filter(u => u.ratio > 1).map((uom, idx) => (
-                                                            <button key={idx} onClick={() => addToCart(item, uom)} className="flex-grow bg-white border border-gray-200 text-gray-600 py-2 rounded-lg text-[10px] font-bold hover:bg-gray-50 active:scale-95 transition-transform">
+                                                            <button key={idx} onClick={() => addToCart(item, uom)} className="flex-1 bg-white border border-gray-200 text-gray-600 py-2 rounded-xl text-[10px] font-bold hover:bg-gray-50 active:scale-95 transition-all min-h-[36px]">
                                                                 + 1 {uom.value}
                                                             </button>
                                                         ))}
@@ -984,27 +920,27 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                             )}
                             
                             {activeDetailTab === 'BILLS' && (
-                                <div className="p-0">
-                                    <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex gap-4 text-xs font-bold text-gray-500">
-                                        <div className="flex-1">Date / ID</div>
+                                <div className="flex flex-col h-full">
+                                    <div className="bg-gray-50 px-6 py-3 border-b border-gray-100 flex gap-4 text-[11px] font-bold text-gray-500 uppercase tracking-widest sticky top-0">
+                                        <div className="flex-[2]">Date & ID</div>
                                         <div className="flex-1 text-center">Status</div>
                                         <div className="flex-1 text-right">Amount</div>
                                     </div>
-                                    <div className="divide-y divide-gray-100">
-                                        {supplierExpenses.length === 0 ? <div className="p-12 text-center text-gray-400 text-sm">暂无记录</div> : supplierExpenses.map(bill => (
-                                            <div key={bill.id} className="px-6 py-4 flex items-center hover:bg-gray-50 transition-colors">
-                                                <div className="flex-1">
-                                                    <div className="font-bold text-[#1A1A1A]">{bill.time.split('T')[0]}</div>
-                                                    <div className="text-[10px] font-mono text-gray-400">#{bill.id.slice(-6)}</div>
+                                    <div className="divide-y divide-gray-100 overflow-y-auto max-h-[500px]">
+                                        {supplierExpenses.length === 0 ? <div className="p-16 text-center text-gray-400 text-sm font-medium">暂无历史账单记录</div> : supplierExpenses.map(bill => (
+                                            <div key={bill.id} className="px-6 py-4 flex items-center hover:bg-blue-50/30 transition-colors">
+                                                <div className="flex-[2]">
+                                                    <div className="font-bold text-sm text-[#1A1A1A] mb-0.5">{bill.time.split('T')[0]}</div>
+                                                    <div className="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded w-fit">#{bill.id.slice(-8)}</div>
                                                 </div>
                                                 <div className="flex-1 text-center">
-                                                    <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${bill.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider ${bill.paymentStatus === 'PAID' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-600/20'}`}>
                                                         {bill.paymentStatus}
                                                     </span>
                                                 </div>
                                                 <div className="flex-1 text-right">
-                                                    <div className="font-mono font-black text-sm">RM {bill.amount.toFixed(2)}</div>
-                                                    {bill.outstandingAmount && bill.outstandingAmount > 0 && <div className="text-[10px] text-red-500 font-bold">Due: {bill.outstandingAmount.toFixed(2)}</div>}
+                                                    <div className="font-mono font-black text-sm text-[#1A1A1A]">RM {bill.amount.toFixed(2)}</div>
+                                                    {bill.outstandingAmount && bill.outstandingAmount > 0 && <div className="text-[10px] text-rose-500 font-bold mt-0.5">Due: RM {bill.outstandingAmount.toFixed(2)}</div>}
                                                 </div>
                                             </div>
                                         ))}
@@ -1015,55 +951,57 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                     </div>
                 )}
 
-                {/* 3. PO LIST VIEW */}
+                {/* 3. 采购单记录 */}
                 {mainTab === 'POS' && view === 'LIST' && (
-                    <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                         <div className="flex items-center justify-between">
-                             <h3 className="font-black text-xl text-[#1A1A1A] flex items-center gap-2"><ClipboardCheck size={24}/> 采购单管理</h3>
-                             <div className="text-xs font-bold text-gray-400 bg-white px-3 py-1 rounded-full border shadow-sm">{purchaseOrders.length} Orders</div>
+                    <div className="max-w-6xl mx-auto space-y-5 animate-in fade-in slide-in-from-bottom-4">
+                         <div className="flex items-center justify-between bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                             <h3 className="font-black text-base text-[#1A1A1A] flex items-center gap-2">
+                                 <div className="p-2 bg-[#FFD700] rounded-xl"><ClipboardCheck size={18}/></div> 
+                                 采购单历史
+                             </h3>
+                             <div className="text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200">Total: {purchaseOrders.length}</div>
                          </div>
 
                          {purchaseOrders.length === 0 ? (
-                             <div className="bg-white rounded-[2rem] p-12 text-center border border-gray-200">
-                                 <FileText size={48} className="mx-auto text-gray-200 mb-4"/>
-                                 <p className="font-bold text-gray-400">暂无采购单</p>
-                                 <p className="text-xs text-gray-300 mt-1">请在供应商目录中添加商品并下单</p>
+                             <div className="bg-white rounded-[2rem] p-16 text-center border border-gray-100 shadow-sm">
+                                 <div className="bg-gray-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4"><FileText size={32} className="text-gray-300"/></div>
+                                 <p className="font-black text-gray-400 text-lg">暂无采购单</p>
+                                 <p className="text-sm text-gray-400 mt-2">请在供应商产品目录中点击“添加商品”生成采购单。</p>
                              </div>
                          ) : (
-                             <div className="grid grid-cols-1 gap-4">
+                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                  {purchaseOrders.map(po => (
-                                     <div key={po.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-all group">
-                                         <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-                                             <div className="flex items-center gap-4">
-                                                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-xs border ${po.status === 'RECEIVED' ? 'bg-green-50 text-green-700 border-green-200' : po.status === 'CANCELLED' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-yellow-50 text-yellow-700 border-yellow-200'}`}>
+                                     <div key={po.id} className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:border-[#FFD700]/50 transition-all flex flex-col group relative">
+                                         <div className="flex justify-between items-start mb-3">
+                                             <div className="flex items-center gap-3">
+                                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] tracking-widest shadow-sm ${po.status === 'RECEIVED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : po.status === 'CANCELLED' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
                                                      {po.status === 'RECEIVED' ? 'RCV' : po.status === 'CANCELLED' ? 'CNL' : 'ORD'}
                                                  </div>
                                                  <div>
-                                                     <div className="flex items-center gap-2">
-                                                         <span className="font-mono font-black text-lg text-blue-900">{po.id}</span>
-                                                         <span className="text-xs font-bold text-gray-400 bg-gray-50 px-2 py-0.5 rounded">{po.date.split('T')[0]}</span>
-                                                     </div>
-                                                     <div className="font-bold text-[#1A1A1A] text-sm flex items-center gap-1"><Truck size={12} className="text-gray-400"/> {po.supplierName}</div>
+                                                     <div className="font-mono font-black text-sm text-[#1A1A1A]">{po.id}</div>
+                                                     <div className="text-[10px] font-bold text-gray-400">{po.date.split('T')[0]}</div>
                                                  </div>
                                              </div>
-                                             
-                                             <div className="flex items-center gap-6 justify-between md:justify-end border-t md:border-t-0 border-gray-50 pt-3 md:pt-0">
-                                                 <div className="text-right">
-                                                     <p className="text-[10px] font-bold text-gray-400 uppercase">Est. Amount</p>
-                                                     <p className="font-mono font-black text-lg">RM {po.totalEstimated.toFixed(2)}</p>
-                                                 </div>
-                                                 <div className="flex gap-2">
-                                                     {po.status === 'ORDERED' && (
-                                                         <button onClick={() => initiateReceivePO(po)} className="bg-[#1A1A1A] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-lg hover:bg-blue-600 transition-colors flex items-center gap-2">
-                                                             <ClipboardCheck size={14}/> 入库 (Receive)
-                                                         </button>
-                                                     )}
-                                                     <button onClick={() => sendWhatsappPO(po)} className="p-2 bg-green-50 text-green-600 rounded-xl hover:bg-green-100 transition-colors"><Send size={18}/></button>
-                                                     <button onClick={() => handleExportPO_PDF(po)} disabled={isGeneratingPdf && printingPO?.id === po.id} className="p-2 bg-gray-50 text-gray-600 rounded-xl hover:bg-gray-100 transition-colors">
-                                                         {isGeneratingPdf && printingPO?.id === po.id ? <Loader2 size={18} className="animate-spin"/> : <FileDown size={18}/>}
-                                                     </button>
-                                                     <button onClick={() => setDeletePOCandidate(po.id)} className="p-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors"><Trash2 size={18}/></button>
-                                                 </div>
+                                         </div>
+                                         <div className="font-bold text-[#1A1A1A] text-sm flex items-center gap-2 mb-3 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                                             <Truck size={14} className="text-gray-400 shrink-0"/> 
+                                             <span className="truncate">{po.supplierName}</span>
+                                         </div>
+                                         
+                                         <div className="flex justify-between items-end mt-auto pt-3 border-t border-gray-100">
+                                             <div>
+                                                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Est. Amount</p>
+                                                <p className="font-mono font-black text-base text-blue-700">RM {po.totalEstimated.toFixed(2)}</p>
+                                             </div>
+                                             <div className="flex gap-1.5">
+                                                 {po.status === 'ORDERED' && (
+                                                     <button onClick={() => initiateReceivePO(po)} className="bg-[#1A1A1A] text-[#FFD700] px-3 py-1.5 rounded-lg text-[10px] font-bold hover:bg-black transition-colors shadow-md active:scale-95">入库收货</button>
+                                                 )}
+                                                 <button onClick={() => sendWhatsappPO(po)} className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors" title="WhatsApp 发送"><Send size={14}/></button>
+                                                 <button onClick={() => handleExportPO_PDF(po)} disabled={isGeneratingPdf && printingPO?.id === po.id} className="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors" title="导出 PDF">
+                                                     {isGeneratingPdf && printingPO?.id === po.id ? <Loader2 size={14} className="animate-spin"/> : <FileDown size={14}/>}
+                                                 </button>
+                                                 <button onClick={() => setDeletePOCandidate(po.id)} className="p-2 bg-rose-50 text-rose-500 rounded-lg hover:bg-rose-100 transition-colors" title="删除"><Trash2 size={14}/></button>
                                              </div>
                                          </div>
                                      </div>
@@ -1074,295 +1012,408 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                 )}
             </div>
 
-            {/* SUPPLIER EDIT MODAL */}
+            {/* 所有 Modals 的设计也进行了黑金扁平化升级 */}
+            
+            {/* 新增/编辑供应商 Modal */}
             {isEditingSupplier && (
-                <div className="fixed inset-0 bg-black/80 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-white w-full max-w-lg rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+                <div className="fixed inset-0 bg-[#1A1A1A]/80 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white w-full max-w-lg rounded-[2rem] p-6 md:p-8 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto border border-gray-100">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-black text-xl text-[#1A1A1A] flex items-center gap-2">
-                                {supplierForm.id && suppliers.find(s => s.id === supplierForm.id) ? '编辑供应商' : '新增供应商'}
+                                <div className="p-2 bg-gray-100 rounded-xl text-gray-700"><Building2 size={20}/></div>
+                                {supplierForm.id && suppliers.some(s => s.id === supplierForm.id) ? '编辑供应商' : '新增供应商'}
                             </h3>
-                            <button onClick={() => setIsEditingSupplier(false)} className="p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
+                            <button onClick={() => setIsEditingSupplier(false)} className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"><X size={20}/></button>
                         </div>
-                        
                         <div className="space-y-5">
-                            <div><label className={LABEL_STYLE}>Company Name</label><input className={INPUT_STYLE} value={supplierForm.name || ''} onChange={e => setSupplierForm({...supplierForm, name: e.target.value})} placeholder="Supplier Name" /></div>
-
+                            <div>
+                                <label className={LABEL_STYLE}>Company Name (公司名称)</label>
+                                <input className={INPUT_STYLE} value={supplierForm.name || ''} onChange={e => setSupplierForm({...supplierForm, name: e.target.value})} placeholder="e.g. ABC Fresh Food" />
+                            </div>
                             <div className="grid grid-cols-2 gap-4">
-                                <div><label className={LABEL_STYLE}>Supplier ID</label><input className={`${INPUT_STYLE} font-mono bg-gray-100 text-gray-500`} value={supplierForm.id || ''} readOnly /></div>
+                                {/* 核心修复：ID 在已有记录时锁死，新增时可自由编辑 */}
                                 <div>
-                                    <label className={LABEL_STYLE}>Status</label>
+                                    <label className={LABEL_STYLE}>ID (Code)</label>
+                                    <input 
+                                        className={`${INPUT_STYLE} font-mono ${suppliers.some(s => s.id === supplierForm.id) ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'text-blue-700 focus:ring-blue-500'}`} 
+                                        value={supplierForm.id || ''} 
+                                        onChange={e => setSupplierForm({...supplierForm, id: e.target.value.trim().toUpperCase()})} 
+                                        placeholder="如: SUP-001" 
+                                        readOnly={suppliers.some(s => s.id === supplierForm.id)} 
+                                        title={suppliers.some(s => s.id === supplierForm.id) ? "已有供应商主键不可修改" : "可手动输入"}
+                                    />
+                                </div>
+                                <div>
+                                    <label className={LABEL_STYLE}>Status (状态)</label>
                                     <select className={INPUT_STYLE} value={supplierForm.status || 'ACTIVE'} onChange={e => setSupplierForm({...supplierForm, status: e.target.value as any})}>
-                                        <option value="ACTIVE">Active</option>
-                                        <option value="INACTIVE">Inactive</option>
+                                        <option value="ACTIVE">🟢 Active 正常</option>
+                                        <option value="INACTIVE">🔴 Inactive 停用</option>
                                     </select>
                                 </div>
                             </div>
-
-                            {/* NEW: Favorites Toggle */}
-                            <div className="flex items-center gap-3 bg-yellow-50 p-3 rounded-xl border border-yellow-200">
-                                <button 
-                                    onClick={() => setSupplierForm({...supplierForm, isFavorite: !supplierForm.isFavorite})}
-                                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${supplierForm.isFavorite ? 'bg-yellow-400 text-white shadow-md' : 'bg-white border border-yellow-300 text-gray-300'}`}
-                                >
-                                    <Star size={20} className={supplierForm.isFavorite ? "fill-white" : ""} />
-                                </button>
+                            
+                            <div className="flex items-center justify-between bg-yellow-50/50 p-4 rounded-2xl border border-yellow-200/60 cursor-pointer group" onClick={() => setSupplierForm({...supplierForm, isFavorite: !supplierForm.isFavorite})}>
                                 <div>
-                                    <p className="text-sm font-bold text-yellow-800">设为常用供应商 (Favorite)</p>
-                                    <p className="text-[10px] text-yellow-600">将在列表中置顶显示</p>
+                                    <p className="text-sm font-bold text-yellow-800">设为优先常用 (Favorite)</p>
+                                    <p className="text-[10px] text-yellow-600/80 mt-0.5">点亮星星后将在列表顶部优先展示</p>
                                 </div>
-                            </div>
-
-                            {/* NEW: Rest Day Input */}
-                            <div>
-                                <label className={LABEL_STYLE}>休息日 / 公假备注 (Rest Days)</label>
-                                <input 
-                                    className={INPUT_STYLE} 
-                                    value={supplierForm.restDayNote || ''} 
-                                    onChange={e => setSupplierForm({...supplierForm, restDayNote: e.target.value})} 
-                                    placeholder="e.g. Sunday, CNY Day 1-3" 
-                                />
-                                <p className="text-[9px] text-gray-400 mt-1 italic">备注特定休息日，如: "周日休息", "年初一至初三休息"</p>
-                            </div>
-
-                            {/* NEW: Category Selector - Synced with Accounts Payable */}
-                            <div>
-                                <label className={LABEL_STYLE}>Category (Main Type)</label>
-                                <select 
-                                    className={INPUT_STYLE} 
-                                    value={supplierForm.category || 'SUPPLIER'} 
-                                    onChange={e => setSupplierForm({...supplierForm, category: e.target.value})}
-                                >
-                                    <option value="SUPPLIER">一般供应商 (General)</option>
-                                    {Object.entries(ACCOUNTING_CATEGORIES_OPTIONS).map(([group, options]) => (
-                                        <optgroup key={group} label={group}>
-                                            {options.map(opt => (
-                                                <option key={opt.id} value={opt.id}>{opt.label}</option>
-                                            ))}
-                                        </optgroup>
-                                    ))}
-                                </select>
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${supplierForm.isFavorite ? 'bg-[#FFD700] text-white shadow-md scale-110' : 'bg-white border border-yellow-200 text-gray-300 group-hover:bg-yellow-100'}`}>
+                                    <Star size={20} className={supplierForm.isFavorite ? "fill-white" : ""} />
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
-                                <div><label className={LABEL_STYLE}>Contact Person</label><input className={INPUT_STYLE} value={supplierForm.contactPerson || ''} onChange={e => setSupplierForm({...supplierForm, contactPerson: e.target.value})} placeholder="Name" /></div>
-                                <div><label className={LABEL_STYLE}>Phone</label><input className={INPUT_STYLE} value={supplierForm.contact || ''} onChange={e => setSupplierForm({...supplierForm, contact: e.target.value})} placeholder="012..." /></div>
+                                <div>
+                                    <label className={LABEL_STYLE}>Category (分类)</label>
+                                    <select className={INPUT_STYLE} value={supplierForm.category || 'SUPPLIER'} onChange={e => setSupplierForm({...supplierForm, category: e.target.value})}>
+                                        <option value="SUPPLIER">General</option>
+                                        {Object.entries(ACCOUNTING_CATEGORIES_OPTIONS).map(([group, options]) => (
+                                            <optgroup key={group} label={group}>{options.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}</optgroup>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className={LABEL_STYLE}>Rest Days (休息日)</label>
+                                    <input className={INPUT_STYLE} value={supplierForm.restDayNote || ''} onChange={e => setSupplierForm({...supplierForm, restDayNote: e.target.value})} placeholder="e.g. Sunday" />
+                                </div>
                             </div>
-
-                            <div><label className={LABEL_STYLE}>Address</label><textarea className={`${INPUT_STYLE} h-20 resize-none`} value={supplierForm.address || ''} onChange={e => setSupplierForm({...supplierForm, address: e.target.value})} placeholder="Full Address" /></div>
 
                             <div className="grid grid-cols-2 gap-4">
-                                <div><label className={LABEL_STYLE}>Bank Info</label><input className={INPUT_STYLE} value={supplierForm.bankAccount || ''} onChange={e => setSupplierForm({...supplierForm, bankAccount: e.target.value})} placeholder="Bank & Acc No." /></div>
-                                <div><label className={LABEL_STYLE}>Min Order (RM)</label><input type="number" className={INPUT_STYLE} value={supplierForm.minOrderValue || ''} onChange={e => setSupplierForm({...supplierForm, minOrderValue: parseFloat(e.target.value)})} placeholder="0.00" /></div>
-                            </div>
-
-                            {/* Tags */}
-                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                <label className={LABEL_STYLE}>Tags (Additional Labels)</label>
-                                <div className="flex flex-wrap gap-2 mb-3">
-                                    {supplierForm.tags?.map(t => (
-                                        <span key={t} className="bg-white px-2 py-1 rounded-lg text-xs font-bold border border-gray-200 flex items-center gap-1 shadow-sm">
-                                            #{t} <button onClick={() => setSupplierForm({...supplierForm, tags: supplierForm.tags?.filter(tag => tag !== t)})} className="hover:text-red-500"><X size={10}/></button>
-                                        </span>
-                                    ))}
+                                <div>
+                                    <label className={LABEL_STYLE}>Contact Person (联系人)</label>
+                                    <input className={INPUT_STYLE} value={supplierForm.contactPerson || ''} onChange={e => setSupplierForm({...supplierForm, contactPerson: e.target.value})} placeholder="Name" />
                                 </div>
-                                <div className="flex gap-2">
-                                    <input className="flex-1 p-2 text-xs border border-gray-200 rounded-lg outline-none" placeholder="New Tag..." value={newTagName} onChange={e => setNewTagName(e.target.value)} />
-                                    <button onClick={handleAddCustomTag} className="px-3 py-1 bg-[#1A1A1A] text-white rounded-lg text-xs font-bold">Add</button>
+                                <div>
+                                    <label className={LABEL_STYLE}>Phone (电话 - 用于WA)</label>
+                                    <input className={INPUT_STYLE} value={supplierForm.contact || ''} onChange={e => setSupplierForm({...supplierForm, contact: e.target.value})} placeholder="012345678" />
                                 </div>
                             </div>
-
-                            <button onClick={handleSaveSupplier} disabled={isSyncingName} className="w-full py-4 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-lg shadow-lg hover:bg-black mt-2 transition-all active:scale-95 flex items-center justify-center gap-2">
-                                {isSyncingName ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} 保存供应商资料
+                            <div>
+                                <label className={LABEL_STYLE}>Address (地址)</label>
+                                <textarea className={`${INPUT_STYLE} h-20 resize-none`} value={supplierForm.address || ''} onChange={e => setSupplierForm({...supplierForm, address: e.target.value})} placeholder="Full Address" />
+                            </div>
+                            <button onClick={handleSaveSupplier} disabled={isSyncingName} className="w-full py-3.5 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-sm mt-4 flex justify-center items-center gap-2 shadow-[0_4px_12px_rgba(0,0,0,0.15)] hover:bg-black active:scale-95 transition-all">
+                                {isSyncingName ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} 保存供应商资料
                             </button>
                         </div>
                     </div>
                 </div>
             )}
-            
-            {/* PRODUCT EDIT MODAL */}
-            {isEditingProduct && (
-               <div className="fixed inset-0 bg-black/80 z-[160] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-white w-full max-w-lg rounded-[2rem] p-6 shadow-2xl h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-black flex items-center gap-2 text-[#1A1A1A]">{productForm.id ? '编辑物品' : '新增物品'}</h3>
-                            <button onClick={() => setIsEditingProduct(false)} className="p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
-                        </div>
 
-                        <div className="space-y-6">
-                            {/* Inventory Link */}
-                            <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
-                                <h4 className="text-xs font-black text-blue-700 uppercase mb-3 flex items-center gap-2"><LinkIcon size={14}/> 关联库存 (Sync Inventory)</h4>
+            {/* 新增/编辑商品 Modal */}
+            {isEditingProduct && (
+               <div className="fixed inset-0 bg-[#1A1A1A]/80 z-[160] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white w-full max-w-md rounded-[2rem] p-6 md:p-8 shadow-2xl max-h-[90vh] overflow-y-auto border border-gray-100">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-black flex items-center gap-2 text-[#1A1A1A]">
+                                <div className="p-2 bg-gray-100 rounded-xl text-gray-700"><Package size={20}/></div>
+                                {productForm.id ? '编辑商品' : '新增供应商品'}
+                            </h3>
+                            <button onClick={() => setIsEditingProduct(false)} className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"><X size={20}/></button>
+                        </div>
+                        <div className="space-y-5">
+                            <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50">
+                                <h4 className="text-[10px] font-black text-blue-700 uppercase tracking-widest mb-3 flex items-center gap-2"><LinkIcon size={14}/> 关联库存系统</h4>
                                 <div className="relative">
-                                    <Search className="absolute left-3 top-2.5 text-blue-400" size={16}/>
-                                    <input type="text" placeholder="搜索库存物品..." value={stockSearchTerm} onChange={e => setStockSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-white border-2 border-blue-100 rounded-xl text-xs font-bold text-blue-900 outline-none focus:border-blue-400"/>
-                                    {stockSearchTerm && (
-                                        <div className="absolute top-full left-0 w-full bg-white shadow-xl rounded-xl border border-gray-100 mt-2 max-h-40 overflow-y-auto z-50">
-                                            {allStockList.filter(s => s.name.toLowerCase().includes(stockSearchTerm.toLowerCase())).map(s => (
-                                                <button key={s.id} onClick={() => { 
-                                                    setProductForm(prev => ({ 
-                                                        ...prev, 
-                                                        linkedStockId: s.id, 
-                                                        name: s.name, 
-                                                        unit: s.unit,
-                                                        price: s.cost,
-                                                        category: s.category
-                                                    })); 
-                                                    setStockSearchTerm(''); 
-                                                }} className="w-full text-left px-4 py-3 hover:bg-blue-50 flex justify-between text-xs border-b border-gray-50">
-                                                    <span className="font-bold">{s.name}</span><span className="text-gray-400 bg-gray-100 px-1 rounded">{s.id}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
+                                    <Search className="absolute left-3 top-3 text-blue-400" size={14}/>
+                                    <input type="text" placeholder="搜索现有库存物品名称..." value={stockSearchTerm} onChange={e => setStockSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2.5 bg-white border border-blue-200 rounded-xl text-xs font-bold outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"/>
                                 </div>
+                                {stockSearchTerm && (
+                                    <div className="mt-2 max-h-32 overflow-y-auto bg-white border border-blue-100 rounded-xl shadow-lg absolute z-50 w-[calc(100%-3rem)] left-6">
+                                        {allStockList.filter(s => s.name.toLowerCase().includes(stockSearchTerm.toLowerCase())).map(s => (
+                                            <button key={s.id} onClick={() => { setProductForm(p => ({...p, linkedStockId: s.id, name: s.name, unit: s.unit, price: s.cost, category: s.category})); setStockSearchTerm(''); }} className="w-full text-left px-3 py-2.5 hover:bg-blue-50 text-xs font-bold text-gray-700 border-b border-gray-50 flex justify-between">
+                                                {s.name} <span className="text-[9px] font-mono text-gray-400 bg-gray-100 px-1 rounded">{s.id}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                                 {productForm.linkedStockId && (
-                                    <div className="mt-3 flex items-center gap-2 bg-white p-2 rounded-xl border border-blue-200 shadow-sm">
-                                        <div className="bg-blue-100 text-blue-600 p-1.5 rounded-lg"><Box size={14}/></div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-[10px] text-gray-400 font-bold uppercase">Linked To</div>
-                                            <div className="text-xs font-black text-blue-900 truncate">{allStockList.find(s => s.id === productForm.linkedStockId)?.name || productForm.linkedStockId}</div>
+                                    <div className="mt-3 bg-white border border-blue-200 rounded-xl p-2.5 flex items-center justify-between shadow-sm">
+                                        <div className="flex items-center gap-2">
+                                            <div className="bg-blue-100 text-blue-600 p-1.5 rounded-lg"><Box size={14}/></div>
+                                            <div>
+                                                <p className="text-[9px] text-gray-400 font-bold uppercase">Linked Item</p>
+                                                <p className="text-xs font-black text-blue-900">{allStockList.find(s => s.id === productForm.linkedStockId)?.name || productForm.linkedStockId}</p>
+                                            </div>
                                         </div>
-                                        <button onClick={() => setProductForm({...productForm, linkedStockId: undefined})} className="text-red-400 p-1"><X size={14}/></button>
+                                        <button onClick={() => setProductForm({...productForm, linkedStockId: undefined})} className="text-red-400 p-1.5 hover:bg-red-50 rounded-lg"><X size={14}/></button>
                                     </div>
                                 )}
                             </div>
-
-                            <div className="space-y-4">
-                                <div><label className={LABEL_STYLE}>Item Name</label><input type="text" value={productForm.name || ''} onChange={e => setProductForm({...productForm, name: e.target.value})} className={INPUT_STYLE} placeholder="e.g. Pork Belly"/></div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div><label className={LABEL_STYLE}>Supplier Code</label><input type="text" value={productForm.supplierCode || ''} onChange={e => setProductForm({...productForm, supplierCode: e.target.value})} className={INPUT_STYLE} placeholder="Optional"/></div>
-                                    <div><label className={LABEL_STYLE}>Base Unit</label><input type="text" value={productForm.unit || ''} onChange={e => setProductForm({...productForm, unit: e.target.value})} className={INPUT_STYLE} placeholder="e.g. PKT"/></div>
+                            <div>
+                                <label className={LABEL_STYLE}>Item Name (商品名称)</label>
+                                <input type="text" value={productForm.name || ''} onChange={e => setProductForm({...productForm, name: e.target.value})} className={INPUT_STYLE} placeholder="e.g. Fresh Chicken Breast"/>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className={LABEL_STYLE}>Base Unit (基础单位)</label>
+                                    <input type="text" value={productForm.unit || ''} onChange={e => setProductForm({...productForm, unit: e.target.value})} className={INPUT_STYLE} placeholder="e.g. KG"/>
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div><label className={LABEL_STYLE}>Price (RM)</label><input type="number" value={productForm.price || ''} onChange={e => setProductForm({...productForm, price: parseFloat(e.target.value)})} className={INPUT_STYLE} placeholder="0.00"/></div>
-                                    <div>
-                                        <label className={LABEL_STYLE}>Category</label>
-                                        <select className={INPUT_STYLE} value={productForm.category || ''} onChange={e => setProductForm({...productForm, category: e.target.value})}>
-                                            <option value="">Select...</option>
-                                            {INVENTORY_CATEGORIES.map(grp => (<optgroup key={grp.label} label={grp.label}>{grp.options.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}</optgroup>))}
-                                        </select>
-                                    </div>
+                                <div>
+                                    <label className={LABEL_STYLE}>Price (价格 RM)</label>
+                                    <input type="number" value={productForm.price || ''} onChange={e => setProductForm({...productForm, price: parseFloat(e.target.value)})} className={INPUT_STYLE} placeholder="0.00"/>
                                 </div>
                             </div>
-
-                            {/* Smart Units */}
-                            <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200">
+                            <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
                                 <div className="flex justify-between items-center mb-3">
-                                    <h4 className="text-xs font-black text-gray-700 uppercase flex items-center gap-2"><Calculator size={14}/> 多单位 (Smart Unit)</h4>
-                                    <button onClick={addUomOption} className="text-[10px] bg-white border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-100 font-bold">+ Add</button>
+                                    <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">多单位换算 (Smart Units)</h4>
+                                    <button onClick={addUomOption} className="text-[10px] bg-white border border-gray-200 px-2.5 py-1 rounded-md font-bold text-[#1A1A1A] hover:bg-gray-100">+ Add</button>
                                 </div>
-                                <div className="space-y-3">
+                                <div className="space-y-2">
                                     {productUoms?.map((opt, idx) => (
-                                        <div key={idx} className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex items-center gap-2">
-                                            <input className="w-20 p-2 text-xs border rounded-lg font-bold bg-gray-50 outline-none" placeholder="Name" value={opt.value} onChange={e => updateUomOption(idx, 'value', e.target.value)} />
-                                            <span className="text-xs font-bold">=</span>
-                                            <input type="number" className="w-16 p-2 text-xs border rounded-lg font-bold bg-gray-50 outline-none text-center" value={opt.ratio} onChange={e => updateUomOption(idx, 'ratio', parseFloat(e.target.value))} />
-                                            <span className="text-xs text-gray-400">{productForm.unit || 'Base'}</span>
-                                            <button onClick={() => removeUomOption(idx)} className="ml-auto text-red-400 p-1"><Trash2 size={14}/></button>
+                                        <div key={idx} className="flex items-center gap-2 bg-white p-2 rounded-xl border border-gray-100 shadow-sm">
+                                            <input className="w-20 p-2 text-xs border border-gray-200 rounded-lg font-bold outline-none focus:border-[#FFD700]" placeholder="Unit Name" value={opt.value} onChange={e => updateUomOption(idx, 'value', e.target.value)} />
+                                            <span className="text-xs font-bold text-gray-400">=</span>
+                                            <input type="number" className="w-16 p-2 text-xs border border-gray-200 rounded-lg font-bold text-center outline-none focus:border-[#FFD700]" value={opt.ratio} onChange={e => updateUomOption(idx, 'ratio', parseFloat(e.target.value))} />
+                                            <span className="text-[10px] text-gray-500 font-bold">{productForm.unit || 'Base'}</span>
+                                            <button onClick={() => removeUomOption(idx)} className="ml-auto text-red-400 p-1.5 hover:bg-red-50 rounded-lg"><Trash2 size={14}/></button>
                                         </div>
                                     ))}
                                 </div>
                             </div>
-                        </div>
-
-                        <div className="flex gap-3 mt-8 pt-4 border-t border-gray-100">
-                            <button onClick={() => setIsEditingProduct(false)} className="flex-1 py-3 bg-white border border-gray-200 font-bold rounded-xl text-xs">取消</button>
-                            <button onClick={handleSaveProduct} className="flex-[2] py-3 bg-[#1A1A1A] text-[#FFD700] font-bold rounded-xl shadow-lg text-xs flex items-center justify-center gap-2"><Save size={14}/> 保存</button>
+                            <button onClick={handleSaveProduct} className="w-full py-3.5 bg-[#1A1A1A] text-[#FFD700] font-black rounded-xl text-sm mt-4 shadow-[0_4px_12px_rgba(0,0,0,0.15)] hover:bg-black active:scale-95 transition-all">保存商品 (Save Item)</button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* BILL FORM MODAL */}
-            {isBillFormOpen && (
-                <div className="fixed inset-0 bg-black/80 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-white w-full max-w-lg rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="font-black text-xl text-[#1A1A1A]">录入新账单</h3>
-                            <button onClick={() => setIsBillFormOpen(false)} className="p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
-                        </div>
-                        <div className="space-y-4">
-                            <div><label className={LABEL_STYLE}>Amount (RM)</label><input type="number" className={INPUT_STYLE} value={newBill.totalBillAmount || ''} onChange={e => setNewBill({...newBill, totalBillAmount: parseFloat(e.target.value)})} placeholder="0.00" /></div>
-                            <div><label className={LABEL_STYLE}>Date</label><input type="date" className={INPUT_STYLE} value={newBill.time?.split('T')[0]} onChange={e => setNewBill({...newBill, time: e.target.value})} /></div>
-                            <div>
-                                <label className={LABEL_STYLE}>Status</label>
-                                <select className={INPUT_STYLE} value={newBill.paymentStatus} onChange={e => setNewBill({...newBill, paymentStatus: e.target.value as any})}>
-                                    <option value="UNPAID">UNPAID</option>
-                                    <option value="PAID">PAID</option>
-                                </select>
+            {/* 底部悬浮购物车 Drawer (极致移动端体验) */}
+            {isCreatingPO && cart.length > 0 && (
+                <div className={`fixed bottom-0 left-0 right-0 bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.15)] border-t border-gray-200 z-[120] transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isCartExpanded ? 'h-[65vh] md:h-[50vh] rounded-t-[2rem]' : 'h-16 md:h-20'}`}>
+                    <div className="max-w-7xl mx-auto h-full flex flex-col relative">
+                        {/* 拖拽指示器 */}
+                        {isCartExpanded && <div className="w-12 h-1.5 bg-gray-200 rounded-full absolute top-2 left-1/2 -translate-x-1/2 cursor-pointer" onClick={() => setIsCartExpanded(false)}></div>}
+                        
+                        <div className={`px-4 md:px-8 flex justify-between items-center bg-white cursor-pointer select-none shrink-0 ${isCartExpanded ? 'h-20 pt-4' : 'h-full'}`} onClick={() => setIsCartExpanded(!isCartExpanded)}>
+                            <div className="flex items-center gap-3 md:gap-4">
+                                <div className="relative">
+                                    <div className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-[#1A1A1A] to-gray-800 rounded-[14px] flex items-center justify-center text-[#FFD700] shadow-md">
+                                        <ShoppingBag size={20} className="md:w-6 md:h-6"/>
+                                    </div>
+                                    <div className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] md:text-xs font-black w-5 h-5 md:w-6 md:h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm">{cart.length}</div>
+                                </div>
+                                <div>
+                                    <h3 className="font-black text-sm md:text-lg text-[#1A1A1A]">采购车 (PO Cart)</h3>
+                                    <p className="text-[10px] md:text-xs text-gray-500 font-bold truncate max-w-[120px] md:max-w-xs">To: {selectedSupplier?.name}</p>
+                                </div>
                             </div>
-                            <div><label className={LABEL_STYLE}>Note</label><input className={INPUT_STYLE} value={newBill.note || ''} onChange={e => setNewBill({...newBill, note: e.target.value})} placeholder="Optional..." /></div>
-                            <button onClick={handleSaveBill} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-bold shadow-lg hover:bg-black mt-4">确认录入 (Confirm)</button>
+                            <div className="flex items-center gap-3 md:gap-6">
+                                <div className="text-right hidden sm:block">
+                                    <p className="text-[9px] md:text-[10px] text-gray-400 font-bold uppercase tracking-widest">Est. Total</p>
+                                    <p className="text-base md:text-xl font-mono font-black text-[#1A1A1A]">RM {cart.reduce((sum, item) => sum + (item.orderQty * item.cost), 0).toFixed(2)}</p>
+                                </div>
+                                <button onClick={(e) => { e.stopPropagation(); handleCreatePO(); }} className="px-5 md:px-8 py-2.5 md:py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-xs md:text-sm shadow-lg hover:bg-black transition-all active:scale-95">生成订单</button>
+                                <div className="text-gray-300 hidden md:block">{isCartExpanded ? <ChevronDown size={24}/> : <ChevronUp size={24}/>}</div>
+                            </div>
                         </div>
+                        
+                        {isCartExpanded && (
+                            <div className="flex-grow overflow-y-auto p-4 md:p-8 bg-gray-50/80 border-t border-gray-100">
+                                <div className="space-y-3 max-w-4xl mx-auto">
+                                    {cart.map((item, idx) => (
+                                        <div key={idx} className="bg-white p-4 rounded-2xl border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm hover:border-[#FFD700]/50 transition-colors">
+                                            <div className="flex-1 min-w-0">
+                                                <h4 className="font-black text-sm text-[#1A1A1A] truncate">{item.name}</h4>
+                                                <p className="text-[10px] font-mono text-gray-400 mt-0.5">{item.stockId}</p>
+                                            </div>
+                                            <div className="flex items-center justify-between md:justify-end gap-4">
+                                                <div className="flex items-center bg-gray-50 border border-gray-200 rounded-xl p-1 shadow-inner">
+                                                    <button onClick={() => { const c=[...cart]; if(c[idx].orderQty>1) c[idx].orderQty--; setCart(c); }} className="w-8 h-8 flex items-center justify-center bg-white rounded-lg shadow-sm text-gray-600 font-black active:scale-95 transition-transform">-</button>
+                                                    <input type="number" className="w-12 bg-transparent text-center font-mono font-black text-sm outline-none" value={item.orderQty} onChange={(e)=>{ const c=[...cart]; c[idx].orderQty = Math.max(1, parseInt(e.target.value)||1); setCart(c); }}/>
+                                                    <button onClick={() => { const c=[...cart]; c[idx].orderQty++; setCart(c); }} className="w-8 h-8 flex items-center justify-center bg-white rounded-lg shadow-sm text-gray-600 font-black active:scale-95 transition-transform">+</button>
+                                                </div>
+                                                <div className="flex flex-col items-end w-20">
+                                                    <span className="text-[10px] font-bold text-gray-400 uppercase">{item.unit}</span>
+                                                    <span className="font-mono font-black text-sm text-blue-700">RM {(item.orderQty * item.cost).toFixed(2)}</span>
+                                                </div>
+                                                <button onClick={() => removeFromCart(idx)} className="p-2 text-red-400 hover:bg-rose-50 hover:text-rose-600 rounded-xl transition-colors"><Trash2 size={18}/></button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {/* Mobile total row inside expanded view */}
+                                    <div className="sm:hidden mt-6 p-4 bg-[#1A1A1A] text-white rounded-2xl flex justify-between items-center shadow-lg">
+                                        <span className="text-xs font-bold uppercase tracking-widest text-[#FFD700]">Total</span>
+                                        <span className="text-xl font-mono font-black">RM {cart.reduce((sum, item) => sum + (item.orderQty * item.cost), 0).toFixed(2)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
-
-            {/* DELETE CONFIRMATIONS */}
+            
+            {/* Delete Confirmations (保持黑金UI) */}
             {deleteProductCandidate && (
-                <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white rounded-2xl p-6 w-full max-w-xs text-center border-t-4 border-red-500 shadow-2xl"><h4 className="text-xl font-black text-[#1A1A1A] mb-2">确认删除?</h4><p className="text-sm font-bold text-gray-500 mb-6">此操作无法撤销。</p><div className="grid grid-cols-2 gap-3"><button onClick={() => setDeleteProductCandidate(null)} className="py-3 bg-gray-100 font-bold rounded-xl text-xs">取消</button><button onClick={executeDeleteProduct} className="py-3 bg-red-600 text-white font-bold rounded-xl text-xs shadow-lg">删除</button></div></div></div>
+                <div className="fixed inset-0 bg-[#1A1A1A]/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white rounded-[2rem] p-6 w-full max-w-xs text-center shadow-2xl">
+                        <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle size={32} className="text-rose-500"/></div>
+                        <h4 className="text-lg font-black text-[#1A1A1A] mb-2">确认删除商品?</h4>
+                        <p className="text-xs font-medium text-gray-500 mb-6">此操作将从供应目录中移除该商品，不可撤销。</p>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={() => setDeleteProductCandidate(null)} className="py-3 bg-gray-50 font-bold rounded-xl text-xs text-gray-600 hover:bg-gray-100">取消</button>
+                            <button onClick={executeDeleteProduct} className="py-3 bg-rose-600 text-white font-bold rounded-xl text-xs shadow-lg hover:bg-rose-700">确认删除</button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {deletePOCandidate && (
-                <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-white rounded-2xl p-6 w-full max-w-xs text-center border-t-4 border-red-500 shadow-2xl">
-                        <h4 className="text-xl font-black text-[#1A1A1A] mb-2">确认删除采购单?</h4>
-                        <p className="text-sm font-bold text-gray-500 mb-6">
-                            此操作无法撤销。
-                        </p>
+                <div className="fixed inset-0 bg-[#1A1A1A]/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white rounded-[2rem] p-6 w-full max-w-xs text-center shadow-2xl">
+                        <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle size={32} className="text-rose-500"/></div>
+                        <h4 className="text-lg font-black text-[#1A1A1A] mb-2">删除采购单?</h4>
+                        <p className="text-xs font-medium text-gray-500 mb-6">仅删除记录，不会撤销已入库的库存数据。</p>
                         <div className="grid grid-cols-2 gap-3">
-                            <button onClick={() => setDeletePOCandidate(null)} className="py-3 bg-gray-100 font-bold rounded-xl text-xs hover:bg-gray-200">取消</button>
-                            <button onClick={executeDeletePO} className="py-3 bg-red-600 text-white font-bold rounded-xl text-xs shadow-lg hover:bg-red-700">确认删除</button>
+                            <button onClick={() => setDeletePOCandidate(null)} className="py-3 bg-gray-50 font-bold rounded-xl text-xs text-gray-600 hover:bg-gray-100">取消</button>
+                            <button onClick={executeDeletePO} className="py-3 bg-rose-600 text-white font-bold rounded-xl text-xs shadow-lg hover:bg-rose-700">确认删除</button>
                         </div>
                     </div>
                 </div>
             )}
 
             {deleteSupplierId && (
-                <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-white rounded-2xl p-6 w-full max-w-xs text-center border-t-4 border-red-500 shadow-2xl">
-                        <h4 className="text-xl font-black text-[#1A1A1A] mb-2">确认删除供应商?</h4>
-                        <p className="text-sm font-bold text-gray-500 mb-6">
-                            此操作将删除该供应商及其所有关联产品目录。
-                            <br/>此操作无法撤销。
+                <div className="fixed inset-0 bg-[#1A1A1A]/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white rounded-[2rem] p-6 md:p-8 w-full max-w-sm text-center shadow-2xl">
+                        <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><Trash2 size={40} className="text-rose-500"/></div>
+                        <h4 className="text-xl font-black text-[#1A1A1A] mb-2">彻底删除供应商?</h4>
+                        <p className="text-sm font-medium text-gray-500 mb-6">
+                            此操作将删除该供应商及其所有关联产品目录。<br/>历史采购单不受影响，但无法再向其下单。
                         </p>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button onClick={() => setDeleteSupplierId(null)} className="py-3 bg-gray-100 font-bold rounded-xl text-xs hover:bg-gray-200">取消</button>
-                            <button onClick={executeDeleteSupplier} className="py-3 bg-red-600 text-white font-bold rounded-xl text-xs shadow-lg hover:bg-red-700">确认删除</button>
+                        <div className="grid grid-cols-2 gap-4">
+                            <button onClick={() => setDeleteSupplierId(null)} className="py-3.5 bg-gray-50 font-bold rounded-xl text-sm text-gray-600 hover:bg-gray-100">取消</button>
+                            <button onClick={executeDeleteSupplier} className="py-3.5 bg-rose-600 text-white font-bold rounded-xl text-sm shadow-[0_4px_12px_rgba(225,29,72,0.3)] hover:bg-rose-700 active:scale-95">彻底删除</button>
                         </div>
                     </div>
                 </div>
             )}
-
-            {/* HIDDEN PRINT */}
-            <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
-                {printingPO && (() => {
-                     const pages = [];
-                     for (let i = 0; i < Math.ceil(printingPO.items.length / ITEMS_PER_PAGE); i++) {
-                         pages.push(printingPO.items.slice(i * ITEMS_PER_PAGE, (i + 1) * ITEMS_PER_PAGE));
-                     }
-                     return pages.map((pageItems, pageIndex) => (
-                         <div key={pageIndex} ref={pageIndex === 0 ? printRef : undefined} id={`po-page-${pageIndex}`} className="w-[794px] bg-white p-12 text-black font-sans relative min-h-[1123px] flex flex-col justify-between">
+            
+            {/* Bill Input Modal */}
+            {isBillFormOpen && (
+                <div className="fixed inset-0 bg-[#1A1A1A]/80 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white w-full max-w-sm rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="font-black text-lg text-[#1A1A1A] flex items-center gap-2"><Receipt size={20}/> 录入新账单</h3>
+                            <button onClick={() => setIsBillFormOpen(false)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400"><X size={18}/></button>
+                        </div>
+                        <div className="space-y-4">
                             <div>
-                                <div className="flex justify-between items-start border-b-2 border-black pb-4 mb-6"><div><h1 className="text-4xl font-black tracking-widest mb-2">PURCHASE ORDER</h1><p className="text-sm font-bold text-gray-500">KIM LIAN KEE (KEPONG)</p></div><div className="text-right"><p className="text-xl font-mono font-black">{printingPO?.id}</p><p className="text-sm font-bold text-gray-500">{printingPO?.date.split('T')[0]}</p></div></div>
-                                <div className="mb-8 p-4 bg-gray-50 rounded-xl border border-gray-200"><p className="text-xs font-bold text-gray-400 uppercase mb-1">To Supplier:</p><h2 className="text-xl font-bold">{printingPO?.supplierName}</h2></div>
-                                <table className="w-full text-left mb-8"><thead><tr className="border-b-2 border-black"><th className="py-2 text-xs font-black uppercase">Item Name</th><th className="py-2 text-xs font-black uppercase text-center">Qty</th><th className="py-2 text-xs font-black uppercase text-center">Unit</th></tr></thead><tbody>{pageItems.map((item, i) => (<tr key={i} className="border-b border-gray-100 break-inside-avoid"><td className="py-3 text-sm font-bold">{item.name}{item.supplierCode && <span className="text-xs text-gray-400 block">{item.supplierCode}</span>}</td><td className="py-3 text-sm font-mono text-center">{item.orderQty}</td><td className="py-3 text-sm font-mono text-center uppercase">{item.unit}</td></tr>))}</tbody></table>
+                                <label className={LABEL_STYLE}>Amount (RM) 总金额</label>
+                                <input type="number" className={INPUT_STYLE} value={newBill.totalBillAmount || ''} onChange={e => setNewBill({...newBill, totalBillAmount: parseFloat(e.target.value)})} placeholder="0.00" />
                             </div>
-                            <div className="mt-8">
-                                {pageIndex === pages.length - 1 && <div className="pt-8 border-t border-black text-center text-xs font-bold text-gray-400">Authorized Signature</div>}
-                                <div className="text-right text-xs text-gray-400 mt-4">Page {pageIndex + 1} of {pages.length}</div>
+                            <div>
+                                <label className={LABEL_STYLE}>Date (账单日期)</label>
+                                <input type="date" className={INPUT_STYLE} value={newBill.time?.split('T')[0]} onChange={e => setNewBill({...newBill, time: e.target.value})} />
                             </div>
-                         </div>
-                     ));
-                })()}
-            </div>
+                            <div>
+                                <label className={LABEL_STYLE}>Status (付款状态)</label>
+                                <select className={INPUT_STYLE} value={newBill.paymentStatus} onChange={e => setNewBill({...newBill, paymentStatus: e.target.value as any})}>
+                                    <option value="UNPAID">🔴 未付 (UNPAID)</option>
+                                    <option value="PAID">🟢 已结清 (PAID)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className={LABEL_STYLE}>Note (备注说明)</label>
+                                <input className={INPUT_STYLE} value={newBill.note || ''} onChange={e => setNewBill({...newBill, note: e.target.value})} placeholder="Optional..." />
+                            </div>
+                            <button onClick={handleSaveBill} className="w-full py-3.5 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-sm shadow-lg hover:bg-black mt-2 active:scale-95 transition-all">确认生成账单</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {/* Receive PO Modal */}
+            {isReceiveModalOpen && receivingPO && (
+                <div className="fixed inset-0 bg-[#1A1A1A]/80 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white w-full max-w-4xl rounded-[2rem] shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh] overflow-hidden">
+                        <div className="p-5 md:p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/80">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 bg-blue-100 text-blue-700 rounded-xl"><ClipboardCheck size={24}/></div>
+                                <div>
+                                    <h3 className="font-black text-lg md:text-xl text-[#1A1A1A]">采购入库对账 (Receive PO)</h3>
+                                    <p className="text-[10px] text-gray-500 font-mono mt-0.5 tracking-widest">ORDER REF: {receivingPO.id}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsReceiveModalOpen(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><X size={20}/></button>
+                        </div>
+                        
+                        <div className="flex-grow overflow-y-auto p-4 md:p-6">
+                            <div className="bg-blue-50/80 border border-blue-200/50 p-4 rounded-2xl mb-6 text-xs font-bold text-blue-800 flex gap-3 items-start shadow-sm">
+                                <Info size={18} className="shrink-0 mt-0.5 text-blue-600"/>
+                                <p className="leading-relaxed">请核对实际收货数量与价格。如果供应商按<span className="text-red-600 font-black">实际重量(KG)</span>计费（如肉类/海鲜），请勾选「按重计费」并输入实重，系统会自动为您摊算每单位的真实库存成本。</p>
+                            </div>
+
+                            <div className="overflow-x-auto rounded-2xl border border-gray-200 shadow-sm">
+                                <table className="w-full text-left text-sm whitespace-nowrap">
+                                    <thead className="bg-gray-50 text-gray-500 font-bold text-[10px] uppercase tracking-wider border-b border-gray-200">
+                                        <tr>
+                                            <th className="p-4">Item (商品)</th>
+                                            <th className="p-4 w-24">Ordered</th>
+                                            <th className="p-4 w-28">Cost(Unit)</th>
+                                            <th className="p-4 w-28">Rcv Qty (包/件)</th>
+                                            <th className="p-4 w-36 bg-blue-50/50 border-x border-blue-100/50">按重计费? (By KG)</th>
+                                            <th className="p-4 w-28 text-right">Total (RM)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {receivedItems.map((item, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-50/50 transition-colors group">
+                                                <td className="p-4 font-bold text-xs text-[#1A1A1A]">
+                                                    {item.name}
+                                                    <div className="text-[9px] text-gray-400 font-mono mt-0.5">{item.supplierCode || 'NO-CODE'}</div>
+                                                </td>
+                                                <td className="p-4 text-xs font-mono font-medium">{item.orderQty} <span className="text-[10px] text-gray-400">{item.unit}</span></td>
+                                                <td className="p-4">
+                                                    <div className="relative">
+                                                        <span className="absolute left-2.5 top-2 text-[10px] text-gray-400 font-bold">RM</span>
+                                                        <input type="number" className="w-full pl-7 pr-2 py-1.5 border border-gray-200 rounded-lg text-xs font-mono font-bold focus:border-blue-500 outline-none" value={item.finalCost} onChange={e => updateReceivedItem(idx, 'finalCost', parseFloat(e.target.value))} />
+                                                    </div>
+                                                </td>
+                                                <td className="p-4">
+                                                    <input type="number" className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-black text-center focus:border-blue-500 outline-none bg-gray-50" value={item.receivedQty} onChange={e => updateReceivedItem(idx, 'receivedQty', parseInt(e.target.value))} />
+                                                </td>
+                                                <td className="p-4 bg-blue-50/30 border-x border-blue-50/50">
+                                                    <div className="flex items-center gap-2">
+                                                        <input type="checkbox" checked={item.billByWeight || false} onChange={e => updateReceivedItem(idx, 'billByWeight', e.target.checked)} className="w-4 h-4 accent-blue-600 rounded cursor-pointer" />
+                                                        {item.billByWeight && (
+                                                            <div className="flex items-center gap-1 relative">
+                                                                <input type="number" className="w-16 p-1.5 border-2 border-blue-400 rounded-lg text-xs font-mono font-black text-blue-900 outline-none focus:ring-2 ring-blue-200 text-center" placeholder="0.0" value={item.receivedWeight || ''} onChange={e => updateReceivedItem(idx, 'receivedWeight', parseFloat(e.target.value))} />
+                                                                <span className="text-[10px] text-blue-600 font-black absolute -right-4">KG</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 text-right font-mono font-black text-blue-700 text-sm">
+                                                    {((item.billByWeight && item.receivedWeight ? item.receivedWeight : item.receivedQty) * item.finalCost).toFixed(2)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div className="p-5 md:p-6 border-t border-gray-200 bg-white flex flex-col md:flex-row justify-between items-center gap-4 shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-10">
+                            <div className="w-full md:w-auto flex items-center justify-between md:justify-start gap-6 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                                <div>
+                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Final AP Total</p>
+                                    <p className="text-2xl font-mono font-black text-red-600">
+                                        RM {receivedItems.reduce((sum, item) => sum + ((item.billByWeight && item.receivedWeight ? item.receivedWeight : item.receivedQty) * item.finalCost), 0).toFixed(2)}
+                                    </p>
+                                </div>
+                            </div>
+                            <button onClick={confirmReceivePO} disabled={isProcessingReceive} className="w-full md:w-auto px-8 py-4 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-sm flex items-center justify-center gap-2 hover:bg-black active:scale-95 transition-all shadow-[0_4px_12px_rgba(0,0,0,0.2)]">
+                                {isProcessingReceive ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} 确认入库并抛转账单
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 
     if (isModal) {
         return (
-            <div className="fixed inset-0 bg-black/80 z-[80] flex items-center justify-center p-0 md:p-6 backdrop-blur-sm animate-in zoom-in duration-200">
+            <div className="fixed inset-0 bg-[#1A1A1A]/80 z-[80] flex items-center justify-center p-0 md:p-6 backdrop-blur-md animate-in zoom-in duration-300">
                 {MainContent}
             </div>
         );
