@@ -190,6 +190,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
     });
 
     const [showPayConfirm, setShowPayConfirm] = useState(false);
+    const [phDays, setPhDays] = useState<number | ''>('');
 
     // PDF Ref
     const printSlipRef = useRef<HTMLDivElement>(null);
@@ -197,8 +198,24 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
 
     // Derived States
     const displayEmployees = useMemo(() => {
-        return employees.filter(e => (!e.isArchived || showResigned) && !e.role.includes('Owner'));
-    }, [employees, showResigned]);
+    return employees.filter(e => {
+        if (e.role.includes('Owner')) return false;
+
+        // 1. 过滤未来入职的新人（比如选了2月，但3月才入职，绝对隐藏）
+        const joinMonth = e.joinDate ? e.joinDate.slice(0, 7) : '0000-00';
+        if (joinMonth > selectedMonth) return false;
+
+        // 2. 过滤历史离职人员（比如2月已离职，当前在看3月薪资）
+        if (e.isArchived && e.terminationDate) {
+            const termMonth = e.terminationDate.slice(0, 7);
+            // 只有当离职月份严格小于当前选中月份，且没开"显示离职"时，才隐藏
+            // (注: 当月离职的人会默认显示，方便 HR 做离职结清)
+            if (termMonth < selectedMonth && !showResigned) return false;
+        }
+
+        return true;
+    });
+    }, [employees, showResigned, selectedMonth]);
 
     const localEmployees = useMemo(() => {
         return displayEmployees.filter(e => e.nationality.includes('Malaysian') || e.nationality.includes('🇲🇾'));
@@ -232,10 +249,18 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
         const loanBalance = (emp.loanRecords || []).reduce((sum, r) => sum + (r.type === 'BORROW' ? r.amount : -r.amount), 0);
 
         const isLocal = emp.nationality.includes('Malaysian') || emp.nationality.includes('🇲🇾');
-        const historicalBasic = getHistoricalSalary(emp, selectedMonth);
+        let historicalBasic = getHistoricalSalary(emp, selectedMonth);
 
-        return {
-            basic: Number(historicalBasic) || 0,
+        // 【核心修复1】防御拦截：如果员工在选中月份之前已经离职，其后续月份底薪强制为 0
+        if (emp.isArchived && emp.terminationDate) {
+            const termMonth = emp.terminationDate.slice(0, 7);
+            if (termMonth < selectedMonth) {
+                historicalBasic = 0;
+    }
+}
+
+return {
+    basic: Number(historicalBasic) || 0,
             allowance: 0,
             ot: 0,
             bonus: 0,
@@ -285,8 +310,20 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
             // Store raw advances for history view
             setMonthAdvances(advances);
 
-            // We iterate over displayEmployees but need to cover everyone potentially in the month
-            const targetEmployees = employees.filter(e => (!e.isArchived || showResigned) && !e.role.includes('Owner'));
+            // 严格对齐时间轴，不为非当月活跃员工生成无效草稿数据
+            const targetEmployees = employees.filter(e => {
+                if (e.role.includes('Owner')) return false;
+    
+                const joinMonth = e.joinDate ? e.joinDate.slice(0, 7) : '0000-00';
+                if (joinMonth > selectedMonth) return false;
+
+                if (e.isArchived && e.terminationDate) {
+                const termMonth = e.terminationDate.slice(0, 7);
+                if (termMonth < selectedMonth && !showResigned) return false;
+                }
+    
+                return true;
+            });
 
             if (existingRecord) {
                 setIsPosted(existingRecord.status === 'POSTED');
@@ -450,7 +487,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                 current.autoCalc = false; 
             }
             if (current.autoCalc && !isPosted) {
-                const grossForStatutory = current.basic + current.allowance + current.ot + current.bonus + (current.holidayPay || 0) - current.unpaidLeave;
+                const grossForStatutory = current.basic + current.allowance + current.ot + current.bonus - current.unpaidLeave;
                 const safeGross = Math.max(0, grossForStatutory);
                 
                 if (current.hasEPF) {
@@ -477,7 +514,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
     const triggerRecalculateStatutory = (id: string) => {
         setPayrollData(prev => {
             const current = { ...prev[id], autoCalc: true }; 
-            const grossForStatutory = current.basic + current.allowance + current.ot + current.bonus + (current.holidayPay || 0) - current.unpaidLeave;
+            const grossForStatutory = current.basic + current.allowance + current.ot + current.bonus - current.unpaidLeave;
             const safeGross = Math.max(0, grossForStatutory);
             
             if (current.hasEPF) {
@@ -641,7 +678,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
     };
 
     const getTotals = (entry: DetailedPayrollEntry) => {
-        const gross = entry.basic + entry.allowance + entry.ot + entry.bonus + (entry.holidayPay || 0);
+        const gross = entry.basic + entry.allowance + entry.ot + entry.bonus;
         const employeeDeductions = entry.latePenalty + entry.unpaidLeave + entry.advanceLoan + entry.ee_epf + entry.ee_socso + entry.ee_eis + entry.ee_pcb;
         const netPay = gross - employeeDeductions;
         const employerCost = entry.er_epf + entry.er_socso + entry.er_eis;
@@ -1172,27 +1209,44 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                                     <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Fixed Allowance (津贴)</label><input type="number" disabled={isPosted} value={editingEntry.allowance} onChange={e => updateEntry(editingEmpId, {allowance: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
                                     <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">OT / Commission</label><input type="number" disabled={isPosted} value={editingEntry.ot} onChange={e => updateEntry(editingEmpId, {ot: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
                                     <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Bonus (奖金)</label><input type="number" disabled={isPosted} value={editingEntry.bonus} onChange={e => updateEntry(editingEmpId, {bonus: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
-                                    {/* PUBLIC HOLIDAY PAY (3X) */}
-                                    <div className="col-span-full bg-red-50 p-3 rounded-xl border border-red-100">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <span className="text-[10px] font-black text-red-700 uppercase">🎌 Public Holiday Pay (公假3倍工资)</span>
-                                            <span className="text-[9px] text-gray-400">Daily Rate = Basic / 26</span>
+                                    {/* 🎌 公假协助计算器 (纯 UI 辅助，不重复计入总额) */}
+                                    <div className="col-span-full bg-orange-50 p-4 rounded-xl border border-orange-200 flex flex-col sm:flex-row sm:items-end gap-3 mb-2">
+                                        <div className="flex-grow">
+                                            <label className="text-[10px] font-black text-orange-800 uppercase mb-1 flex items-center gap-1">
+                                                🎌 公假助手 (PH Extra Pay: Basic / 26 × 2)
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                                <input 
+                                                    type="number" 
+                                                    value={phDays} 
+                                                    disabled={isPosted}
+                                                    onChange={e => setPhDays(e.target.value ? parseFloat(e.target.value) : '')} 
+                                                    className="w-full sm:w-32 p-3 bg-white border border-orange-200 rounded-xl text-sm font-black text-[#1A1A1A] outline-none focus:border-orange-500 shadow-sm" 
+                                                    placeholder="输入天数"
+                                                    inputMode="decimal"
+                                                />
+                                                <span className="text-sm font-black text-orange-700 whitespace-nowrap bg-orange-100 px-3 py-2 rounded-lg border border-orange-200">
+                                                    = RM {phDays ? ((editingEntry.basic / 26) * 2 * Number(phDays)).toFixed(2) : '0.00'}
+                                                </span>
+                                            </div>
+                                            <p className="text-[9px] text-orange-600/70 mt-1 font-bold">注: 计算结果为额外2倍(底薪已含1倍)。点击右侧按钮后，金额将自动累加至上方【OT】内。</p>
                                         </div>
-                                        <div className="grid grid-cols-3 gap-3 items-end">
-                                            <div>
-                                                <label className="text-[9px] font-bold text-gray-400 uppercase mb-1 block">PH Days Worked</label>
-                                                <input type="number" disabled={isPosted} min="0" step="0.5" value={editingEntry.holidayDays || ''} onChange={e => { const days = parseFloat(e.target.value) || 0; const dailyRate = editingEntry.basic / 26; const extra = parseFloat((dailyRate * 2 * days).toFixed(2)); updateEntry(editingEmpId, { holidayDays: days, holidayPay: extra }); }} className="w-full p-3 bg-white border-2 border-red-200 rounded-xl text-sm font-black text-center outline-none focus:border-red-400" placeholder="0"/>
-                                            </div>
-                                            <div>
-                                                <label className="text-[9px] font-bold text-gray-400 uppercase mb-1 block">Daily Rate (÷26)</label>
-                                                <div className="w-full p-3 bg-white/50 border border-gray-200 rounded-xl text-sm font-mono text-gray-500 text-center">RM {(editingEntry.basic / 26).toFixed(2)}</div>
-                                            </div>
-                                            <div>
-                                                <label className="text-[9px] font-bold text-red-600 uppercase mb-1 block">Extra 2x Pay</label>
-                                                <div className={`w-full p-3 rounded-xl text-sm font-black font-mono text-center ${(editingEntry.holidayPay || 0) > 0 ? 'bg-red-100 border-2 border-red-300 text-red-700' : 'bg-gray-100 border border-gray-200 text-gray-400'}`}>+ RM {(editingEntry.holidayPay || 0).toFixed(2)}</div>
-                                            </div>
-                                        </div>
-                                        <p className="text-[9px] text-gray-400 mt-2">计算方式: 底薪 ÷ 26 × 2 × 天数 = 额外补贴 (基本薪已包含1倍, 此处补额外2倍 = 总共3倍)</p>
+                                        <button 
+                                            disabled={!phDays || isPosted}
+                                            onClick={() => {
+                                                if (!phDays) return;
+                                                const phAmount = parseFloat(((editingEntry.basic / 26) * 2 * Number(phDays)).toFixed(2));
+                                                updateEntry(editingEmpId, { 
+                                                    ot: editingEntry.ot + phAmount,
+                                                    // 备注自动留底，方便财务对账
+                                                    note: (editingEntry.note ? editingEntry.note + '\n' : '') + `[PH Pay] ${phDays} days = RM${phAmount}`
+                                                });
+                                                setPhDays(''); // 结清重置输入框
+                                            }}
+                                            className="w-full sm:w-auto px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-black shadow-md active:scale-95 transition-all whitespace-nowrap disabled:opacity-50 disabled:bg-gray-400"
+                                        >
+                                            + 算入 OT (Add to OT)
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -1507,7 +1561,6 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                                             {editingEntry.allowance > 0 && <div className="flex justify-between"><span>Allowances (津贴)</span><span className="font-mono">{editingEntry.allowance.toFixed(2)}</span></div>}
                                             {editingEntry.ot > 0 && <div className="flex justify-between"><span>Overtime / Comm (加班/佣金)</span><span className="font-mono">{editingEntry.ot.toFixed(2)}</span></div>}
                                             {editingEntry.bonus > 0 && <div className="flex justify-between"><span>Bonus (奖金)</span><span className="font-mono">{editingEntry.bonus.toFixed(2)}</span></div>}
-                                            {(editingEntry.holidayPay || 0) > 0 && <div className="flex justify-between text-red-700"><span>PH 3x Pay (公假补贴) — {editingEntry.holidayDays || 0}天</span><span className="font-mono">{(editingEntry.holidayPay || 0).toFixed(2)}</span></div>}
                                             <div className="flex justify-between font-bold pt-2 border-t border-gray-200 mt-2"><span>GROSS PAY (总收入)</span><span className="font-mono">{getTotals(editingEntry).gross.toFixed(2)}</span></div>
                                         </div>
                                     </div>
