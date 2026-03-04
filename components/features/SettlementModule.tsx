@@ -192,8 +192,11 @@ const ExpenseModal = ({
 
 const HistoryDetailModal = ({ record, onClose, onDelete }: { record: SettlementRecord | null, onClose: () => void, onDelete: (id: string) => void }) => {
     if (!record) return null;
-    const deliveryBreakdown = record.sales.deliveryBreakdown || { grab: 0, panda: 0, shopee: 0, lalamove: 0 };
-    const totalDelivery = Object.values(deliveryBreakdown).reduce((a, b) => a + (b || 0), 0);
+    const deliveryBreakdown = record.sales.deliveryBreakdown || {} as any;
+    const totalDelivery = (Number(deliveryBreakdown.grab) || 0) + 
+                      (Number(deliveryBreakdown.panda) || 0) + 
+                      (Number(deliveryBreakdown.shopee) || 0) + 
+                      (Number(deliveryBreakdown.lalamove) || 0);
     const totalDebit = (record.sales.duitnow || 0);
     const totalCard = record.sales.card || 0;
     const totalCashOut = record.expenses ? record.expenses.reduce((sum, e) => sum + (e.amount || 0), 0) : 0;

@@ -290,7 +290,12 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                 cash += actualCashIncome;
                 
                 const bankIncome = Number(s.sales.tng || 0) + Number(s.sales.duitnow || 0) + Number(s.sales.card || 0);
-                const deliveryIncome = s.sales.deliveryBreakdown ? Object.values(s.sales.deliveryBreakdown).reduce((a:number, b:any) => a + (Number(b)||0), 0) : 0;
+                const deliveryIncome = s.sales.deliveryBreakdown? 
+                (Number(s.sales.deliveryBreakdown.grab || 0) + 
+                Number(s.sales.deliveryBreakdown.panda || 0) + 
+                Number(s.sales.deliveryBreakdown.shopee || 0) + 
+                Number(s.sales.deliveryBreakdown.lalamove || 0)) 
+                : 0;
                 
                 const debitFee = Number(s.sales.duitnow || 0) * 0.0045;
                 const creditFee = Number(s.sales.card || 0) * 0.01;
@@ -346,7 +351,12 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                 if (s.variance && s.variance !== 0) items.push({ id: `var_${s.id}`, date: s.date, desc: `Cash Variance (现金误差调整) ${s.varianceReason ? `[${s.varianceReason}]` : ''}`, amount: Math.abs(s.variance), type: s.variance > 0 ? 'IN' : 'OUT', category: 'ADJUSTMENT', tag: 'VARIANCE' });
             } else {
                 const bankIncome = (s.sales.tng || 0) + (s.sales.duitnow || 0) + (s.sales.card || 0);
-                const deliveryIncome = s.sales.deliveryBreakdown ? Object.values(s.sales.deliveryBreakdown).reduce((a:number, b:any) => a + (Number(b)||0), 0) : 0;
+                const deliveryIncome = s.sales.deliveryBreakdown? 
+                (Number(s.sales.deliveryBreakdown.grab || 0) + 
+                Number(s.sales.deliveryBreakdown.panda || 0) + 
+                Number(s.sales.deliveryBreakdown.shopee || 0) + 
+                Number(s.sales.deliveryBreakdown.lalamove || 0)) 
+                : 0;
                 const total = bankIncome + deliveryIncome;
                 if (total > 0) {
                     items.push({ id: `sale_${s.id}`, date: s.date, desc: 'Digital Sales (电子/外卖营收)', amount: total, type: 'IN', category: 'SALES', tag: 'REVENUE' });

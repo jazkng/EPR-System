@@ -424,7 +424,8 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 }
 
                 const bankIncome = Number(s.sales?.tng || 0) + Number(s.sales?.duitnow || 0) + Number(s.sales?.card || 0);
-                const delivery = s.sales?.deliveryBreakdown ? Object.values(s.sales.deliveryBreakdown).reduce((a: number, b: any) => a + (Number(b) || 0), 0) : 0;
+                const delivery = s.sales?.deliveryBreakdown? (Number(s.sales.deliveryBreakdown.grab || 0) + Number(s.sales.deliveryBreakdown.panda || 0) + Number(s.sales.deliveryBreakdown.shopee || 0) + Number(s.sales.deliveryBreakdown.lalamove || 0))     
+                : 0;
                 
                 if (bankIncome + delivery > 0) {
                     allTransactions.push({ id: `bank_${s.id}`, date: s.date.split('T')[0], time: s.timestamp || `${s.date.split('T')[0]}T12:00:00`, type: 'IN', category: 'SALES', description: 'Digital/Delivery Sales', amount: bankIncome + delivery, account: 'BANK' });

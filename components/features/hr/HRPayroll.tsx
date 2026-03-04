@@ -672,7 +672,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                     employeeId: id,
                     employeeName: emp?.name || 'Unknown',
                     basicSalary: entry.basic,
-                    allowance: entry.allowance + entry.ot + entry.bonus + (entry.holidayPay || 0),
+                    allowance: entry.allowance + entry.ot + entry.bonus,
                     holidayDays: entry.holidayDays || 0,
                     holidayPay: entry.holidayPay || 0,
                     penalty: entry.latePenalty + entry.unpaidLeave,
@@ -768,7 +768,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                 const t = getTotals(entry);
                 return {
                     employeeId: id, employeeName: emp?.name || 'Unknown',
-                    basicSalary: entry.basic, allowance: entry.allowance + entry.ot + entry.bonus + (entry.holidayPay || 0),
+                    basicSalary: entry.basic, allowance: entry.allowance + entry.ot + entry.bonus,
                     holidayDays: entry.holidayDays || 0,
                     holidayPay: entry.holidayPay || 0,
                     penalty: entry.latePenalty + entry.unpaidLeave, advanceLoan: entry.advanceLoan,
