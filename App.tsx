@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { isFirebaseInitialized } from './firebaseConfig';
 import { UserRole, StaffRole, Employee } from './types';
 import { Login } from './components/Login';
 import { BossDashboard } from './components/BossDashboard';
@@ -21,6 +22,35 @@ export default function App() {
   
   // New State for Version Modal
   const [showWhatsNew, setShowWhatsNew] = useState(false);
+
+  if (!isFirebaseInitialized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#FFF8F8] p-4 text-center">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 border-2 border-[#8B0000]/10">
+          <div className="w-20 h-20 bg-[#8B0000]/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Settings className="text-[#8B0000] w-10 h-10 animate-spin-slow" />
+          </div>
+          <h1 className="text-2xl font-black text-[#8B0000] mb-4 font-serif">配置未完成 (Config Required)</h1>
+          <p className="text-gray-600 mb-6 leading-relaxed">
+            Firebase 数据库配置未找到。请在 AI Studio 的 <span className="font-bold text-[#8B0000]">Settings</span> 菜单中设置以下环境变量：
+          </p>
+          <div className="bg-gray-50 rounded-xl p-4 text-left font-mono text-xs text-gray-500 mb-6 border border-gray-200 overflow-x-auto">
+            <ul className="space-y-1">
+              <li>• VITE_FIREBASE_API_KEY</li>
+              <li>• VITE_FIREBASE_AUTH_DOMAIN</li>
+              <li>• VITE_FIREBASE_PROJECT_ID</li>
+              <li>• VITE_FIREBASE_STORAGE_BUCKET</li>
+              <li>• VITE_FIREBASE_MESSAGING_SENDER_ID</li>
+              <li>• VITE_FIREBASE_APP_ID</li>
+            </ul>
+          </div>
+          <p className="text-sm text-gray-400 italic">
+            设置完成后，请刷新页面。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
       const params = new URLSearchParams(window.location.search);
@@ -59,13 +89,11 @@ export default function App() {
           // Check Version after restoring session
           checkVersion();
       }
-  }, []); // 🟢 useEffect 到这里完美闭合
+  }, []);
 
-  // 🟢 恢复独立的 checkVersion 方法
   const checkVersion = () => {
       const lastSeenVersion = localStorage.getItem('klk_last_seen_version');
       if (lastSeenVersion !== APP_VERSION) {
-          // Add a small delay to ensure UI is ready
           setTimeout(() => setShowWhatsNew(true), 1000);
       }
   };
@@ -101,7 +129,7 @@ export default function App() {
       localStorage.removeItem('kepong_erp_session_employee');
     }
     setBossTab(null);
-    checkVersion(); // Check version on fresh login
+    checkVersion();
   };
 
   const handleLogout = () => {
@@ -130,7 +158,8 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col relative font-sans bg-[#FFF8F8]">
       {currentUser && (
-        <header className="bg-gradient-to-r from-[#8B0000] via-[#A00000] to-[#8B0000] text-[#FFD700] px-4 py-3 md:px-6 md:py-4 flex justify-between items-center shadow-[0_4px_14px_0_rgba(139,0,0,0.3)] z-50 sticky top-0 border-b border-[#FFD700]/30 relative overflow-hidden">
+        <header className="bg-gradient-to-r from-[#8B0000] via-[#A00000] to-[#8B0000] text-[#FFD700] px-4 pb-3 pt-[max(env(safe-area-inset-top),0.75rem)] md:px-6 md:pb-4 md:pt-[max(env(safe-area-inset-top),1rem)] flex justify-between items-center shadow-[0_4px_14px_0_rgba(139,0,0,0.3)] z-50 sticky top-0 border-b border-[#FFD700]/30 relative">
+          {/* ✅ 背景纹理层：确保 pointer-events-none 生效，不遮挡按钮 */}
           <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'url("https://www.transparenttextures.com/patterns/wood-pattern.png")' }}></div>
           
           <div className="flex items-center gap-3 md:gap-4 relative z-10">

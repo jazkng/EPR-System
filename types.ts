@@ -14,7 +14,9 @@ export interface PayrollRecordDetail {
     employeeName: string;
     basicSalary: number;
     allowance: number;
+    extraSubsidy?: number; // 🟢 新增：补贴 (油费等额外)
     penalty: number;
+    hostelFee?: number;    // 🟢 新增：住宿费
     advanceLoan: number;
     ee_epf: number;
     ee_socso: number;
@@ -190,6 +192,7 @@ export interface Employee {
     id: string;
     name: string;
     role: string;
+    secondaryRoles?: string[]; // <--- 新增：用于存储多项副职
     pin?: string;
     status: 'CONFIRMED' | 'PROBATION' | 'TERMINATED';
     rank?: EmployeeRank; 
@@ -315,35 +318,39 @@ export interface ExpenseItem {
 }
 
 export interface SettlementRecord {
-    id: string;
-    date: string;
-    timestamp: string;
-    openingCash: number;
-    closingCash: number;
-    sales: {
-        total: number;
-        storeHubTotal: number;
-        refundTotal?: number;
-        cash: number;
-        tng: number;
-        duitnow: number;
-        card: number;
-        amex?: number;
-        deliveryBreakdown: {
-            grab: number;
-            panda: number;
-            shopee: number;
-            lalamove: number;
-            grabGross?: number;
-            pandaGross?: number;
-            shopeeGross?: number;
-        };
+  id: string;
+  date: string;
+  timestamp: string;
+  openingCash: number;
+  closingCash: number;
+  sales: {
+    total: number;
+    storeHubTotal: number;
+    refundTotal?: number;
+    cash: number;
+    tng: number;
+    duitnow: number;
+    card: number;
+    amex?: number;
+    deliveryBreakdown?: {
+      grab: number;
+      panda: number;
+      shopee: number;
+      lalamove: number;
+      grabGross?: number;
+      pandaGross?: number;
+      shopeeGross?: number;
     };
-    expenses: ExpenseItem[];
-    variance: number;
-    varianceReason?: string;
-    submittedBy: string;
-    isClosed: boolean;
+  };
+  expenses: any[]; 
+  variance: number;
+  varianceReason?: string;
+  submittedBy: string;
+  isClosed: boolean;
+  createdAt?: string;
+  
+  // 🟢 加入下面这一行，允许记录核销状态
+  reconStatus?: Record<string, boolean>; 
 }
 
 export interface RecurringBill {

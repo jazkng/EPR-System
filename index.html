@@ -65,12 +65,12 @@
   </script>
 
   <style>
-    /* 2. 深度锁定 iOS 弹性回弹 (Rubber-banding) */
+    /* 深度锁定 iOS 弹性回弹 (Rubber-banding) */
     html, body {
-      position: fixed; /* 强制锁定根元素，禁止 iOS 整个页面背景被拖动 */
+      position: fixed;
       width: 100%;
       height: 100%;
-      overflow: hidden; /* 禁止根滚动 */
+      overflow: hidden;
       background-color: #FFF8F8;
     }
 
@@ -80,16 +80,14 @@
       left: 0;
       right: 0;
       bottom: 0;
-      /* 适配 iPhone 动态高度，解决底部黑条遮挡 */
       height: 100%;
       height: -webkit-fill-available; 
       
-      overflow-y: auto; /* 只允许在 root 容器内垂直滚动 */
-      overflow-x: hidden; /* 强制干掉左右晃动 */
+      overflow-y: auto;
+      overflow-x: hidden;
       
-      /* 阻止滚动溢出传播到 fixed 的 body */
       overscroll-behavior: contain; 
-      -webkit-overflow-scrolling: touch; /* 保持 iOS 原生滚动的丝滑感 */
+      -webkit-overflow-scrolling: touch;
     }
 
     /* 全局滚动条美化 */
@@ -108,7 +106,6 @@
       background: #8B0000;
     }
 
-    /* 针对宫廷风边框的防御：确保盒子模型不撑破宽度 */
     * {
       box-sizing: border-box;
     }
@@ -129,7 +126,7 @@
         });
       }
 
-      // 3. 针对 iOS 的补充逻辑：防止触摸移动穿透到 body
+      // 针对 iOS 的补充逻辑：防止触摸移动穿透到 body
       document.addEventListener('touchmove', function (e) {
           if (e.target.id === 'root' || document.getElementById('root').contains(e.target)) {
               // 允许 root 内部滚动
