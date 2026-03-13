@@ -149,7 +149,7 @@ export const StoreConfigModal: React.FC<StoreConfigModalProps> = ({ isOpen, onCl
 
     return (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-0 md:p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white w-full md:max-w-3xl rounded-t-3xl md:rounded-2xl p-4 md:p-6 shadow-2xl h-[90vh] md:max-h-[90vh] overflow-y-auto mt-auto md:mt-0 flex flex-col relative">
+            <div className="bg-white w-full md:max-w-2xl rounded-t-3xl md:rounded-2xl px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] md:px-6 md:pb-6 md:pt-[max(env(safe-area-inset-top),1.5rem)] shadow-2xl h-[90vh] md:max-h-[90vh] overflow-y-auto mt-auto md:mt-0 flex flex-col relative">
                 <div className="flex justify-between items-center mb-4 md:mb-6">
                     <h3 className="font-black text-lg md:text-xl flex items-center gap-2"><Settings size={20} className="md:w-6 md:h-6"/> 系统设置 (System Config)</h3>
                     <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>

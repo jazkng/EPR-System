@@ -691,47 +691,50 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
 
     return (
         <div className="fixed inset-0 bg-[#F5F7FA] z-[100] flex flex-col animate-in fade-in duration-200 font-sans">
-            <div className="bg-[#1A1A1A] p-5 flex flex-col md:flex-row justify-between items-center text-white shrink-0 shadow-xl z-20 border-b-4 border-[#FFD700]">
-                <div className="flex items-center gap-5 w-full md:w-auto mb-4 md:mb-0">
-                    <div className="bg-[#FFD700] text-black p-3 rounded-2xl shadow-gold"><Briefcase size={28} /></div>
+            {/* Header - Mobile & iPad Optimized & Safe-Area */}
+            <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] md:px-5 md:pb-5 md:pt-[max(env(safe-area-inset-top),1.25rem)] flex flex-col md:flex-row justify-between items-center text-white shrink-0 shadow-xl z-20 border-b-4 border-[#FFD700]">
+                <div className="flex items-center gap-3 md:gap-5 w-full md:w-auto mb-3 md:mb-0">
+                    <div className="bg-[#FFD700] text-black p-2 md:p-3 rounded-xl md:rounded-2xl shadow-gold"><Briefcase size={20} className="md:w-7 md:h-7" /></div>
                     <div>
-                        <h2 className="text-2xl font-black tracking-wide text-white">考勤指挥台</h2>
-                        <p className="text-xs text-gray-400 font-mono tracking-[0.2em] uppercase mt-0.5">Central Attendance Control</p>
+                        <h2 className="text-lg md:text-2xl font-black tracking-wide text-white">考勤指挥台</h2>
+                        <p className="text-[9px] md:text-xs text-gray-400 font-mono tracking-[0.2em] uppercase mt-0.5">Central Attendance Control</p>
                     </div>
                 </div>
-                <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+                <div className="flex items-center gap-2 md:gap-3 w-full md:w-auto justify-between md:justify-end overflow-x-auto scrollbar-hide">
                     
-                    <div className="relative" ref={batchMenuRef}>
+                    <div className="relative shrink-0" ref={batchMenuRef}>
                         <button 
                             onClick={() => setShowBatchMenu(!showBatchMenu)} 
                             disabled={isLoading} 
-                            className="bg-[#FFD700] text-black hover:bg-white px-5 py-3 rounded-2xl text-sm font-bold transition-all border border-[#FFD700] flex items-center gap-2 active:scale-95 shadow-lg"
+                            className="bg-[#FFD700] text-black hover:bg-white px-3 py-2 md:px-5 md:py-3 rounded-xl md:rounded-2xl text-[10px] md:text-sm font-bold transition-all border border-[#FFD700] flex items-center gap-1 md:gap-2 active:scale-95 shadow-lg whitespace-nowrap"
                         >
-                            <Zap size={18} fill="currentColor"/> 一键开工 (Batch In) <ChevronDown size={16} className={`transition-transform ${showBatchMenu ? 'rotate-180' : ''}`}/>
+                            <Zap size={14} className="md:w-[18px] md:h-[18px]" fill="currentColor"/> <span className="hidden sm:inline">一键开工</span><span className="sm:hidden">批量</span> <ChevronDown size={14} className={`transition-transform ${showBatchMenu ? 'rotate-180' : ''}`}/>
                         </button>
                         
                         {showBatchMenu && (
-                            <div className="absolute top-full right-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-50 animate-in slide-in-from-top-2">
-                                <button onClick={() => handleBatchClockIn('FLOOR')} className="w-full text-left px-4 py-3 hover:bg-blue-50 flex items-center gap-3 border-b border-gray-50">
-                                    <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><Coffee size={16}/></div>
-                                    <div><span className="font-bold text-sm text-[#1A1A1A]">楼面 & 水吧</span><p className="text-[10px] text-gray-400">Floor, Bar & Dish</p></div>
+                            <div className="absolute top-full left-0 md:left-auto md:right-0 mt-2 w-48 md:w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-50 animate-in slide-in-from-top-2">
+                                <button onClick={() => handleBatchClockIn('FLOOR')} className="w-full text-left px-3 py-2 md:px-4 md:py-3 hover:bg-blue-50 flex items-center gap-3 border-b border-gray-50">
+                                    <div className="p-1.5 md:p-2 bg-blue-100 text-blue-600 rounded-lg"><Coffee size={14} className="md:w-4 md:h-4"/></div>
+                                    <div><span className="font-bold text-xs md:text-sm text-[#1A1A1A]">楼面 & 水吧</span><p className="text-[8px] md:text-[10px] text-gray-400">Floor, Bar & Dish</p></div>
                                 </button>
-                                <button onClick={() => handleBatchClockIn('KITCHEN')} className="w-full text-left px-4 py-3 hover:bg-orange-50 flex items-center gap-3 border-b border-gray-50">
-                                    <div className="p-2 bg-orange-100 text-orange-600 rounded-lg"><ChefHat size={16}/></div>
-                                    <div><span className="font-bold text-sm text-[#1A1A1A]">厨房团队</span><p className="text-[10px] text-gray-400">Kitchen Team</p></div>
+                                <button onClick={() => handleBatchClockIn('KITCHEN')} className="w-full text-left px-3 py-2 md:px-4 md:py-3 hover:bg-orange-50 flex items-center gap-3 border-b border-gray-50">
+                                    <div className="p-1.5 md:p-2 bg-orange-100 text-orange-600 rounded-lg"><ChefHat size={14} className="md:w-4 md:h-4"/></div>
+                                    <div><span className="font-bold text-xs md:text-sm text-[#1A1A1A]">厨房团队</span><p className="text-[8px] md:text-[10px] text-gray-400">Kitchen Team</p></div>
                                 </button>
-                                <button onClick={() => handleBatchClockIn('ALL')} className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3">
-                                    <div className="p-2 bg-gray-100 text-gray-600 rounded-lg"><Users size={16}/></div>
-                                    <div><span className="font-bold text-sm text-[#1A1A1A]">全员开工</span><p className="text-[10px] text-gray-400">All Staff</p></div>
+                                <button onClick={() => handleBatchClockIn('ALL')} className="w-full text-left px-3 py-2 md:px-4 md:py-3 hover:bg-gray-50 flex items-center gap-3">
+                                    <div className="p-1.5 md:p-2 bg-gray-100 text-gray-600 rounded-lg"><Users size={14} className="md:w-4 md:h-4"/></div>
+                                    <div><span className="font-bold text-xs md:text-sm text-[#1A1A1A]">全员开工</span><p className="text-[8px] md:text-[10px] text-gray-400">All Staff</p></div>
                                 </button>
                             </div>
                         )}
                     </div>
 
-                    <button onClick={() => setShowRollCall(true)} className="bg-white/10 hover:bg-white/20 px-5 py-3 rounded-2xl text-sm font-bold transition-all border border-white/10 flex items-center gap-2 active:scale-95"><ListChecks size={18}/> 快速点名</button>
-                    <button onClick={() => setShowReport(true)} className="bg-white/10 hover:bg-white/20 px-5 py-3 rounded-2xl text-sm font-bold transition-all border border-white/10 flex items-center gap-2 active:scale-95"><FileBarChart size={18}/> 达标检查</button>
-                    <div className="h-10 w-px bg-white/10 mx-2 hidden md:block"></div>
-                    <button onClick={onClose} className="p-3 hover:bg-white/10 rounded-full transition-colors"><X size={24}/></button>
+                    <div className="flex gap-2 shrink-0">
+                        <button onClick={() => setShowRollCall(true)} className="bg-white/10 hover:bg-white/20 px-3 py-2 md:px-5 md:py-3 rounded-xl md:rounded-2xl text-[10px] md:text-sm font-bold transition-all border border-white/10 flex items-center gap-1 md:gap-2 active:scale-95 whitespace-nowrap"><ListChecks size={14} className="md:w-[18px] md:h-[18px]"/> 点名</button>
+                        <button onClick={() => setShowReport(true)} className="bg-white/10 hover:bg-white/20 px-3 py-2 md:px-5 md:py-3 rounded-xl md:rounded-2xl text-[10px] md:text-sm font-bold transition-all border border-white/10 flex items-center gap-1 md:gap-2 active:scale-95 whitespace-nowrap"><FileBarChart size={14} className="md:w-[18px] md:h-[18px]"/> 达标</button>
+                    </div>
+                    <div className="h-8 md:h-10 w-px bg-white/10 mx-1 md:mx-2 hidden sm:block"></div>
+                    <button onClick={onClose} className="p-2 md:p-3 hover:bg-white/10 rounded-full transition-colors shrink-0"><X size={20} className="md:w-6 md:h-6"/></button>
                 </div>
             </div>
 

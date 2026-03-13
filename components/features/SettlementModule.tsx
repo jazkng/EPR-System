@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     DollarSign, Plus, Trash2, Check, 
     AlertTriangle, Calculator, Play, Power, History, 
     ArrowRight, Receipt, Wallet, Banknote, CreditCard, 
     Coins, X, Calendar, ChevronRight, Truck, CheckCircle2, 
-    RotateCcw, AlertCircle, MinusCircle, Loader2, User, FileText, UserMinus // 🟢 1. 把 UserMinus 加到这里
+    RotateCcw, AlertCircle, Loader2, User, FileText, UserMinus,
+    FileDown, Printer, Edit3, ShieldCheck, Zap
 } from 'lucide-react';
-import { SettlementRecord, ExpenseItem, StoreConfig, Employee, Supplier } from '../../types';
+import { jsPDF } from "jspdf";
+import html2canvas from 'html2canvas';
+import { SettlementRecord, StoreConfig, Employee, Supplier, ExpenseItem } from '../../types';
 import { DataManager } from '../../utils/dataManager';
 import { ModuleGuideButton } from '../ui/ModuleGuide';
 
@@ -45,302 +48,402 @@ const getCalendarTodayStr = () => {
     return `${year}-${month}-${day}`;
 };
 
-// --- CASH OUT MODAL COMPONENT (ENHANCED) ---
-const ExpenseModal = ({ 
-    isOpen, 
-    onClose, 
-    onSave, 
-    employees,
-    suppliers 
+// 🟢 Helper: 判断某渠道是否已核销 (兼容旧 boolean 和新 number 格式)
+const isChannelReconciled = (reconStatus: any, key: string): boolean => {
+    const val = reconStatus?.[key];
+    return val === true || (typeof val === 'number');
+};
+
+// 🟢 Helper: 获取核销后的实收金额 (新格式返回数字，旧格式返回 null)
+const getReconActual = (reconStatus: any, key: string): number | null => {
+    const val = reconStatus?.[key];
+    if (typeof val === 'number') return val;
+    return null;
+};
+
+// 🟢 改版：单个对账条目组件 — 支持显示核销后实收金额
+const ReconItem = ({ 
+    label, 
+    gross, 
+    isReconciled,
+    actualAmount,
+    onReconcile 
 }: { 
-    isOpen: boolean, 
-    onClose: () => void, 
-    onSave: (exp: ExpenseItem) => void, 
-    employees: Employee[],
-    suppliers: Supplier[]
+    label: string, 
+    gross: number, 
+    isReconciled: boolean,
+    actualAmount: number | null,
+    onReconcile: () => void 
 }) => {
-    const [type, setType] = useState<'SUPPLIER' | 'STAFF_ADVANCE' | 'GENERAL'>('SUPPLIER');
-    const [amount, setAmount] = useState<string>('');
-    const [targetId, setTargetId] = useState<string>('');
-    const [billRef, setBillRef] = useState<string>('');
-    
-    useEffect(() => {
-        setTargetId('');
-        setBillRef('');
-    }, [type]);
-
-    if (!isOpen) return null;
-
-    const handleSubmit = () => {
-        if (!amount || parseFloat(amount) <= 0) return alert("请输入金额 (Please enter amount)");
-
-        let companyName = '';
-        let noteText = '';
-        let category = 'GENERAL';
-
-        if (type === 'SUPPLIER') {
-            if (!targetId) return alert("请选择供应商 (Select Supplier)");
-            const sup = suppliers.find(s => s.id === targetId);
-            companyName = sup ? sup.name : 'Unknown Supplier';
-            noteText = billRef ? `Bill Ref: ${billRef}` : 'COD Payment';
-            category = sup?.category || 'SUPPLIER';
-        } else if (type === 'STAFF_ADVANCE') {
-            if (!targetId) return alert("请选择员工 (Select Staff)");
-            const emp = employees.find(e => e.id === targetId);
-            companyName = emp ? emp.name : 'Unknown Staff';
-            noteText = billRef ? `Note: ${billRef}` : 'Cash Advance';
-            category = 'STAFF_ADVANCE';
-        } else {
-            if (!billRef) return alert("请输入用途/备注 (Enter Description)");
-            companyName = billRef;
-            noteText = 'Petty Cash Bill';
-            category = 'GENERAL';
-        }
-
-        const expense: ExpenseItem = {
-            id: `exp_${Date.now()}`,
-            category: category as any,
-            expenseType: 'CASH_OUT',
-            company: companyName,
-            amount: parseFloat(amount),
-            paymentStatus: 'PAID',
-            paymentMethod: 'CASH',
-            time: new Date().toISOString(),
-            note: noteText,
-            paidBy: 'SHOP_CASH',
-            isAdvancePayment: false 
-        };
-        onSave(expense);
-        setAmount('');
-        setTargetId('');
-        setBillRef('');
-        onClose();
-    };
-
+    if (gross <= 0) return null;
+    // 🟢 兼容旧数据：actualAmount 为 null 时（旧 boolean true），视为完美对账 = gross
+    const displayActual = actualAmount !== null ? actualAmount : (isReconciled ? gross : null);
+    const fee = displayActual !== null ? Number((gross - displayActual).toFixed(2)) : null;
     return (
-        <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white w-full max-w-md rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh]">
-                <div className="flex justify-between items-center mb-6">
-                    <h3 className="font-black text-xl text-[#1A1A1A] flex items-center gap-2">
-                        <MinusCircle className="text-red-600" size={24}/>
-                        记一笔支出 (Cash Out)
-                    </h3>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
-                </div>
-
-                <div className="space-y-6 overflow-y-auto pb-4">
-                    <div className="grid grid-cols-3 gap-3">
-                        <button onClick={() => setType('SUPPLIER')} className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all gap-2 ${type === 'SUPPLIER' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-md' : 'bg-white border-gray-100 text-gray-400 hover:bg-gray-50'}`}>
-                            <Truck size={24} strokeWidth={type === 'SUPPLIER' ? 2.5 : 2}/>
-                            <span className="text-[10px] font-black uppercase text-center leading-tight">货款<br/>(Supplier)</span>
-                        </button>
-                        <button onClick={() => setType('STAFF_ADVANCE')} className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all gap-2 ${type === 'STAFF_ADVANCE' ? 'bg-orange-50 border-orange-500 text-orange-700 shadow-md' : 'bg-white border-gray-100 text-gray-400 hover:bg-gray-50'}`}>
-                            <UserMinus size={24} strokeWidth={type === 'STAFF_ADVANCE' ? 2.5 : 2}/>
-                            <span className="text-[10px] font-black uppercase text-center leading-tight">预支<br/>(Advance)</span>
-                        </button>
-                        <button onClick={() => setType('GENERAL')} className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all gap-2 ${type === 'GENERAL' ? 'bg-gray-100 border-gray-600 text-gray-800 shadow-md' : 'bg-white border-gray-100 text-gray-400 hover:bg-gray-50'}`}>
-                            <Receipt size={24} strokeWidth={type === 'GENERAL' ? 2.5 : 2}/>
-                            <span className="text-[10px] font-black uppercase text-center leading-tight">杂费<br/>(Petty)</span>
-                        </button>
-                    </div>
-
-                    <div className="space-y-4">
-                        {type === 'SUPPLIER' && (
-                            <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 animate-in slide-in-from-top-2">
-                                <label className="text-[10px] font-black text-blue-800 uppercase mb-2 block flex items-center gap-1"><Truck size={12}/> 选择供应商 (Select Supplier)</label>
-                                <select value={targetId} onChange={e => setTargetId(e.target.value)} className="w-full p-3 bg-white border border-blue-200 rounded-xl text-sm font-bold text-[#1A1A1A] outline-none focus:ring-2 focus:ring-blue-400">
-                                    <option value="">-- 请选择 (Select) --</option>
-                                    {suppliers.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
-                                </select>
-                            </div>
+        <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 shadow-sm mt-2">
+            <div className="flex-1 min-w-0">
+                <p className="text-xs font-black text-gray-800">{label}</p>
+                <p className="text-[10px] text-gray-500">Gross: RM {gross.toFixed(2)}</p>
+                {isReconciled && displayActual !== null && (
+                    <div className="flex items-center gap-3 mt-1">
+                        <p className="text-[10px] font-bold text-green-600">实收: RM {displayActual.toFixed(2)}</p>
+                        {fee !== null && fee > 0 && (
+                            <p className="text-[10px] font-bold text-orange-500">手续费: RM {fee.toFixed(2)}</p>
                         )}
-
-                        {type === 'STAFF_ADVANCE' && (
-                            <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 animate-in slide-in-from-top-2">
-                                <label className="text-[10px] font-black text-orange-800 uppercase mb-2 block flex items-center gap-1"><User size={12}/> 选择员工 (Select Staff)</label>
-                                <select value={targetId} onChange={e => setTargetId(e.target.value)} className="w-full p-3 bg-white border border-orange-200 rounded-xl text-sm font-bold text-[#1A1A1A] outline-none focus:ring-2 focus:ring-orange-400">
-                                    <option value="">-- 请选择 (Select) --</option>
-                                    {employees.map(e => (<option key={e.id} value={e.id}>{e.name}</option>))}
-                                </select>
-                            </div>
+                        {fee === 0 && actualAmount === null && (
+                            <p className="text-[10px] font-bold text-gray-400">(旧记录)</p>
                         )}
-
-                        <div>
-                            <label className="text-[10px] font-bold text-gray-400 uppercase mb-1.5 block flex items-center gap-1">
-                                <FileText size={12}/> {type === 'GENERAL' ? '用途 / 购买物品 (Description)' : '单据号码 / 备注 (Bill Ref / Note)'}
-                            </label>
-                            <input type="text" value={billRef} onChange={e => setBillRef(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:bg-white focus:border-[#1A1A1A] transition-all" placeholder={type === 'GENERAL' ? 'e.g. Ice / Pen / Plastic Bag' : 'Optional (e.g. Inv #123)'} />
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] font-bold text-gray-400 uppercase mb-1.5 block flex items-center gap-1"><Coins size={12}/> 支付金额 (Cash Amount)</label>
-                            <div className="relative">
-                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-black text-lg">RM</span>
-                                <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-xl font-mono text-3xl font-black text-[#1A1A1A] outline-none focus:ring-2 focus:ring-[#FFD700] border-2 border-transparent focus:bg-white transition-all" placeholder="0.00" autoFocus />
-                            </div>
-                        </div>
                     </div>
-                </div>
-
-                <button onClick={handleSubmit} className="w-full py-4 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-lg shadow-lg hover:bg-black mt-auto active:scale-95 transition-transform flex items-center justify-center gap-2">
-                    <CheckCircle2 size={20}/> 确认支出 (Confirm Payout)
-                </button>
+                )}
             </div>
+            {isReconciled ? (
+                <span className="flex items-center gap-1 text-[10px] font-black text-green-600 bg-green-50 px-2 py-1 rounded-lg border border-green-200 shrink-0 ml-2">
+                    <CheckCircle2 size={12}/> 已过账
+                </span>
+            ) : (
+                <button 
+                    onClick={onReconcile}
+                    className="flex items-center gap-1 text-[10px] font-black text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg shadow-sm active:scale-95 transition-all shrink-0 ml-2"
+                >
+                    <ShieldCheck size={12}/> 核销对账
+                </button>
+            )}
         </div>
     );
 };
 
-const HistoryDetailModal = ({ record, onClose, onDelete }: { record: SettlementRecord | null, onClose: () => void, onDelete: (id: string) => void }) => {
-    if (!record) return null;
-    const deliveryBreakdown = record.sales.deliveryBreakdown || {} as any;
-    const totalDelivery = (Number(deliveryBreakdown.grab) || 0) + 
-                      (Number(deliveryBreakdown.panda) || 0) + 
-                      (Number(deliveryBreakdown.shopee) || 0) + 
-                      (Number(deliveryBreakdown.lalamove) || 0);
-    const totalDebit = (record.sales.duitnow || 0);
-    const totalCard = record.sales.card || 0;
-    const totalCashOut = record.expenses ? record.expenses.reduce((sum, e) => sum + (e.amount || 0), 0) : 0;
+const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: SettlementRecord | null, onClose: () => void, onDelete: (id: string) => void, onRefresh: () => void }) => {
+    const printRef = useRef<HTMLDivElement>(null);
+    const [isGenerating, setIsGenerating] = useState(false);
     
+    // 🟢 本地记录状态：核销后不关闭弹窗，直接刷新本地数据
+    const [localRecord, setLocalRecord] = useState<SettlementRecord | null>(record);
+    
+    // 当 prop 变化时同步
+    useEffect(() => {
+        setLocalRecord(record);
+    }, [record]);
+
+    // 🟢 对账弹窗状态
+    const [reconTarget, setReconTarget] = useState<{key: string, label: string, gross: number} | null>(null);
+    const [reconActual, setReconActual] = useState<string>('');
+    const [isProcessingRecon, setIsProcessingRecon] = useState(false);
+
+    if (!localRecord) return null;
+    const deliveryBreakdown = localRecord.sales.deliveryBreakdown || {} as any;
+    // 兼容旧记录的 Net 以及新记录的 Gross，防止 PDF 区块被意外隐藏
+    const totalDelivery = (Number(deliveryBreakdown.grabGross) || Number(deliveryBreakdown.grab) || 0) + 
+                        (Number(deliveryBreakdown.pandaGross) || Number(deliveryBreakdown.panda) || 0) + 
+                        (Number(deliveryBreakdown.shopeeGross) || Number(deliveryBreakdown.shopee) || 0) + 
+                        (Number(deliveryBreakdown.lalamove) || 0);
+    const totalDebit = (localRecord.sales.duitnow || 0);
+    const totalCard = localRecord.sales.card || 0;
+    const totalBank = (localRecord.sales.tng || 0) + totalDebit + totalCard + (localRecord.sales.amex || 0);
+    
+    // 🟢 兼容旧数据：如果没有 reconStatus，当作全未核销
+    const reconStatus = (localRecord as any).reconStatus || {};
+
+    const handleDownloadPDF = async () => {
+        if (!printRef.current) return;
+        setIsGenerating(true);
+        setTimeout(async () => {
+            try {
+                const canvas = await html2canvas(printRef.current!, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+                const imgData = canvas.toDataURL('image/jpeg', 1.0);
+                const pdf = new jsPDF('p', 'mm', 'a5'); 
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+                pdf.save(`Settlement_${localRecord.date}.pdf`);
+            } catch (error) {
+                console.error('PDF Generation Failed:', error);
+                alert("生成 PDF 失败，请重试。");
+            } finally {
+                setIsGenerating(false);
+            }
+        }, 300);
+    };
+
+    // 🟢 核心对账处理逻辑 (改版：不关闭弹窗 + 存储实收金额)
+    const executeReconciliation = async (perfectMatch: boolean = false) => {
+        if (!reconTarget) return;
+        const actualNum = perfectMatch ? reconTarget.gross : (parseFloat(reconActual) || 0);
+        
+        if (actualNum > reconTarget.gross) {
+            return alert("❌ 实收金额不能大于营业总额！");
+        }
+
+        const diff = Number((reconTarget.gross - actualNum).toFixed(2));
+        setIsProcessingRecon(true);
+
+        try {
+            // 1. 如果有差额，自动生成一笔 "BANK_FEE" 的 Expense
+            if (diff > 0) {
+                const expense: ExpenseItem = {
+                    id: `recon_fee_${localRecord.id}_${reconTarget.key}_${Date.now()}`,
+                    category: 'BANK_FEE', // 记录为银行手续费/平台抽佣
+                    expenseType: 'GENERAL',
+                    company: reconTarget.label,
+                    amount: diff,
+                    totalBillAmount: diff,
+                    outstandingAmount: 0,
+                    paymentStatus: 'PAID',
+                    paymentMethod: 'BANK_TRANSFER', // 从银行数字资产扣
+                    time: `${localRecord.date}T12:00:00.000Z`, // 维持账期为这天
+                    createdAt: new Date().toISOString(), // 真实的审计时间
+                    note: `[自动核销抽佣] 营业额: ${reconTarget.gross} | 实收: ${actualNum} | ${reconTarget.label}`,
+                    paidBy: 'COMPANY'
+                };
+                await DataManager.saveStandaloneExpense(expense);
+            }
+
+            // 2. 🟢 更新 reconStatus：存储实际到账金额 (数字) 而非 boolean
+            const updatedReconStatus = { ...reconStatus, [reconTarget.key]: actualNum };
+            const updatedRecord = { ...localRecord, reconStatus: updatedReconStatus };
+            
+            await DataManager.updateSettlementReconStatus(localRecord.id, updatedReconStatus);
+            
+            // 🟢 改版核心：更新本地状态而非关闭弹窗
+            setLocalRecord(updatedRecord as SettlementRecord);
+            
+            const matchText = perfectMatch ? '(完美对账)' : '';
+            alert(`✅ ${reconTarget.label} 核销成功！${matchText}\n实收 RM ${actualNum.toFixed(2)}${diff > 0 ? `\n自动计入手续费 RM ${diff.toFixed(2)}` : ''}`);
+            setReconTarget(null);
+            setReconActual('');
+            onRefresh(); // 刷新父组件历史列表（后台静默刷新）
+            // 🟢 不再调用 onClose()，用户留在详情页继续操作
+        } catch (e) {
+            console.error(e);
+            alert("核销失败，请重试");
+        } finally {
+            setIsProcessingRecon(false);
+        }
+    };
+
     return (
         <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white w-full max-w-lg rounded-[2rem] shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col custom-scrollbar">
+            <div className="bg-white w-full max-w-lg rounded-[2rem] shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col custom-scrollbar relative">
+                
+                {/* Recon Modal Overlay (对账输入框弹窗) */}
+                {reconTarget && (
+                    <div className="absolute inset-0 bg-white/90 backdrop-blur-md z-50 rounded-[2rem] p-6 flex flex-col items-center justify-center animate-in zoom-in-95">
+                        <div className="bg-white p-6 rounded-3xl shadow-2xl border border-gray-200 w-full max-w-sm">
+                            <div className="flex justify-between items-center mb-4">
+                                <h4 className="font-black text-lg text-blue-900 flex items-center gap-2"><ShieldCheck size={20}/> 数字核销</h4>
+                                <button onClick={() => { setReconTarget(null); setReconActual(''); }} className="p-1 hover:bg-gray-100 rounded-full"><X size={16}/></button>
+                            </div>
+                            <p className="text-xs text-gray-500 font-bold mb-4">当前核销: <span className="text-[#1A1A1A]">{reconTarget.label}</span></p>
+                            
+                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4">
+                                <div className="flex justify-between text-xs font-bold text-gray-400 mb-1"><span>System Gross (系统总额)</span><span>RM {reconTarget.gross.toFixed(2)}</span></div>
+                            </div>
+
+                            {/* 🟢 新增：完美对账按钮 — 金额完全匹配时一键核销 */}
+                            <button 
+                                onClick={() => executeReconciliation(true)}
+                                disabled={isProcessingRecon}
+                                className="w-full py-3 mb-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-black shadow-md hover:from-green-600 hover:to-emerald-700 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {isProcessingRecon ? <Loader2 size={16} className="animate-spin"/> : <Zap size={16}/>}
+                                完美对账 (Perfect Match)
+                                <span className="text-[10px] font-bold opacity-80 ml-1">= RM {reconTarget.gross.toFixed(2)}</span>
+                            </button>
+
+                            <div className="relative flex items-center justify-center mb-4">
+                                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200"></div></div>
+                                <span className="relative bg-white px-3 text-[10px] font-bold text-gray-400 uppercase">或手动输入实收金额</span>
+                            </div>
+
+                            <div className="mb-6">
+                                <label className="text-[10px] font-black text-blue-600 uppercase mb-2 block">Bank Received (银行实际到账金额)</label>
+                                <input 
+                                    type="number" 
+                                    value={reconActual} 
+                                    onChange={e => setReconActual(e.target.value)} 
+                                    className="w-full p-4 bg-white border-2 border-blue-200 focus:border-blue-500 rounded-xl text-xl font-black font-mono outline-none shadow-inner"
+                                    placeholder="0.00"
+                                />
+                                {reconActual && parseFloat(reconActual) < reconTarget.gross && (
+                                    <p className="text-[10px] text-orange-600 font-bold mt-2">
+                                        ⚠️ 差额 RM {(reconTarget.gross - parseFloat(reconActual)).toFixed(2)} 将自动转为平台抽佣支出。
+                                    </p>
+                                )}
+                            </div>
+
+                            <button 
+                                onClick={() => executeReconciliation(false)}
+                                disabled={!reconActual || isProcessingRecon}
+                                className="w-full py-3 bg-blue-600 text-white rounded-xl font-black shadow-md hover:bg-blue-700 disabled:opacity-50 flex justify-center items-center gap-2"
+                            >
+                                {isProcessingRecon ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16}/>}
+                                确认实收并记账
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* Header */}
-                <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-[#1A1A1A] rounded-t-[2rem]">
+                <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-[#1A1A1A] rounded-t-[2rem] sticky top-0 z-10">
                     <div>
                         <h3 className="font-black text-xl text-[#FFD700]">结算单详情 (Receipt Details)</h3>
-                        <p className="text-xs text-gray-400 font-mono mt-1 font-bold tracking-widest">{record.date} • {new Date(record.timestamp).toLocaleTimeString()}</p>
+                        <p className="text-xs text-gray-400 font-mono mt-1 font-bold tracking-widest">{localRecord.date} • {new Date(localRecord.timestamp).toLocaleTimeString()}</p>
                     </div>
-                    <button onClick={onClose} className="p-2 bg-white/10 text-white rounded-full hover:bg-white/20 hover:text-[#FFD700] transition-colors"><X size={20}/></button>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={handleDownloadPDF} 
+                            disabled={isGenerating}
+                            className="p-2 bg-[#FFD700] text-black rounded-full hover:bg-white hover:text-black transition-colors shadow-lg disabled:opacity-50"
+                            title="导出为 PDF"
+                        >
+                            {isGenerating ? <Loader2 size={20} className="animate-spin"/> : <FileDown size={20}/>}
+                        </button>
+                        <button onClick={onClose} className="p-2 bg-white/10 text-white rounded-full hover:bg-white/20 hover:text-[#FFD700] transition-colors"><X size={20}/></button>
+                    </div>
                 </div>
                 
                 {/* Content */}
                 <div className="p-6 space-y-6 bg-[#F8F9FA] flex-grow">
                     <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-                        <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-                            <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Total Sales (总营业额)</span>
-                            <span className="text-2xl font-black font-mono text-[#1A1A1A]">RM {record.sales.total.toFixed(2)}</span>
+                        
+                        <div className="flex justify-between items-end pb-4 border-b border-gray-100 gap-2">
+                            <span className="text-xs font-black text-gray-400 uppercase tracking-widest leading-tight flex-1">
+                                Total Sales<br/>(总营业额)
+                            </span>
+                            <div className="flex items-baseline gap-1 text-[#1A1A1A] shrink-0">
+                                <span className="text-sm font-bold">RM</span>
+                                <span className="text-3xl font-black font-mono tracking-tighter">{localRecord.sales.total.toFixed(2)}</span>
+                            </div>
                         </div>
                         
-                        {record.sales.refundTotal && record.sales.refundTotal > 0 ? (
-                            <div className="flex justify-between items-center text-xs bg-red-50 p-3 rounded-xl border border-red-100 mb-2">
-                                <span className="flex items-center gap-2 text-red-600 font-bold"><RotateCcw size={14}/> Refunds (退款)</span>
-                                <span className="font-mono font-bold text-red-700">- RM {record.sales.refundTotal.toFixed(2)}</span>
+                        {localRecord.sales.refundTotal && localRecord.sales.refundTotal > 0 ? (
+                            <div className="flex justify-between items-center text-xs bg-red-50 p-3 rounded-xl border border-red-100 mb-2 gap-2">
+                                <span className="flex items-center gap-2 text-red-600 font-bold shrink-0"><RotateCcw size={14}/> Refunds</span>
+                                <span className="font-mono font-bold text-red-700 whitespace-nowrap">- RM {localRecord.sales.refundTotal.toFixed(2)}</span>
                             </div>
                         ) : null}
 
-                        <div className="flex justify-between items-center text-sm p-2">
-                            <span className="flex items-center gap-2 text-gray-600 font-bold"><Banknote size={16}/> Cash (现金)</span>
-                            <span className="font-mono font-bold text-[#1A1A1A] text-lg">RM {record.sales.cash.toFixed(2)}</span>
+                        <div className="flex justify-between items-center text-sm p-2 gap-2">
+                            <span className="flex items-center gap-2 text-gray-600 font-bold shrink-0"><Banknote size={16} className="text-green-600"/> Cash (现金)</span>
+                            <span className="font-mono font-bold text-[#1A1A1A] text-lg whitespace-nowrap">RM {localRecord.sales.cash.toFixed(2)}</span>
                         </div>
                         
-                        <div className="bg-gray-50 p-4 rounded-xl space-y-3 border border-gray-100">
-                            <p className="text-[10px] font-black text-gray-400 uppercase mb-2">POS Payments (系统支付)</p>
-                            <div className="flex justify-between text-xs text-gray-600">
-                                <span className="flex items-center gap-1"><Wallet size={12}/> TNG eWallet</span>
-                                <span className="font-mono font-bold text-gray-800">RM {(record.sales.tng || 0).toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-xs text-gray-600">
-                                <span className="flex items-center gap-1"><CreditCard size={12}/> Debit Card</span>
-                                <span className="font-mono font-bold text-gray-800">RM {totalDebit.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-xs text-gray-600">
-                                <span className="flex items-center gap-1"><CreditCard size={12}/> Credit Card</span>
-                                <span className="font-mono font-bold text-gray-800">RM {totalCard.toFixed(2)}</span>
-                            </div>
-                            {(record.sales.amex || 0) > 0 && (
-                                <div className="flex justify-between text-xs text-gray-600">
-                                    <span className="flex items-center gap-1"><CreditCard size={12}/> Amex</span>
-                                    <span className="font-mono font-bold text-blue-700">RM {(record.sales.amex || 0).toFixed(2)}</span>
-                                </div>
-                            )}
+                        <div className="bg-blue-50/50 p-4 rounded-xl space-y-2 border border-blue-100">
+                            <p className="text-[10px] font-black text-blue-800 uppercase flex items-center gap-1.5"><CreditCard size={12}/> Digital & POS Payments</p>
+                            
+                            <ReconItem label="TNG eWallet" gross={localRecord.sales.tng || 0} isReconciled={isChannelReconciled(reconStatus, 'tng')} actualAmount={getReconActual(reconStatus, 'tng')} onReconcile={() => setReconTarget({key: 'tng', label: 'TNG eWallet', gross: localRecord.sales.tng || 0})} />
+                            <ReconItem label="Debit / DuitNow" gross={totalDebit} isReconciled={isChannelReconciled(reconStatus, 'debit')} actualAmount={getReconActual(reconStatus, 'debit')} onReconcile={() => setReconTarget({key: 'debit', label: 'Debit / DuitNow', gross: totalDebit})} />
+                            <ReconItem label="Credit Card" gross={totalCard} isReconciled={isChannelReconciled(reconStatus, 'credit')} actualAmount={getReconActual(reconStatus, 'credit')} onReconcile={() => setReconTarget({key: 'credit', label: 'Credit Card', gross: totalCard})} />
+                            <ReconItem label="Amex" gross={localRecord.sales.amex || 0} isReconciled={isChannelReconciled(reconStatus, 'amex')} actualAmount={getReconActual(reconStatus, 'amex')} onReconcile={() => setReconTarget({key: 'amex', label: 'Amex', gross: localRecord.sales.amex || 0})} />
                         </div>
 
-                        {/* 精美的外卖数据 UI (Delivery Breakdown) */}
                         {totalDelivery > 0 && (
-                            <div className="bg-white p-4 rounded-xl space-y-3 border-2 border-orange-100 shadow-[0_4px_20px_rgba(251,146,60,0.05)] relative overflow-hidden">
-                                <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-bl from-orange-100 to-transparent opacity-50 rounded-bl-[100px] pointer-events-none"></div>
-                                <div className="flex justify-between items-center text-sm font-black text-orange-800 border-b border-orange-100 pb-2">
-                                    <span className="flex items-center gap-1"><Truck size={14} className="text-orange-500"/> Delivery (外卖收入)</span>
-                                    <span className="font-mono">RM {totalDelivery.toFixed(2)}</span>
+                            <div className="bg-orange-50/50 p-4 rounded-xl space-y-2 border border-orange-100">
+                                <div className="flex justify-between items-center border-b border-orange-100 pb-2">
+                                    <p className="text-[10px] font-black text-orange-800 uppercase flex items-center gap-1.5"><Truck size={12}/> Delivery Platforms</p>
+                                    <span className="font-mono text-xs font-black text-orange-800">Total: RM {totalDelivery.toFixed(2)}</span>
                                 </div>
                                 
-                                <div className="grid grid-cols-2 gap-3 pt-1">
-                                    {deliveryBreakdown.grab > 0 && (
-                                        <div className="flex flex-col gap-1">
-                                            <div className="bg-white p-2.5 rounded-xl border border-green-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
-                                                <span className="text-[10px] font-black text-green-700 bg-green-50 px-2.5 py-1 rounded-md">Grab</span>
-                                                <span className="font-mono font-bold text-green-800 text-xs">RM {deliveryBreakdown.grab.toFixed(2)}</span>
-                                            </div>
-                                            {(deliveryBreakdown as any).grabGross > 0 && <div className="flex justify-between px-2.5 pb-1 text-[9px] text-gray-400"><span>Gross: RM {(deliveryBreakdown as any).grabGross.toFixed(2)}</span><span className="text-red-500 font-bold">-RM {((deliveryBreakdown as any).grabGross - deliveryBreakdown.grab).toFixed(2)}</span></div>}
-                                        </div>
-                                    )}
-                                    {deliveryBreakdown.panda > 0 && (
-                                        <div className="flex flex-col gap-1">
-                                            <div className="bg-white p-2.5 rounded-xl border border-pink-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
-                                                <span className="text-[10px] font-black text-pink-700 bg-pink-50 px-2.5 py-1 rounded-md">Panda</span>
-                                                <span className="font-mono font-bold text-pink-800 text-xs">RM {deliveryBreakdown.panda.toFixed(2)}</span>
-                                            </div>
-                                            {(deliveryBreakdown as any).pandaGross > 0 && <div className="flex justify-between px-2.5 pb-1 text-[9px] text-gray-400"><span>Gross: RM {(deliveryBreakdown as any).pandaGross.toFixed(2)}</span><span className="text-red-500 font-bold">-RM {((deliveryBreakdown as any).pandaGross - deliveryBreakdown.panda).toFixed(2)}</span></div>}
-                                        </div>
-                                    )}
-                                    {deliveryBreakdown.shopee > 0 && (
-                                        <div className="flex flex-col gap-1">
-                                            <div className="bg-white p-2.5 rounded-xl border border-orange-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
-                                                <span className="text-[10px] font-black text-orange-700 bg-orange-50 px-2.5 py-1 rounded-md">Shopee</span>
-                                                <span className="font-mono font-bold text-orange-800 text-xs">RM {deliveryBreakdown.shopee.toFixed(2)}</span>
-                                            </div>
-                                            {(deliveryBreakdown as any).shopeeGross > 0 && <div className="flex justify-between px-2.5 pb-1 text-[9px] text-gray-400"><span>Gross: RM {(deliveryBreakdown as any).shopeeGross.toFixed(2)}</span><span className="text-red-500 font-bold">-RM {((deliveryBreakdown as any).shopeeGross - deliveryBreakdown.shopee).toFixed(2)}</span></div>}
-                                        </div>
-                                    )}
-                                    {deliveryBreakdown.lalamove > 0 && (
-                                        <div className="bg-white p-2.5 rounded-xl border border-blue-100 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
-                                            <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md">Lala</span>
-                                            <span className="font-mono font-bold text-blue-800 text-xs">RM {deliveryBreakdown.lalamove.toFixed(2)}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {record.expenses && record.expenses.length > 0 && (
-                        <div className="bg-red-50 p-5 rounded-2xl border border-red-100 shadow-sm">
-                            <h4 className="text-xs font-black text-red-600 uppercase tracking-widest mb-3 flex items-center gap-2"><MinusCircle size={14}/> 现金支出 (Cash Payouts)</h4>
-                            <div className="space-y-2">
-                                {record.expenses.map((exp, idx) => (
-                                    <div key={idx} className="flex justify-between items-center text-xs border-b border-red-100 pb-2 last:border-0 pt-1">
-                                        <span className="font-bold text-red-800">{exp.company} <span className="text-[9px] font-normal text-red-500 bg-red-100 px-1 py-0.5 rounded ml-1">({exp.category})</span></span>
-                                        <span className="font-mono font-bold text-red-700">- RM {exp.amount.toFixed(2)}</span>
-                                    </div>
-                                ))}
-                                <div className="pt-2 flex justify-between items-center font-black text-sm text-red-900 border-t border-red-200 mt-2">
-                                    <span>Total Payout</span>
-                                    <span>- RM {totalCashOut.toFixed(2)}</span>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="bg-[#1A1A1A] p-5 rounded-2xl shadow-lg text-white">
-                        <h4 className="text-xs font-black text-[#FFD700] uppercase tracking-widest mb-4 flex items-center gap-2"><Calculator size={14}/> 现金对账 (Reconciliation)</h4>
-                        <div className="space-y-2 text-sm">
-                            <div className="flex justify-between"><span className="text-white/60">Opening Float</span><span className="font-mono text-[#FFD700]">RM {record.openingCash.toFixed(2)}</span></div>
-                            <div className="flex justify-between"><span className="text-white/60">Cash Sales</span><span className="font-mono text-green-400">+ RM {record.sales.cash.toFixed(2)}</span></div>
-                            <div className="flex justify-between"><span className="text-white/60">Cash Payouts</span><span className="font-mono text-red-400">- RM {totalCashOut.toFixed(2)}</span></div>
-                            <div className="h-px bg-white/20 my-2"></div>
-                            <div className="flex justify-between text-base font-bold"><span className="text-white">Actual Closing</span><span className="font-mono">RM {record.closingCash.toFixed(2)}</span></div>
-                            <div className="flex justify-between text-base font-bold"><span className="text-white">Variance</span><span className={`font-mono px-2 py-0.5 rounded ${record.variance >= 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{record.variance > 0 ? '+' : ''}{record.variance.toFixed(2)}</span></div>
-                        </div>
-                        {record.varianceReason && (
-                            <div className="mt-4 p-3 bg-white/10 rounded-xl text-xs text-white/80 italic border border-white/10">
-                                <span className="font-bold not-italic text-[#FFD700] mr-2">Note:</span>"{record.varianceReason}"
+                                <ReconItem label="GrabFood" gross={(deliveryBreakdown as any).grabGross || deliveryBreakdown.grab || 0} isReconciled={isChannelReconciled(reconStatus, 'grab')} actualAmount={getReconActual(reconStatus, 'grab')} onReconcile={() => setReconTarget({key: 'grab', label: 'GrabFood', gross: (deliveryBreakdown as any).grabGross || deliveryBreakdown.grab || 0})} />
+                                <ReconItem label="FoodPanda" gross={(deliveryBreakdown as any).pandaGross || deliveryBreakdown.panda || 0} isReconciled={isChannelReconciled(reconStatus, 'panda')} actualAmount={getReconActual(reconStatus, 'panda')} onReconcile={() => setReconTarget({key: 'panda', label: 'FoodPanda', gross: (deliveryBreakdown as any).pandaGross || deliveryBreakdown.panda || 0})} />
+                                <ReconItem label="ShopeeFood" gross={(deliveryBreakdown as any).shopeeGross || deliveryBreakdown.shopee || 0} isReconciled={isChannelReconciled(reconStatus, 'shopee')} actualAmount={getReconActual(reconStatus, 'shopee')} onReconcile={() => setReconTarget({key: 'shopee', label: 'ShopeeFood', gross: (deliveryBreakdown as any).shopeeGross || deliveryBreakdown.shopee || 0})} />
                             </div>
                         )}
                     </div>
                     
-                    <button onClick={() => onDelete(record.id)} className="w-full py-4 bg-white border-2 border-red-100 text-red-600 rounded-2xl font-black text-sm hover:bg-red-50 transition-all flex items-center justify-center gap-2 shadow-sm">
-                        <Trash2 size={18}/> 删除此结算记录 (Delete Record)
+                    <div className={`flex justify-between items-center p-4 rounded-xl border-2 ${localRecord.variance >= 0 ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+                        <div>
+                            <span className="font-black uppercase tracking-widest text-xs block mb-1">Cash Variance</span>
+                            {localRecord.varianceReason && <span className="text-[9px] text-gray-500 font-bold">{localRecord.varianceReason}</span>}
+                        </div>
+                        <span className="font-mono font-black text-2xl">{localRecord.variance > 0 ? '+' : ''}{localRecord.variance.toFixed(2)}</span>
+                    </div>
+                    
+                    <button onClick={() => onDelete(localRecord.id)} className="w-full py-4 bg-white border-2 border-red-100 text-red-600 rounded-2xl font-black text-sm hover:bg-red-50 transition-all flex items-center justify-center gap-2 shadow-sm">
+                        <Trash2 size={18}/> 删除此记录 (Delete)
                     </button>
+                </div>
+
+                {/* 🟢 隐藏的 PDF 生成模板 (排版空间优化版) */}
+                <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
+                    <div ref={printRef} className="w-[148mm] min-h-[210mm] bg-white p-5 font-sans text-black border box-border flex flex-col">
+                        
+                        <div className="text-center border-b border-black pb-3 mb-4 shrink-0">
+                            <h1 className="text-xl font-black tracking-widest uppercase mb-0.5">KIM LIAN KEE</h1>
+                            <p className="text-xs font-bold text-gray-600 uppercase tracking-widest">Daily Settlement Report</p>
+                            <p className="text-[10px] text-gray-500 mt-1.5 font-mono">{localRecord.date} • {new Date(localRecord.timestamp).toLocaleTimeString()}</p>
+                            <p className="text-[8px] text-gray-400 font-mono mt-0.5">Ref: {localRecord.id.slice(-8).toUpperCase()}</p>
+                        </div>
+
+                        <div className="space-y-3 flex-grow">
+                            <div className="space-y-1.5">
+                                <div className="flex justify-between items-center bg-gray-100 p-3 rounded-xl">
+                                    <span className="font-bold uppercase tracking-widest text-xs">Opening Float</span>
+                                    <span className="font-mono font-black text-lg">RM {localRecord.openingCash.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between items-center bg-black text-white p-3 rounded-xl shadow-md">
+                                    <span className="font-bold uppercase tracking-widest text-xs">Total Sales (今日总和)</span>
+                                    <span className="font-mono font-black text-xl text-[#FFD700]">RM {localRecord.sales.total.toFixed(2)}</span>
+                                </div>
+                            </div>
+
+                            <div className="border border-gray-200 rounded-xl p-3 space-y-3">
+                                <h3 className="font-black border-b border-gray-200 pb-1.5 uppercase text-[10px] tracking-widest text-gray-500">Sales Breakdown</h3>
+                                
+                                <div className="flex justify-between items-center bg-gray-50 p-2 rounded-lg">
+                                    <span className="font-black text-gray-800 uppercase tracking-wide text-xs">Cash (现金)</span>
+                                    <span className="font-mono font-black text-gray-900 text-xs">RM {localRecord.sales.cash.toFixed(2)}</span>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <div className="flex justify-between items-center bg-gray-50 p-2 rounded-lg">
+                                        <span className="font-black text-gray-800 uppercase tracking-wide text-xs">Bank (银行)</span>
+                                        <span className="font-mono font-black text-gray-900 text-xs">RM {totalBank.toFixed(2)}</span>
+                                    </div>
+                                    <div className="pl-4 pr-2 space-y-1 text-xs text-gray-600 border-l-2 border-gray-100 ml-2">
+                                        <div className="flex justify-between items-center"><span>TNG eWallet</span><span className="font-mono font-bold text-black">RM {(localRecord.sales.tng || 0).toFixed(2)}</span></div>
+                                        <div className="flex justify-between items-center"><span>Debit Card</span><span className="font-mono font-bold text-black">RM {totalDebit.toFixed(2)}</span></div>
+                                        <div className="flex justify-between items-center"><span>Credit Card</span><span className="font-mono font-bold text-black">RM {totalCard.toFixed(2)}</span></div>
+                                        <div className="flex justify-between items-center"><span>Amex</span><span className="font-mono font-bold text-black">RM {(localRecord.sales.amex || 0).toFixed(2)}</span></div>
+                                    </div>
+                                </div>
+
+                                {totalDelivery > 0 && (
+                                    <div className="space-y-2 pt-1.5 border-t border-dashed border-gray-200">
+                                        <div className="flex justify-between items-center bg-gray-50 p-2 rounded-lg">
+                                            <span className="font-black text-gray-800 uppercase tracking-wide text-xs">Delivery (外卖)</span>
+                                            <span className="font-mono font-black text-gray-900 text-xs">RM {totalDelivery.toFixed(2)}</span>
+                                        </div>
+                                        <div className="pl-4 pr-2 space-y-2 border-l-2 border-gray-100 ml-2">
+                                            {[
+                                                { label: 'Grab', net: deliveryBreakdown.grab, gross: (deliveryBreakdown as any).grabGross },
+                                                { label: 'FoodPanda', net: deliveryBreakdown.panda, gross: (deliveryBreakdown as any).pandaGross },
+                                                { label: 'Shopee', net: deliveryBreakdown.shopee, gross: (deliveryBreakdown as any).shopeeGross },
+                                                { label: 'Lalamove', net: deliveryBreakdown.lalamove, gross: 0 }
+                                            ].map(platform => {
+                                                if (!platform.net && !platform.gross) return null;
+                                                return (
+                                                    <div key={platform.label} className="flex justify-between items-center text-xs">
+                                                        <span className="font-bold text-gray-800">{platform.label}</span>
+                                                        <span className="font-mono text-black font-bold">RM {(platform.gross || platform.net || 0).toFixed(2)}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className={`flex justify-between items-center p-3 rounded-xl border ${localRecord.variance >= 0 ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+                                <span className="font-bold uppercase tracking-widest text-[11px]">Cash Variance</span>
+                                <span className="font-mono font-black text-lg">{localRecord.variance > 0 ? '+' : ''}{localRecord.variance.toFixed(2)}</span>
+                            </div>
+                        </div>
+
+                        <div className="mt-auto pt-3 text-center border-t border-black">
+                            <p className="text-[9px] font-bold uppercase tracking-widest mb-0.5">System Generated Report</p>
+                            <p className="text-[7px] text-gray-400">EPR System • For Internal Use Only</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -353,7 +456,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     
-    // Shift Data
     const [openingCounts, setOpeningCounts] = useState<Record<number, number>>({ 100:0, 50:0, 20:0, 10:0, 5:0, 1:0 });
     const [openingCoins, setOpeningCoins] = useState<number>(0);
     const [businessDate, setBusinessDate] = useState<string>(getBusinessDateStr(storeConfig.businessDayCutoff || 4));
@@ -362,17 +464,11 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
         storeHubTotal: 0, refundTotal: 0, cash: 0, tng: 0, duitnow: 0, card: 0, amex: 0, grab: 0, panda: 0, shopee: 0, lalamove: 0, grabGross: 0, pandaGross: 0, shopeeGross: 0
     });
     
-    const [shiftExpenses, setShiftExpenses] = useState<ExpenseItem[]>([]);
-    const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-    const [staffList, setStaffList] = useState<Employee[]>([]);
-    const [supplierList, setSupplierList] = useState<Supplier[]>([]); 
-    
     const [closingCashInput, setClosingCashInput] = useState<number>(0);
     const [varianceReason, setVarianceReason] = useState<string>('');
     
-    // History Data & Filters
     const [historyRecords, setHistoryRecords] = useState<SettlementRecord[]>([]);
-    const [filterMonth, setFilterMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // ✅ 这里是重点！防错变量
+    const [filterMonth, setFilterMonth] = useState<string>(new Date().toISOString().slice(0, 7)); 
     const [selectedRecord, setSelectedRecord] = useState<SettlementRecord | null>(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -383,11 +479,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
         setIsLoading(true);
         try {
             const shift = await DataManager.getActiveShift();
-            const emps = await DataManager.getEmployees();
-            const sups = await DataManager.getSuppliers(); 
-            
-            setStaffList(emps.filter(e => !e.isArchived));
-            setSupplierList(sups.filter(s => s.status === 'ACTIVE')); 
 
             if (shift) {
                 setBusinessDate(shift.businessDate || getBusinessDateStr(storeConfig.businessDayCutoff || 4));
@@ -403,7 +494,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                     grabGross: savedSales.grabGross || 0, pandaGross: savedSales.pandaGross || 0, shopeeGross: savedSales.shopeeGross || 0
                 });
                 
-                setShiftExpenses(shift.expenseList || []);
                 setClosingCashInput(shift.closingCashInput || 0);
                 setVarianceReason(shift.varianceReason || '');
                 setIsShiftOpen(true);
@@ -416,6 +506,8 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     const loadHistory = async () => {
         setIsLoading(true);
         const records = await DataManager.getSettlements(filterMonth);
+        // 确保历史记录按日期倒序排列
+        records.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setHistoryRecords(records);
         setIsLoading(false);
     };
@@ -424,12 +516,13 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
         if (isShiftOpen && !isLoading && !isSubmitting && activeTab === 'SHIFT') {
             const shiftData = {
                 businessDate: businessDate || getBusinessDateStr(4),
-                openingCounts, openingCoins, salesData, expenseList: shiftExpenses,
+                openingCounts, openingCoins, salesData, 
+                expenseList: [],
                 closingCashInput, varianceReason: varianceReason || '', updatedAt: new Date().toISOString()
             };
             DataManager.saveActiveShift(shiftData);
         }
-    }, [isShiftOpen, businessDate, openingCounts, openingCoins, salesData, closingCashInput, varianceReason, isLoading, activeTab, isSubmitting, shiftExpenses]);
+    }, [isShiftOpen, businessDate, openingCounts, openingCoins, salesData, closingCashInput, varianceReason, isLoading, activeTab, isSubmitting]);
 
     const openingTotal = useMemo(() => {
         const notesTotal = Object.entries(openingCounts).reduce((acc, [val, count]) => acc + (parseInt(val) * (Number(count) || 0)), 0);
@@ -439,15 +532,20 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     const totals = useMemo(() => {
         const s = salesData;
         const posSales = (Number(s.cash)||0) + (Number(s.tng)||0) + (Number(s.duitnow)||0) + (Number(s.card)||0) + (Number(s.amex)||0);
-        const deliverySales = (Number(s.grab)||0) + (Number(s.panda)||0) + (Number(s.shopee)||0) + (Number(s.lalamove)||0);
+        
+        // 🔴 对账改造：外卖算总收入时，采用 GROSS（如果没有填 gross 就用 net 作为 fallback）
+        const grabVal = Number(s.grabGross) || Number(s.grab) || 0;
+        const pandaVal = Number(s.pandaGross) || Number(s.panda) || 0;
+        const shopeeVal = Number(s.shopeeGross) || Number(s.shopee) || 0;
+        const deliverySales = grabVal + pandaVal + shopeeVal + (Number(s.lalamove)||0);
+        
         const totalRevenue = posSales + deliverySales;
-        const totalCashOut = shiftExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-        const expectedCash = (Number(openingTotal) + Number(s.cash||0)) - totalCashOut;
+        const expectedCash = Number(openingTotal) + Number(s.cash||0); 
         const variance = Number(closingCashInput) - expectedCash;
         const storeHubTotal = Number(s.storeHubTotal) || 0;
         const salesVariance = posSales - storeHubTotal;
-        return { posSales, deliverySales, totalRevenue, totalCashOut, expectedCash, variance, storeHubTotal, salesVariance };
-    }, [openingTotal, salesData, closingCashInput, shiftExpenses]);
+        return { posSales, deliverySales, totalRevenue, expectedCash, variance, storeHubTotal, salesVariance };
+    }, [openingTotal, salesData, closingCashInput]);
 
     const handleStartShift = () => {
         if (openingTotal <= 0 && !confirm("点算总额为 RM 0，确定开班吗？")) return;
@@ -457,14 +555,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     const handleDenomChange = (denom: number, count: string) => {
         const c = parseInt(count) || 0;
         setOpeningCounts(prev => ({ ...prev, [denom]: c }));
-    };
-
-    const handleAddExpense = (newExp: ExpenseItem) => {
-        setShiftExpenses([...shiftExpenses, newExp]);
-    };
-
-    const handleRemoveExpense = (id: string) => {
-        setShiftExpenses(shiftExpenses.filter(e => e.id !== id));
     };
 
     const handleDeleteClick = (id: string) => setShowDeleteConfirm(true);
@@ -485,10 +575,9 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     const handleSubmitSettlement = async () => {
         setIsSubmitting(true);
         
-        // 1. O(1) 极简查重，省钱又快
         const isDuplicate = await DataManager.checkSettlementExists(businessDate);
         if (isDuplicate) {
-             alert(`📅 日期 ${businessDate} 已经结算过了！\n\n系统检测到重复记录。若需重新提交，请先在“历史”页面删除该日期的旧记录。`);
+             alert(`📅 日期 ${businessDate} 已经结算过了！\n\n系统检测到重复记录。若需重新提交，请先在"历史"页面删除该日期的旧记录。`);
              setIsSubmitting(false);
              return;
         }
@@ -498,6 +587,7 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
             return;
         }
         
+        // 🔴 对账改造：新建 settlement 时，增加 reconStatus 字段追踪各渠道核销状态
         const record: SettlementRecord = {
             id: `settle_${businessDate}_${Date.now()}`,
             date: businessDate,
@@ -514,43 +604,42 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                 card: salesData.card || 0,
                 amex: salesData.amex || 0,
                 deliveryBreakdown: {
-                    grab: salesData.grab || 0, panda: salesData.panda || 0, 
-                    shopee: salesData.shopee || 0, lalamove: salesData.lalamove || 0,
-                    grabGross: salesData.grabGross || 0, pandaGross: salesData.pandaGross || 0, shopeeGross: salesData.shopeeGross || 0
-                }
+                        grab: salesData.grabGross || salesData.grab || 0,       // 🟢 Bug5修复：Gross同步写入Net，向后兼容
+                        panda: salesData.pandaGross || salesData.panda || 0,     // 🟢 Bug5修复
+                        shopee: salesData.shopeeGross || salesData.shopee || 0,  // 🟢 Bug5修复
+                        lalamove: salesData.lalamove || 0,
+                        grabGross: salesData.grabGross || 0, pandaGross: salesData.pandaGross || 0, shopeeGross: salesData.shopeeGross || 0
+                    }
             },
-            expenses: shiftExpenses,
+            expenses: [], 
             variance: totals.variance,
             varianceReason: varianceReason,
             submittedBy: 'Manager',
-            isClosed: true
+            isClosed: true,
+            reconStatus: {
+                tng: false, debit: false, credit: false, amex: false, grab: false, panda: false, shopee: false
+            } as any
         };
         
         try {
-            // 2. 🟢 核心修复：调用你刚写的无敌事务方法，一键完成所有操作
             await DataManager.executeSettlementTransaction(record);
 
-            // 3. 清理前端状态
             const nextDateStr = getBusinessDateStr(storeConfig.businessDayCutoff || 4);
             setBusinessDate(nextDateStr);
             setOpeningCounts({ 100:0, 50:0, 20:0, 10:0, 5:0, 1:0 });
             setOpeningCoins(0);
             setSalesData({ storeHubTotal: 0, refundTotal: 0, cash: 0, tng: 0, duitnow: 0, card: 0, amex: 0, grab: 0, panda: 0, shopee: 0, lalamove: 0, grabGross: 0, pandaGross: 0, shopeeGross: 0 });
             setClosingCashInput(0);
-            setShiftExpenses([]);
             setVarianceReason('');
             setIsShiftOpen(false);
             
-            alert("✅ 结算成功！数据已转入历史记录。");
+            alert("✅ 结算成功！数据已转入历史记录，请移步历史列表进行数字对账。");
             
-            // 4. 刷新历史记录
             setActiveTab('HISTORY');
-            const updatedHistory = await DataManager.getSettlements();
-            setHistoryRecords(updatedHistory);
+            loadHistory();
             
         } catch (error: any) { 
             console.error("Settlement Error", error); 
-            // 拦截后端事务抛出的重复结算错误
             if (error.message.includes('DATE_ALREADY_SETTLED')) {
                 alert("❌ 提交被拦截：该日期刚刚已被其他设备结算！");
             } else {
@@ -573,19 +662,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                 <div className="space-y-3 p-4 bg-white/5 rounded-2xl border border-white/10">
                     <div className="flex justify-between text-sm"><span className="text-gray-400">Opening Float</span><span className="font-mono text-[#FFD700]">RM {openingTotal.toFixed(2)}</span></div>
                     <div className="flex justify-between text-sm"><span className="text-gray-400">Cash Sales</span><span className="font-mono text-green-400">+ RM {(salesData?.cash || 0).toFixed(2)}</span></div>
-                    {totals.totalCashOut > 0 && (
-                        <div className="pt-2 mt-2 border-t border-white/10 animate-in fade-in">
-                            <div className="flex justify-between text-sm mb-1"><span className="text-red-400 font-bold">Cash Payouts (支出)</span><span className="font-mono text-red-400">- RM {totals.totalCashOut.toFixed(2)}</span></div>
-                            <div className="pl-2 space-y-1">
-                                {shiftExpenses.map((exp, i) => (
-                                    <div key={i} className="flex justify-between text-[10px] text-gray-500">
-                                        <span className="truncate max-w-[150px]">{exp.company}</span>
-                                        <span>{exp.amount.toFixed(2)}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
                     <div className="h-px bg-white/10 my-2"></div>
                     <div className="flex justify-between items-center"><span className="text-xs font-black text-[#FFD700] uppercase">Expected Cash</span><span className="text-xl font-mono font-black text-white">RM {totals.expectedCash.toFixed(2)}</span></div>
                 </div>
@@ -623,18 +699,22 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     return (
         <div className={isStandalone ? "fixed inset-0 bg-black/90 z-[90] flex items-center justify-center p-0 md:p-4 backdrop-blur-sm animate-in zoom-in duration-200" : "w-full h-full flex flex-col relative animate-in fade-in"}>
             <div className={isStandalone ? "bg-[#F5F7FA] w-full h-[100dvh] md:max-w-7xl md:h-[95vh] md:rounded-[2rem] flex flex-col overflow-hidden shadow-2xl font-sans relative" : "flex-grow flex flex-col overflow-hidden font-sans relative"}>
-                {/* Header */}
-                <div className="bg-[#1A1A1A] p-4 flex flex-col md:flex-row justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700] gap-4 md:gap-0">
+                
+                {/* Header (iOS Safe Area Padding 终极防护) */}
+                <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top,16px),16px)] flex flex-col md:flex-row justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700] gap-4 md:gap-0 relative z-50 shadow-md">
                     <div className="flex items-center gap-4 w-full md:w-auto">
                         <div className="bg-[#FFD700] text-black p-2 md:p-2.5 rounded-xl shadow-lg shrink-0"><Calculator size={24}/></div>
                         <div><h3 className="font-serif font-black text-lg md:text-xl tracking-wide">每日结算中心</h3><p className="text-[9px] md:text-[10px] text-gray-400 font-mono uppercase tracking-widest mt-0.5">SETTLEMENT & CASH CONTROL</p></div>
                     </div>
-                    <div className="flex items-center justify-between w-full md:w-auto gap-3">
-                        <div className="flex bg-white/10 p-1 rounded-xl flex-1 md:flex-none justify-center">
-                            <button onClick={() => setActiveTab('SHIFT')} className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-lg text-xs font-black transition-all whitespace-nowrap ${activeTab === 'SHIFT' ? 'bg-[#FFD700] text-black shadow-sm' : 'text-gray-400 hover:text-white'}`}>当班 (Shift)</button>
-                            <button onClick={() => setActiveTab('HISTORY')} className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-lg text-xs font-black transition-all whitespace-nowrap ${activeTab === 'HISTORY' ? 'bg-[#FFD700] text-black shadow-sm' : 'text-gray-400 hover:text-white'}`}>历史 (History)</button>
+                    <div className="flex items-center justify-between w-full md:w-auto gap-3 relative z-50">
+                        <div className="flex bg-white/10 p-1 rounded-xl flex-1 md:flex-none justify-center cursor-pointer relative z-50">
+                            <button onClick={() => setActiveTab('SHIFT')} className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-lg text-xs font-black transition-all whitespace-nowrap relative z-50 ${activeTab === 'SHIFT' ? 'bg-[#FFD700] text-black shadow-sm' : 'text-gray-400 hover:text-white'}`}>当班 (Shift)</button>
+                            <button onClick={() => setActiveTab('HISTORY')} className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-lg text-xs font-black transition-all whitespace-nowrap relative z-50 ${activeTab === 'HISTORY' ? 'bg-[#FFD700] text-black shadow-sm' : 'text-gray-400 hover:text-white'}`}>历史 (History)</button>
                         </div>
-                        <div className="flex gap-2"><ModuleGuideButton module="SETTLEMENT" />{onClose && (<button onClick={onClose} className="p-2 md:p-3 bg-white/10 hover:bg-red-600 rounded-xl transition-colors text-white" title="关闭/退出 (Exit)"><X size={20}/></button>)}</div>
+                        <div className="flex gap-2 relative z-50">
+                            <ModuleGuideButton module="SETTLEMENT" />
+                            {onClose && (<button onClick={onClose} className="p-2 md:p-3 bg-white/10 hover:bg-red-600 rounded-xl transition-colors text-white relative z-50 cursor-pointer" title="关闭/退出 (Exit)"><X size={20}/></button>)}
+                        </div>
                     </div>
                 </div>
 
@@ -685,112 +765,94 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                     </div>
                                     
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div className="space-y-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                                            <h4 className="text-xs font-bold text-[#1A1A1A] uppercase border-b pb-2 mb-2">POS Payment Methods (In-Store)</h4>
+                                        <div className="space-y-3 bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
+                                            <h4 className="text-xs font-bold text-[#1A1A1A] uppercase border-b pb-3 mb-3">POS Payment Methods (In-Store)</h4>
                                             
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 shrink-0"><Banknote size={16}/></div>
-                                                <span className="text-xs font-bold text-gray-600 w-32 shrink-0 whitespace-nowrap">Cash (现金)</span>
-                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-lg text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-[#FFD700]" value={salesData.cash || ''} onChange={e => setSalesData({...salesData, cash: parseFloat(e.target.value)})} /></div>
+                                            <div className="flex items-center gap-3 mb-3 group">
+                                                <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center text-green-600 shrink-0 shadow-sm border border-green-100 group-hover:scale-105 transition-transform"><Banknote size={18}/></div>
+                                                <span className="text-xs font-bold text-gray-600 w-24 shrink-0 whitespace-nowrap">Cash (现金)</span>
+                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-xl text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-[#FFD700] transition-colors tabular-nums shadow-inner" value={salesData.cash || ''} onChange={e => setSalesData({...salesData, cash: parseFloat(e.target.value)})} /></div>
                                             </div>
 
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 shrink-0"><Wallet size={16}/></div>
-                                                <span className="text-xs font-bold text-gray-600 w-32 shrink-0 whitespace-nowrap">TNG eWallet</span>
-                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-lg text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-[#FFD700]" value={salesData.tng || ''} onChange={e => setSalesData({...salesData, tng: parseFloat(e.target.value)})} /></div>
+                                            <div className="flex items-center gap-3 mb-3 group">
+                                                <div className="w-10 h-10 rounded-xl bg-cyan-50 flex items-center justify-center text-cyan-600 shrink-0 shadow-sm border border-cyan-100 group-hover:scale-105 transition-transform"><Wallet size={18}/></div>
+                                                <span className="text-xs font-bold text-gray-600 w-24 shrink-0 whitespace-nowrap">TNG eWallet</span>
+                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-xl text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-[#FFD700] transition-colors tabular-nums shadow-inner" value={salesData.tng || ''} onChange={e => setSalesData({...salesData, tng: parseFloat(e.target.value)})} /></div>
                                             </div>
 
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 shrink-0"><CreditCard size={16}/></div>
-                                                <div className="w-32 shrink-0 flex flex-col justify-center"><span className="text-xs font-bold text-gray-600 whitespace-nowrap">Debit Card</span></div>
-                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-lg text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-[#FFD700]" value={salesData.duitnow || ''} onChange={e => setSalesData({...salesData, duitnow: parseFloat(e.target.value)})} /></div>
+                                            <div className="flex items-center gap-3 mb-3 group">
+                                                <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0 shadow-sm border border-indigo-100 group-hover:scale-105 transition-transform"><CreditCard size={18}/></div>
+                                                <span className="text-xs font-bold text-gray-600 w-24 shrink-0 whitespace-nowrap">Debit Card</span>
+                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-xl text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-[#FFD700] transition-colors tabular-nums shadow-inner" value={salesData.duitnow || ''} onChange={e => setSalesData({...salesData, duitnow: parseFloat(e.target.value)})} /></div>
                                             </div>
 
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 shrink-0"><CreditCard size={16}/></div>
-                                                <div className="w-32 shrink-0 flex flex-col justify-center"><span className="text-xs font-bold text-gray-600 whitespace-nowrap">Credit Card</span></div>
-                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-lg text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-[#FFD700]" value={salesData.card || ''} onChange={e => setSalesData({...salesData, card: parseFloat(e.target.value)})} /></div>
+                                            <div className="flex items-center gap-3 mb-3 group">
+                                                <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 shrink-0 shadow-sm border border-purple-100 group-hover:scale-105 transition-transform"><CreditCard size={18}/></div>
+                                                <span className="text-xs font-bold text-gray-600 w-24 shrink-0 whitespace-nowrap">Credit Card</span>
+                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-xl text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-[#FFD700] transition-colors tabular-nums shadow-inner" value={salesData.card || ''} onChange={e => setSalesData({...salesData, card: parseFloat(e.target.value)})} /></div>
                                             </div>
 
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-500 shrink-0"><CreditCard size={16}/></div>
-                                                <div className="w-32 shrink-0 flex flex-col justify-center"><span className="text-xs font-bold text-blue-600 whitespace-nowrap">Amex</span></div>
-                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-lg text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-blue-300" value={salesData.amex || ''} onChange={e => setSalesData({...salesData, amex: parseFloat(e.target.value)})} /></div>
+                                            <div className="flex items-center gap-3 mb-3 group">
+                                                <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0 shadow-sm border border-blue-100 group-hover:scale-105 transition-transform"><CreditCard size={18}/></div>
+                                                <span className="text-xs font-bold text-blue-600 w-24 shrink-0 whitespace-nowrap">Amex</span>
+                                                <div className="relative flex-grow"><input type="number" className="w-full p-3 bg-gray-50 rounded-xl text-right font-mono font-bold text-base outline-none focus:bg-white focus:ring-2 focus:ring-blue-300 transition-colors tabular-nums shadow-inner" value={salesData.amex || ''} onChange={e => setSalesData({...salesData, amex: parseFloat(e.target.value)})} /></div>
                                             </div>
-                                            <div className="pt-2 mt-2 border-t border-gray-100 flex justify-between items-center text-xs font-bold"><span>POS Total</span><span className="font-mono text-blue-600">RM {totals.posSales.toFixed(2)}</span></div>
+                                            
+                                            <div className="pt-3 mt-3 border-t border-gray-100 flex justify-between items-center text-xs font-bold"><span>POS Total</span><span className="font-mono text-blue-600 text-base">RM {totals.posSales.toFixed(2)}</span></div>
                                         </div>
                                         
-                                        <div className="space-y-3 bg-orange-50/50 p-4 rounded-2xl border border-orange-100 shadow-sm">
-                                            <h4 className="text-xs font-bold text-orange-800 uppercase border-b border-orange-200 pb-2 mb-2">Delivery Platforms (Extra Income)</h4>
-                                            <div className="flex items-center gap-2 text-[9px] font-bold text-gray-400 uppercase mb-1 px-1">
-                                                <span className="w-20 shrink-0"></span>
-                                                <span className="flex-1 text-center">原价 (Gross)</span>
-                                                <span className="flex-1 text-center">到手 (Net)</span>
-                                                <span className="w-16 text-center shrink-0">佣金</span>
+                                        {/* 🔴 改版后的外卖录入区 */}
+                                        <div className="space-y-3 bg-orange-50/50 p-5 rounded-3xl border border-orange-100 shadow-sm">
+                                            <div className="flex justify-between items-center border-b border-orange-200 pb-3 mb-3">
+                                                <h4 className="text-xs font-bold text-orange-800 uppercase">Delivery Platforms</h4>
+                                                <span className="text-[9px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold">⚠️ 日后对账自动扣手续费</span>
                                             </div>
+                                            
+                                            <div className="flex items-center gap-2 text-[10px] font-black text-gray-400 uppercase mb-3 px-1">
+                                                <span className="w-[72px] shrink-0"></span>
+                                                <span className="flex-1 text-center bg-white/50 rounded py-1 shadow-sm">原价 Gross (必填)</span>
+                                            </div>
+                                            
                                             {[
-                                                { key: 'grab', grossKey: 'grabGross', label: 'GrabFood', color: 'text-green-600', ring: 'focus:ring-green-300' },
-                                                { key: 'panda', grossKey: 'pandaGross', label: 'FoodPanda', color: 'text-pink-600', ring: 'focus:ring-pink-300' },
-                                                { key: 'shopee', grossKey: 'shopeeGross', label: 'ShopeeFood', color: 'text-orange-600', ring: 'focus:ring-orange-300' },
-                                            ].map(item => {
-                                                const gross = (salesData as any)[item.grossKey] || 0;
-                                                const net = (salesData as any)[item.key] || 0;
-                                                const commission = gross > 0 ? gross - net : 0;
-                                                return (
-                                                    <div key={item.key} className="flex items-center gap-2">
-                                                        <span className={`text-[10px] font-black w-20 shrink-0 whitespace-nowrap ${item.color}`}>{item.label}</span>
-                                                        <input type="number" placeholder="原价" className={`flex-1 p-2.5 bg-white rounded-lg text-right font-mono font-bold text-sm outline-none focus:ring-2 ${item.ring} border border-orange-100 min-w-0`} value={(salesData as any)[item.grossKey] || ''} onChange={e => setSalesData({...salesData, [item.grossKey]: parseFloat(e.target.value) || 0})} />
-                                                        <input type="number" placeholder="到手" className={`flex-1 p-2.5 bg-white rounded-lg text-right font-mono font-bold text-sm outline-none focus:ring-2 ${item.ring} border border-orange-100 min-w-0`} value={(salesData as any)[item.key] || ''} onChange={e => setSalesData({...salesData, [item.key]: parseFloat(e.target.value) || 0})} />
-                                                        <span className={`w-16 text-right text-[10px] font-mono font-bold shrink-0 ${commission > 0 ? 'text-red-500' : 'text-gray-300'}`}>{commission > 0 ? `-${commission.toFixed(0)}` : '-'}</span>
+                                                { key: 'grabGross', label: 'Grab', color: 'text-green-600 bg-green-50 border-green-100', ring: 'focus:ring-green-400' },
+                                                { key: 'pandaGross', label: 'Panda', color: 'text-pink-600 bg-pink-50 border-pink-100', ring: 'focus:ring-pink-400' },
+                                                { key: 'shopeeGross', label: 'Shopee', color: 'text-orange-600 bg-orange-50 border-orange-100', ring: 'focus:ring-orange-400' },
+                                            ].map(item => (
+                                                <div key={item.key} className="flex items-center gap-2 mb-3">
+                                                    <div className={`w-[72px] shrink-0 border rounded-xl py-2 flex items-center justify-center shadow-sm ${item.color}`}>
+                                                        <span className="text-[11px] font-black">{item.label}</span>
                                                     </div>
-                                                );
-                                            })}
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[10px] font-black w-20 shrink-0 whitespace-nowrap text-orange-500">Lalamove</span>
-                                                <div className="flex-1"></div>
-                                                <input type="number" placeholder="净额" className="flex-1 p-2.5 bg-white rounded-lg text-right font-mono font-bold text-sm outline-none focus:ring-2 focus:ring-orange-300 border border-orange-100 min-w-0" value={salesData.lalamove || ''} onChange={e => setSalesData({...salesData, lalamove: parseFloat(e.target.value) || 0})} />
-                                                <span className="w-16 shrink-0"></span>
+                                                    <div className="flex-1 relative">
+                                                        <input 
+                                                            type="number" 
+                                                            placeholder="0.00" 
+                                                            className={`w-full px-2 py-2.5 bg-white rounded-xl text-center font-mono font-bold text-sm outline-none focus:ring-2 ${item.ring} border border-orange-100 shadow-inner transition-all tabular-nums`} 
+                                                            value={(salesData as any)[item.key] || ''} 
+                                                            onChange={e => setSalesData({...salesData, [item.key]: parseFloat(e.target.value) || 0})} 
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            
+                                            <div className="flex items-center gap-2 pt-1 border-t border-orange-100/50 mt-2">
+                                                <div className="w-[72px] shrink-0 border rounded-xl py-2 flex items-center justify-center shadow-sm text-blue-600 bg-blue-50 border-blue-100">
+                                                    <span className="text-[11px] font-black">Lala</span>
+                                                </div>
+                                                <div className="flex-1 relative">
+                                                    <input type="number" placeholder="Net Only" className="w-full px-2 py-2.5 bg-white rounded-xl text-center font-mono font-bold text-sm outline-none focus:ring-2 focus:ring-blue-400 border border-orange-100 shadow-inner transition-all tabular-nums" value={salesData.lalamove || ''} onChange={e => setSalesData({...salesData, lalamove: parseFloat(e.target.value) || 0})} />
+                                                </div>
                                             </div>
-                                            <div className="pt-2 mt-2 border-t border-orange-200 space-y-1">
-                                                <div className="flex justify-between items-center text-xs font-bold"><span>Delivery Net</span><span className="font-mono text-orange-600">RM {totals.deliverySales.toFixed(2)}</span></div>
-                                                {(() => { const tGross = (Number(salesData.grabGross)||0)+(Number(salesData.pandaGross)||0)+(Number(salesData.shopeeGross)||0); const tNet = (Number(salesData.grab)||0)+(Number(salesData.panda)||0)+(Number(salesData.shopee)||0); const tComm = tGross - tNet; return tGross > 0 ? (<div className="flex justify-between items-center text-[10px]"><span className="text-gray-400">Total Commission</span><span className="font-mono font-bold text-red-500">- RM {tComm.toFixed(2)} ({tGross > 0 ? ((tComm/tGross)*100).toFixed(1) : '0'}%)</span></div>) : null; })()}
+
+                                            <div className="pt-3 mt-3 border-t border-orange-200 space-y-1">
+                                                <div className="flex justify-between items-center text-xs font-bold">
+                                                    <span>Delivery Gross Total</span>
+                                                    <span className="font-mono text-orange-600 text-base">RM {totals.deliverySales.toFixed(2)}</span>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                    
-                                    <div className="bg-red-50 p-5 rounded-3xl border border-red-100">
-                                        <div className="flex justify-between items-center mb-4">
-                                            <h4 className="text-sm font-black text-red-700 uppercase flex items-center gap-2"><MinusCircle size={16}/> 现金支出 (Cash Payouts)</h4>
-                                            <button onClick={() => setIsExpenseModalOpen(true)} className="bg-red-600 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-red-700 shadow-md transition-all active:scale-95"><Plus size={14}/> 记一笔支出</button>
-                                        </div>
-                                        
-                                        {shiftExpenses.length === 0 ? (
-                                            <div className="text-center py-6 border-2 border-dashed border-red-200 rounded-2xl text-xs text-red-300 font-bold">暂无现金支出 (No Cash Out)</div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                {shiftExpenses.map(exp => (
-                                                    <div key={exp.id} className="bg-white p-3 rounded-xl border border-red-100 flex justify-between items-center shadow-sm">
-                                                        <div>
-                                                            <div className="flex items-center gap-2">
-                                                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-black uppercase ${exp.category === 'SUPPLIER' ? 'bg-blue-50 text-blue-700' : exp.category === 'STAFF_ADVANCE' ? 'bg-orange-50 text-orange-700' : 'bg-gray-100 text-gray-700'}`}>
-                                                                    {exp.category === 'SUPPLIER' ? '货款' : exp.category === 'STAFF_ADVANCE' ? '预支' : '杂费'}
-                                                                </span>
-                                                                <span className="font-bold text-sm text-[#1A1A1A]">{exp.company}</span>
-                                                            </div>
-                                                            <div className="text-[10px] text-gray-400 ml-1">{exp.note}</div>
-                                                        </div>
-                                                        <div className="flex items-center gap-3">
-                                                            <span className="font-mono font-black text-red-600">- RM {exp.amount.toFixed(2)}</span>
-                                                            <button onClick={() => handleRemoveExpense(exp.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14}/></button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                                <div className="pt-2 mt-2 border-t border-red-200 flex justify-end text-xs font-black text-red-800">Total Out: RM {totals.totalCashOut.toFixed(2)}</div>
-                                            </div>
-                                        )}
                                     </div>
 
-                                    <div className={`p-4 rounded-xl border flex justify-between items-center ${Math.abs(totals.salesVariance) < 1 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                    <div className={`p-5 rounded-2xl border flex justify-between items-center shadow-sm ${Math.abs(totals.salesVariance) < 1 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                                         <div>
                                             <p className={`text-xs font-black uppercase ${Math.abs(totals.salesVariance) < 1 ? 'text-green-700' : 'text-red-700'}`}>{Math.abs(totals.salesVariance) < 1 ? 'POS Match (Perfect)' : 'POS Variance Detected'}</p>
                                             <p className="text-[10px] text-gray-500 font-bold mt-0.5">Calc POS: RM {totals.posSales.toFixed(2)} vs Report: RM {totals.storeHubTotal.toFixed(2)}</p>
@@ -833,90 +895,131 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                         </div>
                                     ) : (
                                         historyRecords.map(record => {
-    const debit = record.sales.duitnow || 0;
-    const credit = record.sales.card || 0;
-    const tng = record.sales.tng || 0;
-    const cash = record.sales.cash || 0; // 提取 Cash
-    // 计算外卖总额
-    const deliveryBreakdown = record.sales.deliveryBreakdown || {};
-    const totalDelivery = (deliveryBreakdown.grab || 0) + (deliveryBreakdown.panda || 0) + (deliveryBreakdown.shopee || 0) + (deliveryBreakdown.lalamove || 0);
+                                            const debit = record.sales.duitnow || 0;
+                                            const credit = record.sales.card || 0;
+                                            const tng = record.sales.tng || 0;
+                                            const amex = record.sales.amex || 0;
+                                            const cash = record.sales.cash || 0;
+                                            
+                                            // 判断当前记录是否还有未核销的项目
+                                            const rs = (record as any).reconStatus || {};
+                                            const deliveryBreakdown = record.sales.deliveryBreakdown || {} as any;
+                                            
+                                            const grabGross = deliveryBreakdown.grabGross || deliveryBreakdown.grab || 0;
+                                            const pandaGross = deliveryBreakdown.pandaGross || deliveryBreakdown.panda || 0;
+                                            const shopeeGross = deliveryBreakdown.shopeeGross || deliveryBreakdown.shopee || 0;
+                                            const lalamoveVal = deliveryBreakdown.lalamove || 0;
+                                            const totalDeliveryVal = grabGross + pandaGross + shopeeGross + lalamoveVal;
+                                            
+                                            // Card = Credit + Debit + Amex
+                                            const totalCardVal = debit + credit + amex;
 
-    return (
-        <div key={record.id} onClick={() => setSelectedRecord(record)} className="bg-white p-5 rounded-[2rem] border border-gray-100 hover:border-[#FFD700] hover:shadow-xl transition-all cursor-pointer group flex flex-col md:flex-row items-center justify-between gap-4">
-            
-            {/* 左侧：日期与总额 */}
-            <div className="flex items-center justify-between md:justify-start gap-4 w-full md:w-48 shrink-0">
-                <div className="w-14 h-14 bg-[#1A1A1A] rounded-2xl flex flex-col items-center justify-center text-[#FFD700] group-hover:scale-110 transition-transform shadow-lg shrink-0">
-                    <span className="text-[10px] font-black leading-none opacity-60 uppercase">{new Date(record.date).toLocaleString('default', { month: 'short' })}</span>
-                    <span className="text-xl font-black leading-none mt-1">{record.date.split('-')[2]}</span>
-                </div>
-                <div className="text-right md:text-left">
-                    <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total Sales</div>
-                    <div className="text-xl font-black text-[#1A1A1A] whitespace-nowrap">RM {record.sales.total.toFixed(2)}</div>
-                </div>
-            </div>
+                                            let hasPending = false;
+                                            if (tng > 0 && !isChannelReconciled(rs, 'tng')) hasPending = true;
+                                            if (debit > 0 && !isChannelReconciled(rs, 'debit')) hasPending = true;
+                                            if (credit > 0 && !isChannelReconciled(rs, 'credit')) hasPending = true;
+                                            if (amex > 0 && !isChannelReconciled(rs, 'amex')) hasPending = true;
+                                            if (grabGross > 0 && !isChannelReconciled(rs, 'grab')) hasPending = true;
+                                            if (pandaGross > 0 && !isChannelReconciled(rs, 'panda')) hasPending = true;
+                                            if (shopeeGross > 0 && !isChannelReconciled(rs, 'shopee')) hasPending = true;
 
-            {/* 中间：5个支付渠道明细 (手机端网格，PC端一排) */}
-            <div className="grid grid-cols-3 gap-y-3 gap-x-2 md:flex md:flex-1 md:items-center md:justify-center md:gap-4 w-full px-4 py-3 bg-gray-50 rounded-2xl border border-gray-100">
-                <div className="flex flex-col items-center">
-                    <span className="text-[9px] font-black text-gray-400 uppercase">Cash</span>
-                    <span className="font-mono text-xs font-bold text-green-700">RM {cash.toFixed(2)}</span>
-                </div>
-                <div className="hidden md:block w-px h-6 bg-gray-200"></div>
-                
-                <div className="flex flex-col items-center">
-                    <span className="text-[9px] font-black text-gray-400 uppercase">Debit</span>
-                    <span className="font-mono text-xs font-bold text-blue-600">RM {debit.toFixed(2)}</span>
-                </div>
-                <div className="hidden md:block w-px h-6 bg-gray-200"></div>
-                
-                <div className="flex flex-col items-center">
-                    <span className="text-[9px] font-black text-gray-400 uppercase">Credit</span>
-                    <span className="font-mono text-xs font-bold text-purple-600">RM {credit.toFixed(2)}</span>
-                </div>
-                
-                {/* 手机端换行时的分隔线隐藏 */}
-                <div className="hidden md:block w-px h-6 bg-gray-200"></div>
-                
-                <div className="flex flex-col items-center">
-                    <span className="text-[9px] font-black text-gray-400 uppercase">TNG</span>
-                    <span className="font-mono text-xs font-bold text-cyan-600">RM {tng.toFixed(2)}</span>
-                </div>
-                <div className="hidden md:block w-px h-6 bg-gray-200"></div>
-                
-                {/* Delivery 占满手机端网格剩下的位置 */}
-                <div className="flex flex-col items-center col-span-2 md:col-span-1">
-                    <span className="text-[9px] font-black text-gray-400 uppercase flex items-center gap-1">Delivery</span>
-                    <span className="font-mono text-xs font-bold text-orange-600">RM {totalDelivery.toFixed(2)}</span>
-                </div>
-            </div>
+                                            return (
+                                                <div key={record.id} onClick={() => setSelectedRecord(record)} className={`bg-white p-5 rounded-[2rem] border-2 hover:border-[#FFD700] hover:shadow-xl transition-all cursor-pointer group relative overflow-hidden ${hasPending ? 'border-orange-200 shadow-sm' : 'border-gray-100'}`}>
+                                                    
+                                                    {/* 🟢 待核销角标指示器 */}
+                                                    {hasPending && (
+                                                        <div className="absolute top-0 right-0 bg-orange-500 text-white text-[9px] font-black px-3 py-1 rounded-bl-xl shadow-sm z-10 animate-pulse">
+                                                            ⏳ 待对账核销 (Pending Recon)
+                                                        </div>
+                                                    )}
 
-            {/* 右侧：Variance 与箭头 */}
-            <div className="flex items-center justify-between md:justify-end gap-6 w-full md:w-32 shrink-0 border-t pt-3 md:border-t-0 md:pt-0 border-gray-100">
-                <div className="text-left md:text-right w-full">
-                    <div className="text-[9px] font-black text-gray-400 uppercase">Variance</div>
-                    <div className={`font-mono font-black ${record.variance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                        {record.variance > 0 ? '+' : ''}{record.variance.toFixed(2)}
-                    </div>
-                </div>
-                <div className="p-3 bg-gray-50 rounded-2xl group-hover:bg-[#1A1A1A] group-hover:text-[#FFD700] transition-all shadow-sm shrink-0">
-                    <ChevronRight size={20}/>
-                </div>
-            </div>
-        </div>
-    );
-})
+                                                    {/* 🟢 改版：顶部行 — 日期 + 总营业额 + Variance + 箭头 */}
+                                                    <div className="flex items-center justify-between gap-4 mb-3">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="w-14 h-14 bg-[#1A1A1A] rounded-2xl flex flex-col items-center justify-center text-[#FFD700] group-hover:scale-110 transition-transform shadow-lg shrink-0">
+                                                                <span className="text-[10px] font-black leading-none opacity-60 uppercase">{new Date(record.date).toLocaleString('default', { month: 'short' })}</span>
+                                                                <span className="text-xl font-black leading-none mt-1">{record.date.split('-')[2]}</span>
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total Sales</div>
+                                                                <div className="text-xl font-black text-[#1A1A1A] whitespace-nowrap">RM {record.sales.total.toFixed(2)}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-4 shrink-0">
+                                                            <div className="text-right">
+                                                                <div className="text-[9px] font-black text-gray-400 uppercase">Variance</div>
+                                                                <div className={`font-mono font-black ${record.variance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                                    {record.variance > 0 ? '+' : ''}{record.variance.toFixed(2)}
+                                                                </div>
+                                                            </div>
+                                                            <div className="p-3 bg-gray-50 rounded-2xl group-hover:bg-[#1A1A1A] group-hover:text-[#FFD700] transition-all shadow-sm shrink-0">
+                                                                <ChevronRight size={20}/>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* 🟢 改版：底部明细行 — Cash | TNG | Card | Delivery (含子项) */}
+                                                    <div className="grid grid-cols-4 gap-2 px-1 py-3 bg-gray-50 rounded-2xl border border-gray-100">
+                                                        {/* Cash */}
+                                                        <div className="flex flex-col items-center">
+                                                            <span className="text-[9px] font-black text-gray-400 uppercase">Cash</span>
+                                                            <span className="font-mono text-xs font-bold text-green-700">RM {cash.toFixed(2)}</span>
+                                                        </div>
+                                                        {/* TNG */}
+                                                        <div className="flex flex-col items-center">
+                                                            <span className="text-[9px] font-black text-gray-400 uppercase">TNG</span>
+                                                            <span className="font-mono text-xs font-bold text-cyan-600">RM {tng.toFixed(2)}</span>
+                                                        </div>
+                                                        {/* Card (Debit + Credit + Amex) */}
+                                                        <div className="flex flex-col items-center">
+                                                            <span className="text-[9px] font-black text-gray-400 uppercase">Card</span>
+                                                            <span className="font-mono text-xs font-bold text-indigo-600">RM {totalCardVal.toFixed(2)}</span>
+                                                        </div>
+                                                        {/* Delivery Total */}
+                                                        <div className="flex flex-col items-center">
+                                                            <span className="text-[9px] font-black text-gray-400 uppercase">Delivery</span>
+                                                            <span className="font-mono text-xs font-bold text-orange-600">RM {totalDeliveryVal.toFixed(2)}</span>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* 🟢 Delivery 子项明细 (仅在有外卖时显示) — 各平台独立配色 */}
+                                                    {totalDeliveryVal > 0 && (
+                                                        <div className="flex items-center justify-center gap-3 mt-2 px-4 py-2 bg-gray-50 rounded-xl border border-gray-100">
+                                                            <Truck size={12} className="text-gray-400 shrink-0"/>
+                                                            {grabGross > 0 && (
+                                                                <span className="text-[10px] font-bold text-gray-500">
+                                                                    Grab <span className="font-mono font-black text-green-600">{grabGross.toFixed(2)}</span>
+                                                                </span>
+                                                            )}
+                                                            {pandaGross > 0 && (
+                                                                <span className="text-[10px] font-bold text-gray-500">
+                                                                    Panda <span className="font-mono font-black text-pink-600">{pandaGross.toFixed(2)}</span>
+                                                                </span>
+                                                            )}
+                                                            {shopeeGross > 0 && (
+                                                                <span className="text-[10px] font-bold text-gray-500">
+                                                                    Shopee <span className="font-mono font-black text-orange-600">{shopeeGross.toFixed(2)}</span>
+                                                                </span>
+                                                            )}
+                                                            {lalamoveVal > 0 && (
+                                                                <span className="text-[10px] font-bold text-gray-500">
+                                                                    Lala <span className="font-mono font-black text-blue-600">{lalamoveVal.toFixed(2)}</span>
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })
                                     )}
                                 </div>
                             </div>
-                            <HistoryDetailModal record={selectedRecord} onClose={() => setSelectedRecord(null)} onDelete={handleDeleteClick} />
+                            <HistoryDetailModal record={selectedRecord} onClose={() => setSelectedRecord(null)} onDelete={handleDeleteClick} onRefresh={loadHistory} />
                         </div>
                     )}
                 </div>
                 {showDeleteConfirm && (<div className="fixed inset-0 bg-black/60 z-[250] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center border-t-8 border-red-600 animate-in zoom-in-95"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><Trash2 size={32} className="text-red-600"/></div><h3 className="font-black text-2xl text-[#1A1A1A] mb-2">严重警告</h3><p className="text-sm text-gray-500 font-bold mb-2">确定要删除 <span className="text-red-600">{selectedRecord?.date}</span> 的结算记录吗？</p><p className="text-xs text-red-500 bg-red-50 p-2 rounded-lg mb-6 border border-red-100"><AlertTriangle size={12} className="inline mr-1"/>此操作将永久清空当天的营业数据，且无法恢复。</p><div className="grid grid-cols-2 gap-4"><button onClick={() => setShowDeleteConfirm(false)} className="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-sm hover:bg-gray-200 transition-colors">取消 (Cancel)</button><button onClick={executeDeleteRecord} className="py-3 bg-red-600 text-white font-bold rounded-xl text-sm hover:bg-red-700 shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2"><Trash2 size={16}/> 确认删除</button></div></div></div>)}
             </div>
-            
-            <ExpenseModal isOpen={isExpenseModalOpen} onClose={() => setIsExpenseModalOpen(false)} onSave={handleAddExpense} employees={staffList} suppliers={supplierList} />
         </div>
     );
 };

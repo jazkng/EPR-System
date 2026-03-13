@@ -433,7 +433,7 @@ export const RosterModule: React.FC<RosterModuleProps> = ({ onClose, allowedModu
     return (
         <div className="fixed inset-0 z-[100] bg-[#F5F7FA] flex flex-col animate-in fade-in duration-200 font-sans">
             {/* Header Controls */}
-            <div className="bg-[#1A1A1A] p-4 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0 shadow-xl z-40 border-b-4 border-[#FFD700]">
+            <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] flex flex-col md:flex-row justify-between items-center gap-4 shrink-0 shadow-xl z-40 border-b-4 border-[#FFD700]">
                 <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
                     <div className="flex items-center gap-3">
                         <div className="bg-[#FFD700] text-black p-2 md:p-2.5 rounded-xl shadow-lg"><Calendar size={20} className="md:w-6 md:h-6"/></div>

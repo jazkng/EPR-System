@@ -734,7 +734,7 @@ export const EmployeeAssessmentModule: React.FC<EmployeeAssessmentModuleProps> =
             <div className="bg-[#F5F7FA] w-full h-full md:max-w-6xl md:h-[95vh] md:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
                 
                 {/* Header */}
-                <div className="bg-[#1A1A1A] p-4 md:p-5 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
+                <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] md:px-5 md:pb-5 md:pt-[max(env(safe-area-inset-top),1.25rem)] flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
                     <div className="flex items-center gap-3">
                         <div className="bg-[#FFD700] text-black p-2 rounded-xl shadow-lg"><Award size={20}/></div>
                         <div>

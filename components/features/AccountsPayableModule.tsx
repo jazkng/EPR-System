@@ -46,6 +46,7 @@ const ACCOUNTING_CATEGORIES: Record<string, { label: string, options: {id: strin
             { id: 'MARKETING', label: '营销广告 (Marketing)' },
             { id: 'PROFESSIONAL', label: '专业服务/律师 (Professional/Legal)' },
             { id: 'ACCOUNTING', label: '会计服务 (Accounting)' },
+            { id: 'BANK_FEE', label: '银行抽佣/手续费 (Bank & Merchant Fees)' }, // 🟢 新增：银行抽佣分类
             { id: 'INSURANCE', label: '保险 (Insurance)' },
             { id: 'SUPPLIES', label: '杂项耗材 (Supplies)' },
             { id: 'LOGISTICS', label: '物流运输 (Logistics)' },
@@ -131,20 +132,16 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             setSuppliers(sups);
             setEmployees(emps);
             
-            // LOAD AND MERGE EXPENSES
             const settlements = await DataManager.getSettlements();
             let expenses: ExpenseItem[] = [];
             
-            // 1. Get from Settlements
             settlements.forEach(s => { 
                 if (s.expenses) expenses.push(...s.expenses.map(e => ({...e, settlementId: s.id}))); 
             });
             
-            // 2. Get from Standalone
             const snap = await getDocs(collection(db, 'standalone_expenses'));
             snap.forEach(doc => { expenses.push(doc.data() as ExpenseItem); });
             
-            // 3. Deduplicate based on ID (Standalone overwrites Settlement if ID matches, which is correct as Standalone is AP source)
             const unique = Array.from(new Map(expenses.map(item => [item.id, item])).values());
             unique.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
             
@@ -153,8 +150,10 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
     };
 
     const filteredBills = useMemo(() => {
-        setDisplayLimit(50); // Reset pagination on filter change
-        let list = allBills;
+        setDisplayLimit(50); 
+        // 🟢 核心过滤：将所有 pay_xxx (子付款记录) 从 UI 中隐藏，防止列表双重污染
+        let list = allBills.filter(b => !b.id.startsWith('pay_'));
+
         if (activeTab !== 'ALL') list = list.filter(b => b.paymentStatus === activeTab);
         if (searchTerm) {
             const lower = searchTerm.toLowerCase();
@@ -196,9 +195,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
         setShowVoucherConfirm(false);
         if (bill) {
             setEditingBill({ ...bill, tags: bill.tags || [], creditNote: bill.creditNote || 0 });
-            if (bill.tags?.includes('SELF_ISSUED')) {
-                setIsVoucherMode(true);
-            }
+            if (bill.tags?.includes('SELF_ISSUED')) setIsVoucherMode(true);
         } else {
             setEditingBill({ id: '', company: '', category: 'SUPPLIES', amount: 0, totalBillAmount: 0, creditNote: 0, paymentStatus: 'UNPAID', time: new Date().toISOString(), tags: [], linkUrl: '', note: '', paymentMethod: 'BANK_TRANSFER', paidBy: 'COMPANY', isAdvancePayment: false });
         }
@@ -238,14 +235,13 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             const isPaid = editingBill.paymentStatus === 'PAID';
             const cn = Number(editingBill.creditNote) || 0;
             const fullTotal = Number(editingBill.totalBillAmount) || 0;
+            // amount 始终代表实际发生的资金流出 (用于初始录入状态)
             const paidAmt = isPaid ? (fullTotal - cn) : (Number(editingBill.amount) || 0);
             
             const payDate = isPaid ? (editingBill.time || new Date().toISOString()) : undefined;
 
             let finalTags = editingBill.tags || [];
-            if (isVoucherMode && !finalTags.includes('SELF_ISSUED')) {
-                finalTags = [...finalTags, 'SELF_ISSUED'];
-            }
+            if (isVoucherMode && !finalTags.includes('SELF_ISSUED')) finalTags = [...finalTags, 'SELF_ISSUED'];
 
             const rawBill: ExpenseItem = {
                 ...editingBill as ExpenseItem,
@@ -271,11 +267,8 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             else if (finalBill.outstandingAmount! < (fullTotal - cn)) finalBill.paymentStatus = 'PARTIAL';
             else finalBill.paymentStatus = 'UNPAID';
 
-            // --- SYNC FIX: Save to BOTH ---
-            await DataManager.saveStandaloneExpense(finalBill); // Always save to AP table
-            if (finalBill.settlementId) {
-                await DataManager.updateExpenseInSettlement(finalBill.settlementId, finalBill); // Sync back to Settlement
-            }
+            await DataManager.saveStandaloneExpense(finalBill);
+            if (finalBill.settlementId) await DataManager.updateExpenseInSettlement(finalBill.settlementId, finalBill);
 
             await loadData();
             setIsFormOpen(false);
@@ -286,20 +279,19 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
         if (!editingBill.id) return;
         setIsSaving(true);
         try {
-            // 1. Always delete from Standalone Expenses (Primary AP source)
-            try {
-                await deleteDoc(doc(db, 'standalone_expenses', editingBill.id));
-            } catch (err) {
-                console.warn("Could not delete standalone doc (might not exist)", err);
+            // 🟢 核心防御：删除主单据前，必须连同其底下的所有分期付款子记录一并粉碎
+            const linkedPayments = allBills.filter(b => b.id.startsWith(`pay_${editingBill.id}_`));
+            for (const p of linkedPayments) {
+                await deleteDoc(doc(db, 'standalone_expenses', p.id));
             }
 
-            // 2. If linked to a settlement, remove from there too (Historical source)
+            try { await deleteDoc(doc(db, 'standalone_expenses', editingBill.id)); } catch (err) {}
+
             if (editingBill.settlementId) {
                 const ref = doc(db, 'settlements', editingBill.settlementId);
                 const snap = await getDoc(ref);
                 if (snap.exists()) {
                     const data = snap.data() as SettlementRecord;
-                    // Filter OUT the specific expense
                     const newExpenses = (data.expenses || []).filter(e => e.id !== editingBill.id);
                     await setDoc(ref, { ...data, expenses: newExpenses });
                 }
@@ -308,20 +300,15 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             await loadData();
             setIsFormOpen(false);
             setShowDeleteConfirm(false);
-            alert("✅ 账单已彻底删除 (Deleted)");
-        } catch (e) { 
-            console.error("Delete failed", e); 
-            alert("Delete failed"); 
-        } finally { 
-            setIsSaving(false); 
-        }
+            alert("✅ 账单及其子付款记录已彻底删除 (Deleted)");
+        } catch (e) { console.error("Delete failed", e); alert("Delete failed"); } finally { setIsSaving(false); }
     };
 
     const handlePasteLink = async () => {
         try { const text = await navigator.clipboard.readText(); if (text) setEditingBill(prev => ({ ...prev, linkUrl: text })); } catch (err) { alert("Clipboard permission denied"); }
     };
 
-    // --- REFINED QUICK PAY LOGIC (PARTIAL SUPPORT) ---
+    // --- QUICK PAY LOGIC ---
     const handleQuickPay = async () => {
         if (!payModalData) return;
         if (!payMethod) return alert("Select Payment Method");
@@ -338,23 +325,20 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
         setIsSaving(true);
         try {
             if (bill.paymentStatus === 'UNPAID' || !bill.paymentStatus) {
-                // First Payment -> Update Bill
                 const updatedBill = {
                     ...bill,
-                    amount: payAmount,
+                    amount: payAmount, // 记录首次支付现金流
                     outstandingAmount: newOutstanding,
                     paymentStatus: newStatus,
                     paymentMethod: payMethod,
                     paymentDate: nowIso,
                     note: (bill.note || '') + `\n[${nowIso.split('T')[0]}] Paid RM${payAmount} via ${payMethod}`
                 };
-                
-                // SYNC FIX
                 await DataManager.saveStandaloneExpense(updatedBill);
                 if (updatedBill.settlementId) await DataManager.updateExpenseInSettlement(updatedBill.settlementId, updatedBill);
 
             } else {
-                // Subsequent Payment -> New Record
+                // 🟢 部分支付产生的尾款：单独开单，确保资金管理精准扣减
                 const paymentRecord: ExpenseItem = {
                     id: `pay_${bill.id}_${Date.now()}`,
                     category: bill.category,
@@ -377,8 +361,6 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                     paymentStatus: newStatus,
                     note: (bill.note || '') + `\n[${nowIso.split('T')[0]}] Balance Paid RM${payAmount} via ${payMethod}`
                 };
-                
-                // SYNC FIX
                 await DataManager.saveStandaloneExpense(updatedTracker);
                 if (updatedTracker.settlementId) await DataManager.updateExpenseInSettlement(updatedTracker.settlementId, updatedTracker);
             }
@@ -386,35 +368,110 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             setPayModalData(null);
             alert(`✅ Payment Recorded via ${payMethod === 'CASH' ? 'Cash' : 'Bank'}`);
             loadData();
-        } catch (e) {
-            console.error(e);
-            alert("Payment Error");
-        } finally {
-            setIsSaving(false);
-        }
+        } catch (e) { console.error(e); alert("Payment Error"); } finally { setIsSaving(false); }
     };
 
+    // 🟢 核心防御：撤销付款时，连同幽灵子账单一起清理
     const handleUndoPayment = async (bill: ExpenseItem) => {
         if (!confirm(`确定要撤销此账单的付款吗？状态将变回 "UNPAID"。\n(Undo Payment?)`)) return;
-        const cn = bill.creditNote || 0;
-        const originalTotal = bill.totalBillAmount !== undefined ? bill.totalBillAmount : (bill.amount || 0);
-        const rawUpdated: ExpenseItem = {
-            ...bill,
-            amount: 0,
-            outstandingAmount: originalTotal - cn,
-            totalBillAmount: originalTotal,
-            paymentStatus: 'UNPAID',
-            note: (bill.note || '') + `\n[${new Date().toISOString().split('T')[0]}] Payment Reverted (Undo)`,
-        };
-        const updated = JSON.parse(JSON.stringify(rawUpdated));
-        delete updated.paymentDate;
+        setIsSaving(true);
+        try {
+            // 清理尾款单 (pay_xxx)
+            const linkedPayments = allBills.filter(b => b.id.startsWith(`pay_${bill.id}_`));
+            for (const p of linkedPayments) {
+                await deleteDoc(doc(db, 'standalone_expenses', p.id));
+            }
 
-        // SYNC FIX
-        await DataManager.saveStandaloneExpense(updated);
-        if (updated.settlementId) await DataManager.updateExpenseInSettlement(updated.settlementId, updated);
-        
-        alert("✅ 付款已撤销 (Payment Undone)");
-        loadData();
+            const cn = bill.creditNote || 0;
+            const originalTotal = bill.totalBillAmount !== undefined ? bill.totalBillAmount : (bill.amount || 0);
+            
+            // 使用正则清理之前自动加上去的 Paid 备注文本
+            const cleanNote = (bill.note || '')
+                .replace(/\[.*\] Paid.*via.*/g, '')
+                .replace(/\[.*\] Balance Paid.*via.*/g, '')
+                .replace(/\[.*\] Batch.*Paid.*via.*/g, '')
+                .trim();
+
+            const rawUpdated: ExpenseItem = {
+                ...bill,
+                amount: 0, // 钱收回，流出变0
+                outstandingAmount: originalTotal - cn,
+                totalBillAmount: originalTotal,
+                paymentStatus: 'UNPAID',
+                note: cleanNote + `\n[${new Date().toISOString().split('T')[0]}] Payment Reverted (Undo)`,
+            };
+            const updated = JSON.parse(JSON.stringify(rawUpdated));
+            delete updated.paymentDate;
+
+            await DataManager.saveStandaloneExpense(updated);
+            if (updated.settlementId) await DataManager.updateExpenseInSettlement(updated.settlementId, updated);
+            
+            alert("✅ 付款已撤销 (Payment Undone)");
+            loadData();
+        } catch (e) { console.error(e); alert("Undo Failed"); } finally { setIsSaving(false); }
+    };
+
+    const handleBatchPay = async () => {
+        if (!confirm(`Confirm pay ${selectedBillIds.size} bills via ${payMethod}?`)) return;
+        setIsSaving(true);
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const payTimestamp = new Date().toISOString();
+            
+            for (const id of selectedBillIds) {
+                const bill = allBills.find(b => b.id === id);
+                if (bill) {
+                    const cn = bill.creditNote || 0;
+                    
+                    // 🟢 核心防御：智能区分 Partial 和 Unpaid 的批量支付动作
+                    if (bill.paymentStatus === 'PARTIAL') {
+                        // 创建子支付单以结清尾款
+                        const paymentRecord: ExpenseItem = {
+                            id: `pay_${bill.id}_${Date.now()}`,
+                            category: bill.category,
+                            expenseType: 'GENERAL',
+                            company: bill.company,
+                            amount: bill.outstandingAmount || 0,
+                            totalBillAmount: 0, 
+                            outstandingAmount: 0,
+                            paymentStatus: 'PAID',
+                            paymentMethod: payMethod,
+                            time: payTimestamp,
+                            note: `[Batch Balance Pay] Ref: ${bill.company} (Inv #${bill.id.slice(-4)})`,
+                            paidBy: 'COMPANY'
+                        };
+                        await DataManager.saveStandaloneExpense(paymentRecord);
+
+                        const updatedTracker = {
+                            ...bill,
+                            outstandingAmount: 0,
+                            paymentStatus: 'PAID',
+                            note: (bill.note || '') + `\n[${today}] Batch Balance Paid via ${payMethod}`
+                        };
+                        await DataManager.saveStandaloneExpense(updatedTracker);
+                        if (updatedTracker.settlementId) await DataManager.updateExpenseInSettlement(updatedTracker.settlementId, updatedTracker);
+                    } else {
+                        // 正常的 UNPAID 直接写入 Amount
+                        const rawUpdated: ExpenseItem = {
+                            ...bill,
+                            amount: (bill.totalBillAmount || bill.amount) - cn,
+                            outstandingAmount: 0,
+                            paymentStatus: 'PAID',
+                            paymentMethod: payMethod,
+                            note: (bill.note || '') + `\n[${today}] Batch Paid via ${payMethod}`,
+                            paymentDate: payTimestamp 
+                        };
+                        const updated = JSON.parse(JSON.stringify(rawUpdated));
+                        await DataManager.saveStandaloneExpense(updated);
+                        if (updated.settlementId) await DataManager.updateExpenseInSettlement(updated.settlementId, updated);
+                    }
+                }
+            }
+            alert(`✅ 批量支付成功！共 ${selectedBillIds.size} 笔账单。`);
+            setSelectedBillIds(new Set());
+            setIsBatchPayModalOpen(false);
+            await loadData();
+        } catch (e) { console.error("Batch Pay Error", e); alert("批量支付出错，请检查网络或重试。"); } finally { setIsSaving(false); }
     };
 
     const handleCompanyClick = (companyName: string) => {
@@ -435,40 +492,6 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
     const handleSelectAll = () => {
         if (selectedBillIds.size === unpaidFilteredBills.length && unpaidFilteredBills.length > 0) setSelectedBillIds(new Set());
         else setSelectedBillIds(new Set(unpaidFilteredBills.map(b => b.id)));
-    };
-
-    const handleBatchPay = async () => {
-        if (!confirm(`Confirm pay ${selectedBillIds.size} bills via ${payMethod}?`)) return;
-        setIsSaving(true);
-        try {
-            const today = new Date().toISOString().split('T')[0];
-            const payTimestamp = new Date().toISOString();
-            
-            for (const id of selectedBillIds) {
-                const bill = allBills.find(b => b.id === id);
-                if (bill) {
-                    const cn = bill.creditNote || 0;
-                    const rawUpdated: ExpenseItem = {
-                        ...bill,
-                        amount: (bill.totalBillAmount || bill.amount) - cn,
-                        outstandingAmount: 0,
-                        paymentStatus: 'PAID',
-                        paymentMethod: payMethod,
-                        note: (bill.note || '') + `\n[${today}] Batch Paid via ${payMethod}`,
-                        paymentDate: payTimestamp 
-                    };
-                    const updated = JSON.parse(JSON.stringify(rawUpdated));
-
-                    // SYNC FIX
-                    await DataManager.saveStandaloneExpense(updated);
-                    if (updated.settlementId) await DataManager.updateExpenseInSettlement(updated.settlementId, updated);
-                }
-            }
-            alert(`✅ 批量支付成功！共 ${selectedBillIds.size} 笔账单。`);
-            setSelectedBillIds(new Set());
-            setIsBatchPayModalOpen(false);
-            await loadData();
-        } catch (e) { console.error("Batch Pay Error", e); alert("批量支付出错，请检查网络或重试。"); } finally { setIsSaving(false); }
     };
 
     const batchTotalAmount = useMemo(() => {
@@ -525,7 +548,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             <div className="bg-[#F5F7FA] w-full h-full md:max-w-6xl md:h-[95vh] md:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
                 
                 {/* === HEADER === */}
-                <div className="bg-[#1A1A1A] px-3 py-2.5 sm:p-4 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
+                <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
                     <div className="flex items-center gap-2 sm:gap-4">
                         <div className="bg-[#FFD700] text-black p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl shadow-lg"><CreditCard size={18} className="sm:hidden"/><CreditCard size={24} className="hidden sm:block"/></div>
                         <div>
@@ -712,7 +735,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                                         </div>
                                     </div>
                                 )
-                            })}
+                                })}
                             </div>
 
                             {/* Load More Button */}
@@ -863,7 +886,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                 )}
 
                 {showDeleteConfirm && (
-                    <div className="fixed inset-0 bg-black/60 z-[160] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-sm rounded-2xl p-6 shadow-2xl text-center border-t-4 border-red-500 animate-in zoom-in-95"><div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><Trash2 size={32}/></div><h3 className="font-black text-xl text-[#1A1A1A] mb-2">确认删除此账单?</h3><p className="text-xs text-gray-500 font-bold mb-6">此操作无法撤销。账单将从记录中永久移除。</p><div className="grid grid-cols-2 gap-3"><button onClick={() => setShowDeleteConfirm(false)} className="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-xs hover:bg-gray-200">取消</button><button onClick={handleDeleteBill} disabled={isSaving} className="py-3 bg-red-600 text-white font-bold rounded-xl text-xs hover:bg-red-700 shadow-lg">确认删除</button></div></div></div>
+                    <div className="fixed inset-0 bg-black/60 z-[160] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-sm rounded-2xl p-6 shadow-2xl text-center border-t-4 border-red-500 animate-in zoom-in-95"><div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><Trash2 size={32}/></div><h3 className="font-black text-xl text-[#1A1A1A] mb-2">确认删除此账单?</h3><p className="text-xs text-gray-500 font-bold mb-6">此操作无法撤销。及其相关的部分付款记录将被永久删除！</p><div className="grid grid-cols-2 gap-3"><button onClick={() => setShowDeleteConfirm(false)} className="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-xs hover:bg-gray-200">取消</button><button onClick={handleDeleteBill} disabled={isSaving} className="py-3 bg-red-600 text-white font-bold rounded-xl text-xs hover:bg-red-700 shadow-lg">确认彻底删除</button></div></div></div>
                 )}
 
                 {payModalData && (

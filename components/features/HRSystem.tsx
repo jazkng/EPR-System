@@ -63,7 +63,7 @@ export const HRSystem: React.FC<HRSystemProps> = ({ onClose, currentEmployee }) 
             {/* Mobile Optimization: Full width/height, no rounded corners on mobile */}
             <div className="bg-white w-full h-full md:max-w-7xl md:h-[95vh] md:rounded-[2rem] flex flex-col overflow-hidden shadow-2xl relative">
                 {/* 顶栏 */}
-                <div className="bg-[#1A1A1A] p-4 text-white flex justify-between items-center shrink-0 border-b-4 border-[#FFD700] safe-area-top">
+                <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] text-white flex justify-between items-center shrink-0 border-b-4 border-[#FFD700]">
                     <div>
                         <h3 className="font-black text-lg flex items-center gap-2">
                             <Users className="text-[#FFD700]"/> <span className="hidden md:inline">御膳智控 · </span>人事中心

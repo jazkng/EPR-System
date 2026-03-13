@@ -34,6 +34,7 @@ interface LedgerItem {
     category: string;
     tag?: string;
     balance?: number;
+    sortTime?: number;
 }
 
 const LedgerModal = ({ isOpen, type, onClose, items }: { isOpen: boolean; type: 'CASH' | 'BANK'; onClose: () => void; items: LedgerItem[] | undefined }) => {
@@ -41,7 +42,7 @@ const LedgerModal = ({ isOpen, type, onClose, items }: { isOpen: boolean; type: 
     return (
         <div className="fixed inset-0 bg-black/80 z-[150] flex items-center justify-center p-0 md:p-4 backdrop-blur-sm animate-in zoom-in duration-200">
             <div className="bg-white w-full h-full md:max-w-4xl md:h-[85vh] md:rounded-[2rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
-                <div className="bg-[#1A1A1A] p-4 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
+                <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
                     <div className="flex items-center gap-3">
                          <div className="bg-[#FFD700] text-black p-2 rounded-xl shadow-lg"><ScrollText size={20}/></div>
                          <div>
@@ -90,7 +91,7 @@ const LedgerModal = ({ isOpen, type, onClose, items }: { isOpen: boolean; type: 
                                                 {item.type === 'IN' ? '+' : '-'} {item.amount.toLocaleString(undefined, {minimumFractionDigits: 2})}
                                             </td>
                                             <td className="p-4 text-right font-mono font-bold text-gray-700 bg-gray-50/50">
-                                                {item.balance !== undefined ? `RM ${item.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '-'}
+                                                {item.balance !== undefined ? `RM ${item.balance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '-'}
                                             </td>
                                         </tr>
                                     ))}
@@ -175,6 +176,7 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         loadData();
     }, []);
 
+    // 🟢 极速查询优化 + 历史记录显示修复
     const loadData = async () => {
         setLoading(true);
         try {
@@ -183,20 +185,23 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
             
             const startDateStr = cfg ? cfg.initialDate : '2020-01-01';
 
-            const [trf, bills] = await Promise.all([
-                DataManager.getFundTransfers(),
-                DataManager.getBillPayments()
+            // 🚨 核心修复：只截断数据量最庞大、最烧钱的 settlements（每日营业结算单）。
+            // 对于 fund_transfers (转账/注资/额外收入)，我们移除日期拦截，让历史记录重新显示在界面上！
+            const [stlSnap, trfSnap, billsSnap] = await Promise.all([
+                getDocs(query(collection(db, 'settlements'), where('date', '>=', startDateStr))), // 保持极速截断
+                getDocs(collection(db, 'fund_transfers')), // 取消截断，恢复历史显示
+                getDocs(collection(db, 'bill_payments'))   // 取消截断，恢复历史显示
             ]);
 
-            const qSettlements = query(collection(db, 'settlements'), where('date', '>=', startDateStr));
-            const stlSnap = await getDocs(qSettlements);
             const stl = stlSnap.docs.map(d => d.data() as SettlementRecord);
+            const trf = trfSnap.docs.map(d => d.data() as FundTransfer).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            const bills = billsSnap.docs.map(d => d.data() as BillPaymentRecord);
 
-            setTransfers(trf);
             setSettlements(stl);
+            setTransfers(trf);
             setBillPayments(bills);
 
-            loadExpenses(stl);
+            loadExpenses(stl, bills);
 
         } catch (e) {
             console.error(e);
@@ -205,20 +210,32 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         }
     };
 
-    const loadExpenses = async (fullSettlements: SettlementRecord[] = settlements) => {
+    const loadExpenses = async (fullSettlements: SettlementRecord[] = settlements, currentBills: BillPaymentRecord[] = billPayments) => {
         try {
             const allExp: ExpenseItem[] = [];
             fullSettlements.forEach(s => {
-                if (s.expenses) allExp.push(...s.expenses);
+                if (s.expenses) {
+                    s.expenses.forEach((e, idx) => {
+                        allExp.push({
+                            ...e,
+                            id: e.id || `petty_${s.id}_${idx}`, 
+                            paymentMethod: e.paymentMethod || 'CASH',
+                            paymentStatus: e.paymentStatus || 'PAID',
+                            time: e.time || `${s.date}T12:00:00`
+                        });
+                    });
+                }
             });
             
-            const snap = await getDocs(collection(db, 'standalone_expenses'));
+            // 🚨 取消对 standalone_expenses (包含你的应付账款) 的日期拦截
+            // 确保未付的旧账全部加载进来
+            const qExpenses = collection(db, 'standalone_expenses');
+            const snap = await getDocs(qExpenses);
             snap.forEach(doc => allExp.push(doc.data() as ExpenseItem));
             
             const uniqueExp = Array.from(new Map(allExp.map(item => [item.id, item])).values());
 
-            const bills = await DataManager.getBillPayments();
-            const billExpenses: ExpenseItem[] = bills.map(b => ({
+            const billExpenses: ExpenseItem[] = currentBills.map(b => ({
                 id: b.id,
                 category: b.category,
                 expenseType: 'RECURRING',
@@ -286,27 +303,41 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         
         settlements.forEach(s => {
             if (new Date(s.date) >= startDate) {
-                const actualCashIncome = Number(s.sales.cash || 0) + Number(s.variance || 0);
-                cash += actualCashIncome;
+                const sCash = Number(s.sales?.cash || 0);
+                const sOpening = Number(s.openingCash || 0);
+                const sClosing = Number(s.closingCash || 0);
                 
-                const bankIncome = Number(s.sales.tng || 0) + Number(s.sales.duitnow || 0) + Number(s.sales.card || 0);
-                const deliveryIncome = s.sales.deliveryBreakdown? 
-                (Number(s.sales.deliveryBreakdown.grab || 0) + 
-                Number(s.sales.deliveryBreakdown.panda || 0) + 
-                Number(s.sales.deliveryBreakdown.shopee || 0) + 
+                let netCashChange = 0;
+                if (s.variance !== undefined) {
+                    netCashChange = sCash + Number(s.variance);
+                } else if (s.closingCash !== undefined && s.openingCash !== undefined) {
+                    netCashChange = sClosing - sOpening;
+                } else {
+                    netCashChange = sCash - Number(s.sales?.refundTotal || 0);
+                }
+                cash += netCashChange;
+                
+                const bankIncome = Number(s.sales.tng || 0) + Number(s.sales.duitnow || 0) + Number(s.sales.card || 0) + Number(s.sales.amex || 0);
+                const deliveryIncome = s.sales.deliveryBreakdown ? 
+                ((Number((s.sales.deliveryBreakdown as any).grabGross) || Number(s.sales.deliveryBreakdown.grab) || 0) + 
+                (Number((s.sales.deliveryBreakdown as any).pandaGross) || Number(s.sales.deliveryBreakdown.panda) || 0) + 
+                (Number((s.sales.deliveryBreakdown as any).shopeeGross) || Number(s.sales.deliveryBreakdown.shopee) || 0) + 
                 Number(s.sales.deliveryBreakdown.lalamove || 0)) 
                 : 0;
                 
-                const debitFee = Number(s.sales.duitnow || 0) * 0.0045;
-                const creditFee = Number(s.sales.card || 0) * 0.01;
-                bank += ((bankIncome + deliveryIncome) - (debitFee + creditFee));
+                bank += (bankIncome + deliveryIncome);
             }
         });
         
         expenses.forEach(e => {
             if (e.expenseType === 'RECURRING') return;
             if (e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL') {
-                const payDate = new Date(e.time.split('T')[0]);
+                // 🚨 核心逻辑：如果是旧账，优先识别它的“实际付款时间(paymentDate / updatedAt)”
+                const payDateStr = (e as any).paymentDate?.split('T')[0] || (e as any).updatedAt?.split('T')[0] || e.time?.split('T')[0] || e.createdAt?.split('T')[0];
+                if (!payDateStr) return;
+                
+                const payDate = new Date(payDateStr);
+                // 只要“付款动作”发生在结转日之后，就从现在的总资金里扣除
                 if (payDate >= startDate) {
                     const amt = Number(e.amount) || 0;
                     const method = e.paymentMethod ? e.paymentMethod.toUpperCase() : 'BANK_TRANSFER';
@@ -324,7 +355,10 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         });
         
         transfers.forEach(t => {
-            if (new Date(t.date.split('T')[0]) >= startDate) {
+            const transferDateStr = t.date?.split('T')[0];
+            if (!transferDateStr) return;
+            
+            if (new Date(transferDateStr) >= startDate) {
                 const amt = Number(t.amount) || 0;
                 if (t.fromAccount === 'CASH') cash -= amt; else if (t.fromAccount === 'BANK') bank -= amt;
                 
@@ -343,56 +377,110 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         const items: LedgerItem[] = [];
         const startDate = new Date(config.initialDate);
         const initialAmt = type === 'CASH' ? config.initialCash : config.initialBank;
-        items.push({ id: 'init', date: config.initialDate, desc: 'Initial Balance (初始资金)', amount: initialAmt, type: 'IN', category: 'INIT', tag: 'SETUP' });
+        
+        items.push({ 
+            id: 'init', 
+            date: config.initialDate, 
+            desc: 'Initial Balance (初始资金)', 
+            amount: initialAmt, 
+            type: 'IN', 
+            category: 'INIT', 
+            tag: 'SETUP',
+            sortTime: new Date(config.initialDate).getTime()
+        });
+        
         settlements.forEach(s => {
             if (new Date(s.date) < startDate) return;
+            
+            const realTime = s.createdAt || s.date;
+            const displayDate = realTime.split('T')[0];
+            const sortTime = new Date(realTime).getTime();
+            const accRef = s.date !== displayDate ? ` [账期: ${s.date}]` : '';
+
             if (type === 'CASH') {
-                if ((s.sales.cash || 0) > 0) items.push({ id: `sale_${s.id}`, date: s.date, desc: 'System Cash Sales (系统记录)', amount: s.sales.cash, type: 'IN', category: 'SALES', tag: 'STOREHUB' });
-                if (s.variance && s.variance !== 0) items.push({ id: `var_${s.id}`, date: s.date, desc: `Cash Variance (现金误差调整) ${s.varianceReason ? `[${s.varianceReason}]` : ''}`, amount: Math.abs(s.variance), type: s.variance > 0 ? 'IN' : 'OUT', category: 'ADJUSTMENT', tag: 'VARIANCE' });
+                const sCash = Number(s.sales.cash || 0);
+                const sOpening = Number(s.openingCash || 0);
+                const sClosing = Number(s.closingCash || 0);
+                
+                if (sCash > 0) items.push({ id: `sale_${s.id}`, date: displayDate, desc: `System Cash Sales (系统记录)${accRef}`, amount: sCash, type: 'IN', category: 'SALES', tag: 'STOREHUB', sortTime });
+                
+                if (s.variance !== undefined && s.variance !== 0) {
+                    items.push({ id: `var_${s.id}`, date: displayDate, desc: `Cash Variance (现金误差)${s.varianceReason ? `[${s.varianceReason}]` : ''}${accRef}`, amount: Math.abs(s.variance), type: s.variance > 0 ? 'IN' : 'OUT', category: 'ADJUSTMENT', tag: 'VARIANCE', sortTime });
+                } else if (s.variance === undefined && s.closingCash !== undefined && s.openingCash !== undefined) {
+                    const inferredVariance = (sClosing - sOpening) - sCash;
+                    if (inferredVariance !== 0) {
+                        items.push({ id: `var_${s.id}`, date: displayDate, desc: `Inferred Cash Variance (推算误差)${accRef}`, amount: Math.abs(inferredVariance), type: inferredVariance > 0 ? 'IN' : 'OUT', category: 'ADJUSTMENT', tag: 'VARIANCE', sortTime });
+                    }
+                } else if (s.variance === undefined && s.closingCash === undefined) {
+                    const refundAmt = Number(s.sales.refundTotal || 0);
+                    if (refundAmt > 0) {
+                        items.push({ id: `refund_${s.id}`, date: displayDate, desc: `Sales Refund (退款)${accRef}`, amount: refundAmt, type: 'OUT', category: 'REFUND', tag: 'REFUND', sortTime });
+                    }
+                }
             } else {
-                const bankIncome = (s.sales.tng || 0) + (s.sales.duitnow || 0) + (s.sales.card || 0);
-                const deliveryIncome = s.sales.deliveryBreakdown? 
-                (Number(s.sales.deliveryBreakdown.grab || 0) + 
-                Number(s.sales.deliveryBreakdown.panda || 0) + 
-                Number(s.sales.deliveryBreakdown.shopee || 0) + 
-                Number(s.sales.deliveryBreakdown.lalamove || 0)) 
+                const bankIncome = Number(s.sales.tng || 0) + Number(s.sales.duitnow || 0) + Number(s.sales.card || 0) + Number(s.sales.amex || 0);
+                const bdownLedger = s.sales.deliveryBreakdown as any;
+                const deliveryIncome = bdownLedger ? 
+                ((Number(bdownLedger.grabGross) || Number(bdownLedger.grab) || 0) + 
+                (Number(bdownLedger.pandaGross) || Number(bdownLedger.panda) || 0) + 
+                (Number(bdownLedger.shopeeGross) || Number(bdownLedger.shopee) || 0) + 
+                Number(bdownLedger.lalamove || 0)) 
                 : 0;
                 const total = bankIncome + deliveryIncome;
                 if (total > 0) {
-                    items.push({ id: `sale_${s.id}`, date: s.date, desc: 'Digital Sales (电子/外卖营收)', amount: total, type: 'IN', category: 'SALES', tag: 'REVENUE' });
-                    const debitFee = (s.sales.duitnow || 0) * 0.0045;
-                    const creditFee = (s.sales.card || 0) * 0.01;
-                    const totalFee = debitFee + creditFee;
-                    if (totalFee > 0) items.push({ id: `fee_${s.id}`, date: s.date, desc: 'Mbb Merchant Fee (银行抽佣)', amount: totalFee, type: 'OUT', category: 'FEE', tag: 'COMMISSION' });
+                    items.push({ id: `sale_${s.id}`, date: displayDate, desc: `Digital Sales (电子/外卖营收)${accRef}`, amount: total, type: 'IN', category: 'SALES', tag: 'REVENUE', sortTime });
                 }
             }
         });
+        
         expenses.forEach(e => {
-            const dateStr = e.time.split('T')[0];
-            if (new Date(dateStr) < startDate) return;
+            const accDateStr = e.time?.split('T')[0] || e.createdAt?.split('T')[0];
+            if (!accDateStr || new Date(accDateStr) < startDate) return;
             if (e.expenseType === 'RECURRING') return;
+            
             const method = (e.paymentMethod || 'BANK_TRANSFER').toUpperCase();
             const isCashExp = method.includes('CASH');
             const isPaid = e.paymentStatus === 'PAID' || e.paymentStatus === 'PARTIAL';
             if (!isPaid) return;
-            const amt = e.amount || 0; 
+            
+            const realTime = e.paymentDate || e.createdAt || e.time;
+            const displayDate = realTime.split('T')[0];
+            const sortTime = new Date(realTime).getTime();
+            
+            const accRef = accDateStr !== displayDate ? ` [账期: ${accDateStr}]` : '';
+            
+            const amt = Number(e.amount) || 0; 
             if (amt > 0) {
-                // FIX: 给 DIVIDEND 专属 tag，区分普通支出
                 const tag = e.category === 'DIVIDEND' ? 'DIVIDEND' : 'EXPENSE';
-                if (type === 'CASH' && isCashExp) items.push({ id: e.id, date: dateStr, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: amt, type: 'OUT', category: e.category, tag });
-                else if (type === 'BANK' && !isCashExp) items.push({ id: e.id, date: dateStr, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: amt, type: 'OUT', category: e.category, tag });
+                const statusTag = e.paymentStatus === 'PARTIAL' ? ' [Partial]' : '';
+                const desc = e.company + (e.note ? ` - ${e.note}` : '') + statusTag + accRef;
+                
+                if (type === 'CASH' && isCashExp) items.push({ id: e.id, date: displayDate, desc, amount: amt, type: 'OUT', category: e.category, tag, sortTime });
+                else if (type === 'BANK' && !isCashExp) items.push({ id: e.id, date: displayDate, desc, amount: amt, type: 'OUT', category: e.category, tag, sortTime });
             }
         });
+        
         billPayments.forEach(b => {
             if (new Date(b.date) < startDate) return;
+            const realTime = (b as any).createdAt || b.date;
+            const displayDate = realTime.split('T')[0];
+            const sortTime = new Date(realTime).getTime();
+
             const method = (b.method || 'BANK_TRANSFER').toUpperCase();
             const isCashBill = method.includes('CASH');
-            if (type === 'CASH' && isCashBill) items.push({ id: b.id, date: b.date, desc: b.name, amount: b.amount, type: 'OUT', category: b.category, tag: 'BILL' });
-            else if (type === 'BANK' && !isCashBill) items.push({ id: b.id, date: b.date, desc: b.name, amount: b.amount, type: 'OUT', category: b.category, tag: 'BILL' });
+            if (type === 'CASH' && isCashBill) items.push({ id: b.id, date: displayDate, desc: b.name, amount: b.amount, type: 'OUT', category: b.category, tag: 'BILL', sortTime });
+            else if (type === 'BANK' && !isCashBill) items.push({ id: b.id, date: displayDate, desc: b.name, amount: b.amount, type: 'OUT', category: b.category, tag: 'BILL', sortTime });
         });
+        
         transfers.forEach(t => {
-            const dateStr = t.date.split('T')[0];
-            if (new Date(dateStr) < startDate) return;
+            const accDateStr = t.date?.split('T')[0];
+            if (!accDateStr || new Date(accDateStr) < startDate) return;
+            
+            const realTime = t.createdAt || t.date;
+            const displayDate = realTime.split('T')[0];
+            const sortTime = new Date(realTime).getTime();
+            const accRef = accDateStr !== displayDate ? ` [账期: ${accDateStr}]` : '';
+
             if (t.toAccount === type) {
                 let desc = 'Transfer In'; let tag = 'TRANSFER';
                 if (t.fromAccount === 'SHAREHOLDER' as any) { desc = 'Shareholder Injection'; tag = 'EQUITY'; }
@@ -400,37 +488,37 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                 else if (t.fromAccount === 'CASH') { desc = 'Deposit from Cash'; }
                 else if (t.fromAccount === 'BANK') { desc = 'Withdrawal from Bank'; }
                 if (t.note) desc += ` (${t.note})`;
-                items.push({ id: t.id, date: dateStr, desc, amount: t.amount, type: 'IN', category: 'TRANSFER', tag });
+                desc += accRef;
+                items.push({ id: t.id, date: displayDate, desc, amount: t.amount, type: 'IN', category: 'TRANSFER', tag, sortTime });
             }
             if (t.fromAccount === type) {
                 let desc = 'Transfer Out'; let tag = 'TRANSFER';
                 if (t.toAccount === 'CASH') { desc = 'Withdrawal to Cash'; }
                 else if (t.toAccount === 'BANK') { desc = 'Deposit to Bank'; }
                 if (t.note) desc += ` (${t.note})`;
-                items.push({ id: t.id, date: dateStr, desc, amount: t.amount, type: 'OUT', category: 'TRANSFER', tag });
+                desc += accRef;
+                items.push({ id: t.id, date: displayDate, desc, amount: t.amount, type: 'OUT', category: 'TRANSFER', tag, sortTime });
             }
         });
+        
         items.sort((a,b) => {
-            const dateA = new Date(a.date).getTime();
-            const dateB = new Date(b.date).getTime();
-            if (dateA !== dateB) return dateA - dateB; 
+            const timeA = a.sortTime || new Date(a.date).getTime();
+            const timeB = b.sortTime || new Date(b.date).getTime();
+            if (timeA !== timeB) return timeA - timeB; 
             if (a.category === 'INIT') return -1; if (b.category === 'INIT') return 1;
             if (a.type === 'IN' && b.type === 'OUT') return -1; if (a.type === 'OUT' && b.type === 'IN') return 1;
             return 0;
         });
+        
         let currentBalance = 0;
         const processedItems = items.map(item => {
-            if (item.id === 'init') { currentBalance = item.amount; return { ...item, balance: currentBalance }; }
-            if (item.type === 'IN') currentBalance += item.amount; else currentBalance -= item.amount;
+            if (item.id === 'init') { currentBalance = item.amount; }
+            else { if (item.type === 'IN') currentBalance += item.amount; else currentBalance -= item.amount; }
+            currentBalance = Math.round(currentBalance * 100) / 100;
             return { ...item, balance: currentBalance };
         });
-        return processedItems.sort((a,b) => {
-            const dateA = new Date(a.date).getTime();
-            const dateB = new Date(b.date).getTime();
-            if (dateA !== dateB) return dateB - dateA;
-            if (a.type === 'IN' && b.type === 'OUT') return -1; if (a.type === 'OUT' && b.type === 'IN') return 1;
-            return 0;
-        });
+        
+        return processedItems.reverse();
     };
 
     // --- HANDLERS ---
@@ -458,7 +546,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
     const handleDeleteTransfer = async (id: string) => { if(!confirm("Delete record?")) return; await DataManager.deleteFundTransfer(id); setTransfers(transfers.filter(t => t.id !== id)); loadData(); };
     
     const handleGenerateReceipt = async (record: FundTransfer) => {
-        // FIX: 防止并发，已在生成中则直接返回
         if (isGeneratingPdf) return;
         setPrintingRecord(record);
         setIsGeneratingPdf(true);
@@ -482,7 +569,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         }, 800);
     };
     
-    // FIX: Dividend time 字段改为完整 ISO 格式，确保 split('T')[0] 能正确解析
     const handleSaveDividend = async () => {
         if (!dividendForm.shareholderId || !dividendForm.amount) return alert("Please fill all fields");
         const sh = config.shareholders?.find(s => s.id === dividendForm.shareholderId);
@@ -496,7 +582,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
             amount: parseFloat(dividendForm.amount),
             paymentStatus: 'PAID',
             paymentMethod: dividendForm.paymentMethod as any,
-            // FIX: 统一使用带时间的 ISO 格式，防止 split('T')[0] 解析失败
             time: `${dividendForm.date}T12:00:00`,
             note: `[股东分红] ${dividendForm.note || 'Dividend Payout'}`,
             paidBy: 'COMPANY'
@@ -509,14 +594,35 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
         loadExpenses();
     };
 
-    const handleDeleteExpense = async (id: string) => {
-        if(!confirm("Delete this payout record?")) return;
+    // 🟢 核心新增：资金结转 (Checkpoint) - 截断旧账，提高效率与节省 Firebase 计费
+    const handleCheckpoint = async () => {
+        const today = new Date().toISOString().split('T')[0];
+        
+        if (config.initialDate === today) {
+            return alert("⚠️ 今天已经进行过结转，无需重复操作。");
+        }
+
+        if (!confirm(`⚠️ 确认执行【资金结转快照 (Checkpoint)】吗？\n\n系统会将现在的真实余额：\n💰 现金: ${formatMoney(balances.cash)}\n🏦 银行: ${formatMoney(balances.bank)}\n\n保存为新的“初始资金”，并将计算起点更新为【今天 (${today})】。\n\n🎯 优势：大幅提升 App 流畅度！避免拉取几千条旧账单导致云端账单爆炸。\n⚠️ 注意：结转后，修改今天之前的旧账单将不再影响现在的总资产。`)) return;
+        
+        setLoading(true);
         try {
-            await deleteDoc(doc(db, 'standalone_expenses', id));
-            loadExpenses();
-        } catch(e) {
-            console.error(e);
-            alert("Delete failed");
+            const newConfig = {
+                ...config,
+                initialDate: today,
+                initialCash: balances.cash,
+                initialBank: balances.bank
+            };
+            
+            await DataManager.saveTreasuryConfig(newConfig);
+            setConfig(newConfig);
+            alert("✅ 资金结转快照保存成功！系统已重置计算起点。");
+            
+            loadData();
+        } catch (error) {
+            console.error("Checkpoint error", error);
+            alert("结转失败，请检查网络！");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -525,7 +631,7 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
             <div className="bg-[#F5F7FA] w-full h-full md:max-w-5xl md:h-[90vh] md:rounded-[2rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
                 
                 {/* Header */}
-                <div className="bg-[#1A1A1A] p-4 md:p-5 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
+                <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] md:px-5 md:pb-5 md:pt-[max(env(safe-area-inset-top),1.25rem)] flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
                     <div className="flex items-center gap-3 md:gap-4">
                         <div className="bg-[#FFD700] text-black p-2 md:p-2.5 rounded-xl shadow-lg"><Wallet size={20} className="md:w-6 md:h-6"/></div>
                         <div>
@@ -557,10 +663,23 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                 <div className="flex-grow overflow-y-auto p-4 md:p-8 pb-32 md:pb-8">
                     {activeTab === 'OVERVIEW' && (
                         <div className="space-y-4 md:space-y-6 max-w-4xl mx-auto">
+                            {/* Total Card */}
                             <div className="bg-[#1A1A1A] rounded-3xl p-5 md:p-8 text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-center gap-4 md:gap-6">
                                 <div className="absolute top-0 right-0 w-64 h-64 bg-[#FFD700] opacity-10 rounded-full blur-3xl pointer-events-none"></div>
-                                <div className="relative z-10 text-center md:text-left"><p className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-[0.2em] mb-1 md:mb-2">Total Assets (总资金)</p><h2 className="text-3xl md:text-6xl font-black text-[#FFD700] font-mono tracking-tight">{formatMoney(balances.total)}</h2><p className="text-[9px] md:text-[10px] text-gray-500 mt-1 md:mt-2 italic">Calculated from {config.initialDate}</p></div>
-                                <div className="relative z-10 flex flex-col gap-2 w-full md:w-auto"><button onClick={() => setIsExpenseModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 md:py-3 rounded-2xl shadow-xl flex items-center gap-3 font-black text-xs md:text-sm transition-transform active:scale-95 border border-red-500 w-full justify-center"><MinusCircle size={16}/> 补录支出 (Expense)</button></div>
+                                <div className="relative z-10 text-center md:text-left">
+                                    <p className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-[0.2em] mb-1 md:mb-2">Total Assets (总资金)</p>
+                                    <h2 className="text-3xl md:text-6xl font-black text-[#FFD700] font-mono tracking-tight">{formatMoney(balances.total)}</h2>
+                                    <p className="text-[9px] md:text-[10px] text-gray-500 mt-1 md:mt-2 italic">Calculated from {config.initialDate}</p>
+                                </div>
+                                <div className="relative z-10 flex flex-col gap-2 w-full md:w-auto">
+                                    <button onClick={() => setIsExpenseModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 md:py-3 rounded-2xl shadow-xl flex items-center gap-3 font-black text-xs md:text-sm transition-transform active:scale-95 border border-red-500 w-full justify-center">
+                                        <MinusCircle size={16}/> 补录支出 (Expense)
+                                    </button>
+                                    {/* 🟢 新增：资金结转按钮 (绕过严格类型报错包裹一层箭头函数) */}
+                                    <button onClick={() => handleCheckpoint()} className="bg-white/10 hover:bg-white/20 text-[#FFD700] px-6 py-2.5 md:py-3 rounded-2xl shadow-xl flex items-center gap-3 font-black text-xs md:text-sm transition-transform active:scale-95 border border-[#FFD700]/30 w-full justify-center backdrop-blur-sm">
+                                        <Save size={16}/> 存取记录 (Checkpoint)
+                                    </button>
+                                </div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                                 <div onClick={() => setViewLedger('CASH')} className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col justify-between min-h-32 md:min-h-40 relative overflow-hidden group cursor-pointer hover:shadow-md transition-all active:scale-[0.98]"><div className="absolute right-0 top-0 p-4 md:p-6 opacity-5 group-hover:opacity-10 transition-opacity"><Banknote size={80} className="text-green-600 md:w-[120px] md:h-[120px]"/></div><div className="flex justify-between items-start mb-3 md:mb-4"><div className="p-2 md:p-3 bg-green-50 rounded-2xl text-green-600 inline-block"><Banknote size={20} className="md:w-6 md:h-6"/></div><div className="flex gap-2"><button onClick={(e) => { e.stopPropagation(); setTransferForm({ type: 'DEPOSIT', fromAccount: 'CASH', toAccount: 'BANK', date: new Date().toISOString().split('T')[0] }); setIsTransferModalOpen(true); }} className="text-[10px] bg-black text-white px-3 py-1.5 rounded-lg font-bold hover:bg-gray-800 transition-colors shadow-lg whitespace-nowrap">存入 (Bank In)</button></div></div><div><p className="text-[10px] md:text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Cash on Hand (现金)</p><h3 className="text-xl md:text-3xl font-black text-[#1A1A1A] font-mono">{formatMoney(balances.cash)}</h3></div></div>
@@ -570,7 +689,19 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                     )}
                     {activeTab === 'EXTRA_INCOME' && (
                         <div className="max-w-5xl mx-auto space-y-6 md:space-y-8 animate-in fade-in slide-in-from-right-4">
-                            <div className="bg-gradient-to-br from-emerald-600 to-teal-800 rounded-[2.5rem] p-6 md:p-10 text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-center gap-8 border border-emerald-500/30"><div className="absolute -top-24 -right-24 w-64 h-64 bg-white/10 rounded-full blur-3xl pointer-events-none"></div><div className="absolute -bottom-24 -left-24 w-64 h-64 bg-emerald-400/20 rounded-full blur-3xl pointer-events-none"></div><div className="relative z-10 text-center md:text-left space-y-2"><div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-emerald-100 text-[10px] font-black uppercase tracking-widest border border-white/10"><TrendingUp size={12}/> Non-Business Revenue</div><h2 className="text-4xl md:text-6xl font-black text-white font-mono tracking-tighter drop-shadow-sm">{formatMoney(extraIncomeStats.total)}</h2><div className="flex items-center justify-center md:justify-start gap-4 text-emerald-100 text-xs font-bold"><span className="flex items-center gap-1"><Calendar size={14}/> 本月收入 (This Month): {formatMoney(extraIncomeStats.thisMonthTotal)}</span></div></div><button onClick={() => setIsIncomeModalOpen(true)} className="relative z-10 bg-white text-emerald-800 px-8 py-4 rounded-2xl shadow-[0_10px_20px_rgba(0,0,0,0.2)] flex items-center gap-3 font-black text-sm transition-all hover:scale-105 active:scale-95 hover:bg-emerald-50"><div className="bg-emerald-100 p-1.5 rounded-full"><Plus size={16} className="text-emerald-700"/></div><span>记录新收入 (Record)</span></button></div>
+                            <div className="bg-gradient-to-br from-emerald-600 to-teal-800 rounded-[2.5rem] p-6 md:p-10 text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-center gap-8 border border-emerald-500/30">
+                                <div className="absolute -top-24 -right-24 w-64 h-64 bg-white/10 rounded-full blur-3xl pointer-events-none"></div>
+                                <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-emerald-400/20 rounded-full blur-3xl pointer-events-none"></div>
+                                <div className="relative z-10 text-center md:text-left space-y-2">
+                                    <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-emerald-100 text-[10px] font-black uppercase tracking-widest border border-white/10"><TrendingUp size={12}/> Non-Business Revenue</div>
+                                    <h2 className="text-4xl md:text-6xl font-black text-white font-mono tracking-tighter drop-shadow-sm">{formatMoney(extraIncomeStats.total)}</h2>
+                                    <div className="flex flex-col md:flex-row items-center justify-center md:justify-start gap-4 text-emerald-100 text-xs font-bold">
+                                        <span className="flex items-center gap-1"><Calendar size={14}/> 本月收入 (This Month): {formatMoney(extraIncomeStats.thisMonthTotal)}</span>
+                                        <span className="bg-yellow-400/20 text-yellow-200 px-2 py-0.5 rounded border border-yellow-400/30 text-[10px]">⚠️ 请勿在此记录营业额 (Do not record sales here)</span>
+                                    </div>
+                                </div>
+                                <button onClick={() => setIsIncomeModalOpen(true)} className="relative z-10 bg-white text-emerald-800 px-8 py-4 rounded-2xl shadow-[0_10px_20px_rgba(0,0,0,0.2)] flex items-center gap-3 font-black text-sm transition-all hover:scale-105 active:scale-95 hover:bg-emerald-50"><div className="bg-emerald-100 p-1.5 rounded-full"><Plus size={16} className="text-emerald-700"/></div><span>记录新收入 (Record)</span></button>
+                            </div>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{[{l:'Electricity',v:extraIncomeStats.breakdown.electricity,c:'text-yellow-600',b:'bg-yellow-50',i:Zap},{l:'Water',v:extraIncomeStats.breakdown.water,c:'text-cyan-600',b:'bg-cyan-50',i:Droplets},{l:'Rent',v:extraIncomeStats.breakdown.rent,c:'text-indigo-600',b:'bg-indigo-50',i:Home},{l:'Other',v:extraIncomeStats.breakdown.other,c:'text-emerald-600',b:'bg-emerald-50',i:Coins}].map(c => (<div key={c.l} className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col justify-between h-32 relative group overflow-hidden"><div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><c.i size={64}/></div><div className="relative z-10"><div className={`w-10 h-10 rounded-2xl ${c.b} ${c.c} flex items-center justify-center mb-3 shadow-inner`}><c.i size={20} fill="currentColor"/></div><p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{c.l}</p><p className="text-lg md:text-xl font-black text-[#1A1A1A]">{formatMoney(c.v)}</p></div></div>))}</div>
                             <div className="bg-white rounded-[2.5rem] border border-gray-200 shadow-sm overflow-hidden"><div className="p-6 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center"><h3 className="font-black text-lg text-[#1A1A1A] flex items-center gap-2"><History size={20} className="text-gray-400"/> 收入记录 (History)</h3><span className="text-xs font-bold text-gray-400 bg-white px-3 py-1 rounded-full border border-gray-100">{extraIncomeStats.records.length} Records</span></div><div className="divide-y divide-gray-100">{extraIncomeStats.records.length === 0 ? (<div className="p-12 text-center text-gray-400 text-sm font-bold flex flex-col items-center"><div className="bg-gray-100 p-4 rounded-full mb-3"><Archive size={24} className="opacity-50"/></div>暂无收入记录</div>) : (extraIncomeStats.records.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(t => (<div key={t.id} className="p-5 flex items-center justify-between hover:bg-gray-50 transition-colors group"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-gray-100 text-gray-600"><Recycle size={20} fill="currentColor" className="opacity-80"/></div><div><div className="font-bold text-sm text-[#1A1A1A]">{t.note?.replace('[代收] ', '') || 'Income'}</div><div className="text-[10px] text-gray-400 font-bold mt-0.5 flex items-center gap-2"><span className="bg-gray-100 px-1.5 py-0.5 rounded">{t.date}</span><span>•</span><span className="uppercase">{t.toAccount}</span></div></div></div><div className="flex items-center gap-4"><span className="font-mono font-black text-base text-emerald-600 bg-emerald-50 px-3 py-1 rounded-lg">+{formatMoney(t.amount)}</span><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleGenerateReceipt(t)} disabled={isGeneratingPdf} className="p-2 bg-white border border-gray-200 text-gray-400 rounded-lg hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm" title="打印收据 (Print Receipt)">{isGeneratingPdf && printingRecord?.id === t.id ? <Loader2 size={14} className="animate-spin"/> : <Printer size={14}/>}</button><button onClick={() => handleDeleteTransfer(t.id)} className="p-2 bg-white border border-gray-200 text-gray-400 rounded-lg hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all shadow-sm"><Trash2 size={14}/></button></div></div></div>)))}</div></div>
                         </div>
@@ -636,7 +767,7 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                 {isShareholderFormOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-4">股东资料 (Shareholder)</h3><div className="space-y-3"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Name</label><input className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={shareholderForm.name} onChange={e => setShareholderForm({...shareholderForm, name: e.target.value})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Role (Title)</label><input className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={shareholderForm.role || ''} onChange={e => setShareholderForm({...shareholderForm, role: e.target.value})} /></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Capital (RM)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={shareholderForm.investmentAmount} onChange={e => setShareholderForm({...shareholderForm, investmentAmount: parseFloat(e.target.value)})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Equity (%)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={shareholderForm.equityPercentage} onChange={e => setShareholderForm({...shareholderForm, equityPercentage: parseFloat(e.target.value)})} /></div></div><button onClick={handleSaveShareholder} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-bold mt-2">Save</button><button onClick={() => setIsShareholderFormOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button></div></div></div>)}
                 {isInjectionModalOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-4">股东注资 (Injection)</h3><div className="space-y-4"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Shareholder (股东)</label><select className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={injectionForm.shareholderName} onChange={e => setInjectionForm({...injectionForm, shareholderName: e.target.value})}><option value="">Select Shareholder...</option>{config.shareholders?.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Amount (金额)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-black text-lg outline-none border-2 border-transparent focus:border-[#FFD700]" value={injectionForm.amount} onChange={e => setInjectionForm({...injectionForm, amount: e.target.value})} placeholder="0.00" /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Into Account (存入账户)</label><div className="flex gap-2"><button onClick={() => setInjectionForm({...injectionForm, toAccount: 'BANK'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${injectionForm.toAccount === 'BANK' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-200 text-gray-500'}`}>BANK</button><button onClick={() => setInjectionForm({...injectionForm, toAccount: 'CASH'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${injectionForm.toAccount === 'CASH' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-gray-200 text-gray-500'}`}>CASH</button></div></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Date (日期)</label><input type="date" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={injectionForm.date} onChange={e => setInjectionForm({...injectionForm, date: e.target.value})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Note (备注)</label><input type="text" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={injectionForm.note} onChange={e => setInjectionForm({...injectionForm, note: e.target.value})} placeholder="e.g. Working Capital" /></div><button onClick={handleSaveInjection} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-bold mt-2 shadow-lg">确认注资 (Confirm)</button><button onClick={() => setIsInjectionModalOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button></div></div></div>)}
                 {isIncomeModalOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-4">代收/杂项收入 (Extra Income)</h3><div className="space-y-4"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Source (来源)</label><input list="income_sources" type="text" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={incomeForm.source} onChange={e => setIncomeForm({...incomeForm, source: e.target.value})} placeholder="e.g. 隔壁店铺" /><datalist id="income_sources">{incomeSourceHistory.map((src, idx) => (<option key={idx} value={src} />))}</datalist></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Category (类别)</label><select className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={incomeForm.category} onChange={e => setIncomeForm({...incomeForm, category: e.target.value})}><option value="ELECTRICITY">电费 (Electricity)</option><option value="WATER">水费 (Water)</option><option value="RENT">租金 (Rent)</option><option value="OTHER">其他 (Other)</option></select></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Amount (金额)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-black text-lg outline-none border-2 border-transparent focus:border-[#FFD700]" value={incomeForm.amount} onChange={e => setIncomeForm({...incomeForm, amount: e.target.value})} placeholder="0.00" /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Into Account (存入账户)</label><div className="flex gap-2"><button onClick={() => setIncomeForm({...incomeForm, toAccount: 'CASH'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${incomeForm.toAccount === 'CASH' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-gray-200 text-gray-500'}`}>CASH</button><button onClick={() => setIncomeForm({...incomeForm, toAccount: 'BANK'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${incomeForm.toAccount === 'BANK' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-200 text-gray-500'}`}>BANK</button></div></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Date (日期)</label><input type="date" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={incomeForm.date} onChange={e => setIncomeForm({...incomeForm, date: e.target.value})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Note (备注)</label><input type="text" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={incomeForm.note} onChange={e => setIncomeForm({...incomeForm, note: e.target.value})} placeholder="Optional..." /></div><button onClick={handleSaveIncome} className="w-full py-3 bg-green-600 text-white rounded-xl font-bold mt-2 shadow-lg hover:bg-green-700">确认收入 (Confirm)</button><button onClick={() => setIsIncomeModalOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button></div></div></div>)}
-                {isExpenseModalOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-2">补录/记录支出</h3><div className="space-y-3"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Category</label><select className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.category} onChange={e => setExpenseForm({...expenseForm, category: e.target.value})}><option value="RENOVATION">装修工程 (Renovation)</option><option value="EQUIPMENT">设备采购 (Equipment)</option><option value="RENT">租金 (Rent)</option><option value="UTILITIES">水电 (Utilities)</option><option value="SALARY">薪资 (Salary)</option><option value="SUPPLIES">杂项 (Supplies)</option><option value="LICENSE">执照 (License)</option><option value="OTHER">其他 (Other)</option></select></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Description / Item</label><input className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.company} onChange={e => setExpenseForm({...expenseForm, company: e.target.value})} placeholder="e.g. Renovation Contractor" /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Amount (RM)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: parseFloat(e.target.value)})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Payment Source</label><div className="flex gap-2"><button onClick={() => setExpenseForm({...expenseForm, paymentMethod: 'BANK_TRANSFER'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${expenseForm.paymentMethod === 'BANK_TRANSFER' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-200 text-gray-500'}`}>BANK</button><button onClick={() => setExpenseForm({...expenseForm, paymentMethod: 'CASH'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${expenseForm.paymentMethod === 'CASH' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-gray-200 text-gray-500'}`}>CASH</button></div></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Date (Backdate Allowed)</label><input type="date" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.time?.split('T')[0]} onChange={e => setExpenseForm({...expenseForm, time: e.target.value})} /></div><button onClick={handleSaveExpense} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-bold mt-2 shadow-lg">确认支出 (Confirm)</button><button onClick={() => setIsExpenseModalOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button></div></div></div>)}
+                {isExpenseModalOpen && (<div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-2">补录/记录支出</h3><div className="space-y-3"><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Category</label><select className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.category} onChange={e => setExpenseForm({...expenseForm, category: e.target.value})}><option value="RENOVATION">装修工程 (Renovation)</option><option value="EQUIPMENT">设备采购 (Equipment)</option><option value="RENT">租金 (Rent)</option><option value="UTILITIES">水电 (Utilities)</option><option value="SALARY">薪资 (Salary)</option><option value="SUPPLIES">杂项 (Supplies)</option><option value="LICENSE">执照 (License)</option><option value="BANK_FEE">银行抽佣/手续费 (Bank Fees)</option><option value="OTHER">其他 (Other)</option></select></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Description / Item</label><input className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.company} onChange={e => setExpenseForm({...expenseForm, company: e.target.value})} placeholder="e.g. Public Bank MDR" /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Amount (RM)</label><input type="number" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: parseFloat(e.target.value)})} /></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Payment Source</label><div className="flex gap-2"><button onClick={() => setExpenseForm({...expenseForm, paymentMethod: 'BANK_TRANSFER'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${expenseForm.paymentMethod === 'BANK_TRANSFER' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-200 text-gray-500'}`}>BANK</button><button onClick={() => setExpenseForm({...expenseForm, paymentMethod: 'CASH'})} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${expenseForm.paymentMethod === 'CASH' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-gray-200 text-gray-500'}`}>CASH</button></div></div><div><label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Date (Backdate Allowed)</label><input type="date" className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none" value={expenseForm.time?.split('T')[0]} onChange={e => setExpenseForm({...expenseForm, time: e.target.value})} /></div><button onClick={handleSaveExpense} className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-bold mt-2 shadow-lg">确认支出 (Confirm)</button><button onClick={() => setIsExpenseModalOpen(false)} className="w-full py-3 bg-gray-100 text-gray-500 rounded-xl font-bold">Cancel</button></div></div></div>)}
 
                 {isDividendModalOpen && (
                     <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
@@ -687,7 +818,6 @@ export const TreasuryModule: React.FC<TreasuryModuleProps> = ({ onClose }) => {
                         {printingRecord && (() => {
                             const cleanNote = printingRecord.note?.replace('[代收] ', '') || '';
                             const dashIndex = cleanNote.indexOf(' - ');
-                            // FIX: 更安全的 note 解析，有 fallback
                             const sourceName = dashIndex > -1 ? cleanNote.substring(0, dashIndex) : cleanNote || 'N/A';
                             const description = dashIndex > -1 ? cleanNote.substring(dashIndex + 3) : 'Payment';
                             return (<div className="space-y-6"><div className="bg-gray-50 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Received From (收到):</p><h2 className="text-xl font-bold">{sourceName}</h2></div><div className="bg-gray-50 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Payment For (款项用途):</p><h2 className="text-lg font-bold">{description}</h2></div><div className="flex justify-between items-center bg-black text-white p-6 rounded-xl"><p className="text-sm font-bold uppercase tracking-widest">Amount Received</p><p className="text-3xl font-mono font-black">RM {printingRecord.amount.toFixed(2)}</p></div><div className="flex justify-between text-xs font-bold text-gray-500 mt-4 px-2"><span>Payment Mode: {printingRecord.toAccount}</span><span>Status: PAID</span></div></div>);

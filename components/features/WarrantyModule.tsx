@@ -73,7 +73,7 @@ export const WarrantyModule: React.FC<WarrantyModuleProps> = ({ onClose }) => {
             <div className="bg-[#F5F7FA] w-full h-full md:max-w-5xl md:h-[95vh] md:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
                 
                 {/* Header */}
-                <div className="bg-[#1A1A1A] p-4 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
+                <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
                     <div className="flex items-center gap-4">
                         <div className="bg-[#FFD700] text-black p-2.5 rounded-xl shadow-lg"><ShieldCheck size={24}/></div>
                         <div>

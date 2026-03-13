@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Calendar, ArrowRight, PieChart, TrendingUp, Download, Loader2, ListChecks, Info, Users, HelpCircle, Receipt, UserMinus, Briefcase, Calculator, Wallet, Banknote, CreditCard, Truck, ShoppingBag, BarChart3, ChevronRight, AlertCircle, Percent, LayoutList } from 'lucide-react';
+import { X, Calendar, ArrowRight, PieChart, TrendingUp, Download, Loader2, ListChecks, Info, Users, HelpCircle, Receipt, UserMinus, Briefcase, Calculator, Wallet, Banknote, CreditCard, Truck, ShoppingBag, BarChart3, ChevronRight, AlertCircle, Percent, LayoutList, ChevronLeft, Table2, ExternalLink } from 'lucide-react';
 import { SettlementRecord, ExpenseItem, BillPaymentRecord, FundTransfer, TreasuryConfig, PayrollRecord } from '../../types';
 import { DataManager } from '../../utils/dataManager';
 import { jsPDF } from "jspdf";
@@ -30,7 +30,8 @@ interface DetailedExpenseItem {
     desc: string;
     amount: number;
     source: string; 
-    type: string; 
+    type: string;
+    documentLink?: string;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -51,7 +52,7 @@ const CATEGORY_LABELS: Record<string, string> = {
     'WASTE': '垃圾处理 (Waste)', 'MARKETING': '营销 (Marketing)', 'PROFESSIONAL': '专业服务 (Professional)',
     'ACCOUNTING': '会计服务 (Accounting)', 'INSURANCE': '保险 (Insurance)', 'LICENSE': '执照 (License)',
     'LOGISTICS': '物流 (Logistics)', 'TRANSPORT': '交通/油费 (Transport)', 'PRINTING': '印刷品 (Printing)',
-    'MISC_OPEX': '其他杂费 (Misc)', 'MBB_COMM': '银行手续费 (Maybank)', 'DIVIDEND': '股东分红 (Dividend)',
+    'MISC_OPEX': '其他杂费 (Misc)', 'MBB_COMM': '银行手续费 (Maybank)', 'BANK_FEE': '银行/平台手续费 (Bank Fees)', 'DIVIDEND': '股东分红 (Dividend)',
     'DEPOSIT': '押金 (Deposit)'
 };
 
@@ -102,7 +103,17 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
     const [retentionRate, setRetentionRate] = useState(20); 
     const [detailView, setDetailView] = useState<{ title: string, type: string, items: DetailedExpenseItem[] } | null>(null);
 
-    // 核心改造点 1：限定日期查询，防止无意义的全量拉取导致的性能和计费灾难
+    const handleMonthChange = (delta: number) => {
+        const currentStart = new Date(startDate);
+        currentStart.setMonth(currentStart.getMonth() + delta);
+        const y = currentStart.getFullYear();
+        const m = String(currentStart.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(y, currentStart.getMonth() + 1, 0).getDate();
+        
+        setStartDate(`${y}-${m}-01`);
+        setEndDate(`${y}-${m}-${String(lastDay).padStart(2, '0')}`);
+    };
+
     useEffect(() => {
         const loadData = async () => {
             setLoading(true);
@@ -117,7 +128,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 const settlementsRef = collection(db, 'settlements'); 
                 const expensesRef = collection(db, 'standalone_expenses');
 
-                // 只拉取当前选定日期范围内的数据
                 const [setSnap, expSnap] = await Promise.all([
                     getDocs(query(settlementsRef, where("date", ">=", startDate), where("date", "<=", endDate))),
                     getDocs(query(expensesRef, where("time", ">=", startDate), where("time", "<=", endDate)))
@@ -138,7 +148,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             }
         };
         loadData();
-    }, [startDate, endDate]); // 依赖项包含起止日期
+    }, [startDate, endDate]); 
 
     const setQuickDate = (type: 'TODAY' | 'YESTERDAY' | 'WEEK' | 'MONTH' | 'LAST_MONTH') => {
         const now = new Date();
@@ -173,7 +183,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         setEndDate(formatLocal(end));
     };
 
-    // 核心改造点 2：以 settlement 集合为主，不再重复用 Math.max(POS, 实际) 平衡数据
     const analytics = useMemo(() => {
         const isInRange = (dateStr: string) => {
             if (!dateStr) return false;
@@ -182,7 +191,16 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         };
 
         const revenueDetails = {
-            cash: 0, tng: 0, debitCard: 0, creditCard: 0, amex: 0, delivery: 0, totalRevenue: 0, variance: 0 
+            cash: 0, tng: 0, debitCard: 0, creditCard: 0, amex: 0, delivery: 0, totalRevenue: 0, variance: 0, refunds: 0 
+        };
+        
+        const deliveryBreakdown = { grab: 0, panda: 0, shopee: 0, lalamove: 0 };
+
+        // 🟢 新增：追踪每个外卖平台的 Gross / Net（核销后实收）
+        const deliveryRecon: Record<string, { gross: number, net: number, reconDays: number, totalDays: number }> = {
+            grab: { gross: 0, net: 0, reconDays: 0, totalDays: 0 },
+            panda: { gross: 0, net: 0, reconDays: 0, totalDays: 0 },
+            shopee: { gross: 0, net: 0, reconDays: 0, totalDays: 0 },
         };
 
         let totalCOGS = 0, totalLabor = 0, totalOPEX = 0, totalDeposits = 0, totalCapex = 0;
@@ -220,7 +238,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const dailySalesMap: Record<string, number> = {};
         const dailyExpenseMap: Record<string, number> = {};
 
-        // 统一从快照获取
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
             const cashAmt = Number(s.sales?.cash || 0);
             const tngAmt = Number(s.sales?.tng || 0);
@@ -229,14 +246,67 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             const amexAmt = Number(s.sales?.amex || 0);
             const varianceAmt = Number(s.variance || 0);
 
-            const deliveryAmt = s.sales?.deliveryBreakdown 
-                ? (Number(s.sales.deliveryBreakdown.grab || 0) + Number(s.sales.deliveryBreakdown.panda || 0) + Number(s.sales.deliveryBreakdown.shopee || 0) + Number(s.sales.deliveryBreakdown.lalamove || 0))
-                : 0;
+            let deliveryAmt = 0;
+            if (s.sales?.deliveryBreakdown) {
+                const bdown = s.sales.deliveryBreakdown as any;
+                const g = (Number(bdown.grabGross) || Number(bdown.grab) || 0);
+                const p = (Number(bdown.pandaGross) || Number(bdown.panda) || 0);
+                const sh = (Number(bdown.shopeeGross) || Number(bdown.shopee) || 0);
+                const l = (Number(bdown.lalamove) || 0);
+                
+                deliveryBreakdown.grab += g;
+                deliveryBreakdown.panda += p;
+                deliveryBreakdown.shopee += sh;
+                deliveryBreakdown.lalamove += l;
+                deliveryAmt += (g + p + sh + l);
 
-            // 严格采用确认后的实收款作为营业额基础
-            const storeSales = cashAmt + tngAmt + duitnowAmt + cardAmt + amexAmt;
+                // 🟢 追踪核销后的实收 Net
+                const rs = (s as any).reconStatus || {};
+                
+                // Grab
+                if (g > 0) {
+                    deliveryRecon.grab.gross += g;
+                    deliveryRecon.grab.totalDays += 1;
+                    if (typeof rs.grab === 'number') {
+                        deliveryRecon.grab.net += rs.grab;
+                        deliveryRecon.grab.reconDays += 1;
+                    } else if (rs.grab === true) {
+                        // 旧记录完美对账，Net = Gross
+                        deliveryRecon.grab.net += g;
+                        deliveryRecon.grab.reconDays += 1;
+                    }
+                }
+                // FoodPanda
+                if (p > 0) {
+                    deliveryRecon.panda.gross += p;
+                    deliveryRecon.panda.totalDays += 1;
+                    if (typeof rs.panda === 'number') {
+                        deliveryRecon.panda.net += rs.panda;
+                        deliveryRecon.panda.reconDays += 1;
+                    } else if (rs.panda === true) {
+                        deliveryRecon.panda.net += p;
+                        deliveryRecon.panda.reconDays += 1;
+                    }
+                }
+                // ShopeeFood
+                if (sh > 0) {
+                    deliveryRecon.shopee.gross += sh;
+                    deliveryRecon.shopee.totalDays += 1;
+                    if (typeof rs.shopee === 'number') {
+                        deliveryRecon.shopee.net += rs.shopee;
+                        deliveryRecon.shopee.reconDays += 1;
+                    } else if (rs.shopee === true) {
+                        deliveryRecon.shopee.net += sh;
+                        deliveryRecon.shopee.reconDays += 1;
+                    }
+                }
+            }
+
+            const posSales = cashAmt + tngAmt + duitnowAmt + cardAmt + amexAmt;
+            const refundAmt = Number(s.sales?.refundTotal || 0);
             
-            revenueDetails.totalRevenue += storeSales + deliveryAmt;
+            const netStoreSales = posSales - refundAmt;
+            revenueDetails.totalRevenue += netStoreSales + deliveryAmt;
             revenueDetails.cash += cashAmt;
             revenueDetails.tng += tngAmt; 
             revenueDetails.debitCard += duitnowAmt;
@@ -244,9 +314,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             revenueDetails.amex += amexAmt;
             revenueDetails.delivery += deliveryAmt;
             revenueDetails.variance += varianceAmt;
+            revenueDetails.refunds += refundAmt;
 
             const dStr = s.date.split('T')[0];
-            dailySalesMap[dStr] = (dailySalesMap[dStr] || 0) + storeSales + deliveryAmt;
+            dailySalesMap[dStr] = (dailySalesMap[dStr] || 0) + netStoreSales + deliveryAmt;
             
             let dayExp = 0;
             s.expenses?.forEach(e => {
@@ -259,6 +330,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
         standaloneExpenses.forEach(e => {
             if (e.id.startsWith('payroll_') || e.category === 'PAYROLL') return;
+            if (e.id.startsWith('salary_')) return; 
             if (e.settlementId) return; 
 
             if (accountingMode === 'ACCRUAL') {
@@ -291,15 +363,40 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
              }
         });
 
-        const debitFee = revenueDetails.debitCard * 0.0045;
-        const creditFee = revenueDetails.creditCard * 0.01;
-        const totalCommission = debitFee + creditFee;
-        
-        if (totalCommission > 0 && !groups['MBB_COMM']) {
-            addCost(totalCommission, 'MBB_COMM');
-        }
+        // 🟢 新增：Payroll 汇总 — 当月总和 vs 已出资
+        const payrollSummary = {
+            monthlyTotal: 0,    // 当月薪资总额 (Net + Statutory)
+            paidAmount: 0,      // 已实际出资金额
+            unpaidAmount: 0,    // 未出资（Draft Statutory 等）
+            staffCount: 0,
+            months: [] as string[]
+        };
 
-        const totalPaymentMethodVolume = revenueDetails.cash + revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard + revenueDetails.amex; 
+        payrollRecords.forEach(p => {
+            const effectiveDate = `${p.month}-28`;
+            if (effectiveDate >= startDate && effectiveDate <= endDate && p.status === 'POSTED') {
+                const netPay = Number(p.totalNetPay || 0);
+                const govtPay = Number(p.totalGovtPay || 0);
+                payrollSummary.monthlyTotal += (netPay + govtPay);
+                payrollSummary.staffCount = Math.max(payrollSummary.staffCount, Number(p.staffCount || 0));
+                if (!payrollSummary.months.includes(p.month)) payrollSummary.months.push(p.month);
+
+                // Net pay is always paid when POSTED
+                payrollSummary.paidAmount += netPay;
+                // Statutory only if isStatutoryPaid
+                if (p.isStatutoryPaid) {
+                    payrollSummary.paidAmount += govtPay;
+                } else {
+                    payrollSummary.unpaidAmount += govtPay;
+                }
+            }
+        });
+
+        const debitFee = 0;
+        const creditFee = 0;
+        const totalCommission = 0;
+
+        const totalPaymentMethodVolume = revenueDetails.cash + revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard + revenueDetails.amex;
         const cashPercentage = totalPaymentMethodVolume > 0 ? (revenueDetails.cash / totalPaymentMethodVolume) * 100 : 0;
         const ewalletPercentage = totalPaymentMethodVolume > 0 ? ((revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard + revenueDetails.amex) / totalPaymentMethodVolume) * 100 : 0;
 
@@ -322,7 +419,8 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const avgDailySales = settlementCount > 0 ? revenueDetails.totalRevenue / settlementCount : 0;
 
         return {
-            revenueDetails, percentages: { cash: cashPercentage, ewallet: ewalletPercentage },
+            revenueDetails, deliveryBreakdown, deliveryRecon, payrollSummary,
+            percentages: { cash: cashPercentage, ewallet: ewalletPercentage },
             grossProfit, netProfit, adjustedNetProfit, netCashFlow, netMargin,
             costs: { totalCOGS, totalLabor, totalOPEX, totalExpenses, totalDeposits, totalCapex },
             margins: { cogs: cogsMargin, labor: laborMargin, opex: opexMargin },
@@ -358,30 +456,33 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
 
         settlementRecords.filter(s => isInRange(s.date)).forEach(s => {
             s.expenses?.forEach((e, idx) => {
-                addItem({ id: `${s.id}_${idx}`, date: s.date.split('T')[0], category: e.category, desc: `${e.company || 'Petty Cash'} (from Daily Settlement)`, amount: Number(e.amount || 0), source: 'Settlement', type: '' });
+                addItem({ id: `${s.id}_${idx}`, date: s.date.split('T')[0], category: e.category, desc: `${e.company || 'Petty Cash'} (from Daily Settlement)`, amount: Number(e.amount || 0), source: 'Settlement', type: '', documentLink: (e as any).documentLink || (e as any).receiptUrl || '' });
             });
         });
 
         standaloneExpenses.forEach(e => {
             if (e.id.startsWith('payroll_') || e.category === 'PAYROLL') return;
+            if (e.id.startsWith('salary_')) return;
             if (e.settlementId) return;
+
+            const docLink = (e as any).documentLink || (e as any).receiptUrl || (e as any).link || (e as any).fileUrl || '';
 
             if (accountingMode === 'ACCRUAL') {
                 if (!isInRange(e.time)) return;
                 const fullCost = Number(e.totalBillAmount || e.amount || 0) - Number(e.creditNote || 0);
                 const statusTag = e.paymentStatus === 'PAID' ? '' : e.paymentStatus === 'PARTIAL' ? ' [部分付款]' : ' [未付款]';
-                addItem({ id: e.id, date: e.time.split('T')[0], category: e.category, desc: e.company + (e.note ? ` - ${e.note}` : '') + statusTag, amount: fullCost, source: 'AP/Voucher', type: '' });
+                addItem({ id: e.id, date: e.time.split('T')[0], category: e.category, desc: e.company + (e.note ? ` - ${e.note}` : '') + statusTag, amount: fullCost, source: 'AP/Voucher', type: '', documentLink: docLink });
             } else {
                 if (e.paymentStatus !== 'PAID' && e.paymentStatus !== 'PARTIAL') return;
                 const effectiveDate = e.paymentDate || e.time;
                 if (!isInRange(effectiveDate)) return;
                 const paidAmt = Number(e.amount || 0) - Number(e.creditNote || 0);
-                addItem({ id: e.id, date: (effectiveDate).split('T')[0], category: e.category, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: paidAmt, source: 'AP/Voucher', type: '' });
+                addItem({ id: e.id, date: (effectiveDate).split('T')[0], category: e.category, desc: e.company + (e.note ? ` - ${e.note}` : ''), amount: paidAmt, source: 'AP/Voucher', type: '', documentLink: docLink });
             }
         });
 
         billPayments.filter(b => isInRange(b.date)).forEach(b => {
-            addItem({ id: b.id, date: b.date, category: b.category, desc: b.name, amount: Number(b.amount || 0), source: 'Bill Payment', type: '' });
+            addItem({ id: b.id, date: b.date, category: b.category, desc: b.name, amount: Number(b.amount || 0), source: 'Bill Payment', type: '', documentLink: (b as any).documentLink || (b as any).receiptUrl || '' });
         });
 
         payrollRecords.forEach(p => {
@@ -399,13 +500,9 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
              }
         });
 
-        if (criteria.categoryId === 'MBB_COMM' && rawItems.length === 0) {
-            rawItems.push({ id: 'MBB_FEE_CALC', date: endDate, category: 'MBB_COMM', desc: `Maybank Transaction Fees (Auto-Calculated)`, amount: analytics.fees.totalCommission, source: 'System Auto-Calc', type: 'OPEX' });
-        }
-
         return rawItems.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     };
-
+    
     const handleDrillDown = (criteria: { type?: string, categoryId?: string }, title: string) => {
         const items = getDrillDownData(criteria);
         setDetailView({ title: title, type: criteria.type || 'OPEX', items: items || [] });
@@ -420,12 +517,17 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             if (s.date >= configStart) {
                 const actualCash = Number(s.sales?.cash || 0) + Number(s.variance || 0);
                 if (actualCash !== 0) {
-                    allTransactions.push({ id: `cash_${s.id}`, date: s.date.split('T')[0], time: s.timestamp || `${s.date.split('T')[0]}T12:00:00`, type: 'IN', category: 'SALES', description: 'Cash Sales (Net)', amount: actualCash, account: 'CASH' });
+                    allTransactions.push({ id: `cash_${s.id}`, date: s.date.split('T')[0], time: s.timestamp || `${s.date.split('T')[0]}T12:00:00`, type: actualCash > 0 ? 'IN' : 'OUT', category: 'SALES', description: 'Cash Sales (Net)', amount: Math.abs(actualCash), account: 'CASH' });
                 }
 
-                const bankIncome = Number(s.sales?.tng || 0) + Number(s.sales?.duitnow || 0) + Number(s.sales?.card || 0);
-                const delivery = s.sales?.deliveryBreakdown? (Number(s.sales.deliveryBreakdown.grab || 0) + Number(s.sales.deliveryBreakdown.panda || 0) + Number(s.sales.deliveryBreakdown.shopee || 0) + Number(s.sales.deliveryBreakdown.lalamove || 0))     
-                : 0;
+                const bankIncome = Number(s.sales?.tng || 0) + Number(s.sales?.duitnow || 0) + Number(s.sales?.card || 0) + Number(s.sales?.amex || 0);
+                const bdown2 = s.sales?.deliveryBreakdown as any;
+                const delivery = bdown2 ? 
+                    ((Number(bdown2.grabGross) || Number(bdown2.grab) || 0) + 
+                     (Number(bdown2.pandaGross) || Number(bdown2.panda) || 0) + 
+                     (Number(bdown2.shopeeGross) || Number(bdown2.shopee) || 0) + 
+                     (Number(bdown2.lalamove) || 0))
+                    : 0;
                 
                 if (bankIncome + delivery > 0) {
                     allTransactions.push({ id: `bank_${s.id}`, date: s.date.split('T')[0], time: s.timestamp || `${s.date.split('T')[0]}T12:00:00`, type: 'IN', category: 'SALES', description: 'Digital/Delivery Sales', amount: bankIncome + delivery, account: 'BANK' });
@@ -469,66 +571,166 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         allTransactions.sort((a, b) => new Date(a.time || a.date).getTime() - new Date(b.time || b.date).getTime());
         
         const displayItems: AuditLogItem[] = [];
-        let balanceAtStartOfRange = runningBalance; 
+        let periodNetFlow = 0; 
 
         allTransactions.forEach(t => {
-            if (t.type === 'IN') runningBalance += t.amount; 
-            else if (t.type === 'OUT') runningBalance -= t.amount;
-            
-            if (t.date < startDate) balanceAtStartOfRange = runningBalance;
-            else if (t.date <= endDate) displayItems.push({ ...t, balance: runningBalance });
+            if (t.date >= startDate && t.date <= endDate) {
+                if (t.type === 'IN') periodNetFlow += t.amount; 
+                else if (t.type === 'OUT') periodNetFlow -= t.amount;
+                
+                displayItems.push({ ...t, balance: periodNetFlow }); 
+            }
         });
 
-        return { auditTrail: displayItems.reverse(), openingBalance: balanceAtStartOfRange };
+        return { auditTrail: displayItems.reverse(), openingBalance: 0 };
     }, [settlementRecords, standaloneExpenses, billPayments, transfers, treasuryConfig, startDate, endDate]);
 
     const formatMoney = (amount: number) => `RM ${Number(amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 
-    const handleExport = async () => {
+    const handleExportCSV = () => {
+        const rev = analytics.revenueDetails;
+        const cost = analytics.costs;
+        const bdown = analytics.deliveryBreakdown;
+
+        const rows = [
+            ['KIM LIAN KEE - 财务核算报表 (Financial Report)'],
+            ['期间 (Period)', `${startDate} to ${endDate}`],
+            ['核算模式 (Mode)', accountingMode === 'ACCRUAL' ? '权责发生制 (Accrual)' : '收付实现制 (Cash Basis)'],
+            [],
+            ['【 1. 营收明细 REVENUE 】', '金额 (RM)'],
+            ['总营业额 (Total Revenue)', rev.totalRevenue.toFixed(2)],
+            ['堂食现金 (Cash Sales)', rev.cash.toFixed(2)],
+            ['电子/刷卡 (Digital/Card)', (rev.tng + rev.debitCard + rev.creditCard + rev.amex).toFixed(2)],
+            [' - TNG eWallet', rev.tng.toFixed(2)],
+            [' - Debit Card', rev.debitCard.toFixed(2)],
+            [' - Credit Card', rev.creditCard.toFixed(2)],
+            [' - Amex', rev.amex.toFixed(2)],
+            ['总外卖流水 (Total Delivery)', rev.delivery.toFixed(2)],
+            [' - GrabFood', bdown.grab.toFixed(2)],
+            [' - FoodPanda', bdown.panda.toFixed(2)],
+            [' - ShopeeFood', bdown.shopee.toFixed(2)],
+            [' - Lalamove', bdown.lalamove.toFixed(2)],
+            ['退款金额 (Refunds)', rev.refunds.toFixed(2)],
+            ['现金盘点差异 (Variance)', rev.variance.toFixed(2)],
+            [],
+            ['【 2. 支出明细 EXPENSES 】', '金额 (RM)', '占营收比例 (%)'],
+            ['销货成本 (Total COGS)', cost.totalCOGS.toFixed(2), analytics.margins.cogs.toFixed(2) + '%'],
+            ['人工成本 (Total Labor)', cost.totalLabor.toFixed(2), analytics.margins.labor.toFixed(2) + '%'],
+            ['运营杂费 (Total OPEX)', cost.totalOPEX.toFixed(2), analytics.margins.opex.toFixed(2) + '%'],
+            ['资本支出 (CAPEX - 资产)', cost.totalCapex.toFixed(2), '-'],
+            ['押金流出 (Deposits - 资产)', cost.totalDeposits.toFixed(2), '-'],
+            [],
+            ['【 3. 核心利润指标 KPI 】', '金额 (RM)', '利润率 (%)'],
+            ['毛利润 (Gross Profit)', analytics.grossProfit.toFixed(2), (rev.totalRevenue ? (analytics.grossProfit / rev.totalRevenue * 100) : 0).toFixed(2) + '%'],
+            ['经营净利 (Net Profit)', analytics.netProfit.toFixed(2), analytics.netMargin.toFixed(2) + '%'],
+            ['含差异实际净利 (Adj. Net Profit)', analytics.adjustedNetProfit.toFixed(2), '-'],
+            ['真实可用现金流 (Net Cash Flow)', analytics.netCashFlow.toFixed(2), '-'],
+        ];
+
+        const csvContent = rows.map(e => e.map(item => `"${String(item).replace(/"/g, '""')}"`).join(",")).join("\n");
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", `Financial_Report_${startDate}_${endDate}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const handleExportPDF = async () => {
         if (!printRef.current) return;
         setIsExporting(true);
         try {
-            await new Promise(r => setTimeout(r, 500));
-            const canvas = await html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            await new Promise(r => setTimeout(r, 800));
+            const canvas = await html2canvas(printRef.current, { 
+                scale: 2, 
+                useCORS: true, 
+                backgroundColor: '#ffffff',
+                windowWidth: 1000
+            });
             const imgData = canvas.toDataURL('image/jpeg', 1.0);
+            
             const pdf = new jsPDF('p', 'mm', 'a4');
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-            pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-            pdf.save(`Financial_Report_${startDate}_${endDate}.pdf`);
-        } catch (e) { alert("Export failed"); } finally { setIsExporting(false); }
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            
+            let heightLeft = pdfHeight;
+            let position = 0;
+
+            pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+            heightLeft -= pageHeight;
+
+            while (heightLeft > 0) {
+                position = heightLeft - pdfHeight; 
+                pdf.addPage();
+                pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+                heightLeft -= pageHeight;
+            }
+
+            pdf.save(`Financial_Report_${startDate}_to_${endDate}.pdf`);
+        } catch (e) { 
+            console.error(e);
+            alert("Export failed"); 
+        } finally { 
+            setIsExporting(false); 
+        }
+    };
+
+    // 🟢 外卖平台颜色配置
+    const PLATFORM_COLORS: Record<string, { bg: string, text: string, border: string, label: string }> = {
+        grab: { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200', label: 'GrabFood' },
+        panda: { bg: 'bg-pink-50', text: 'text-pink-700', border: 'border-pink-200', label: 'FoodPanda' },
+        shopee: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', label: 'ShopeeFood' },
     };
 
     return (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-0 md:p-4 backdrop-blur-sm animate-in zoom-in duration-200">
             <div className="bg-[#F5F7FA] w-full h-full md:w-[95vw] md:h-[92vh] lg:max-w-7xl md:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
                 
-                <div className="bg-[#1A1A1A] p-4 md:p-5 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
-                    <div className="flex items-center gap-4">
-                        <div className="bg-[#FFD700] text-black p-2.5 rounded-xl shadow-lg"><PieChart size={24}/></div>
-                        <div>
-                            <h3 className="font-serif font-black text-xl tracking-wide">财务审计报表</h3>
-                            <p className="text-[10px] text-gray-400 font-mono uppercase tracking-widest mt-0.5">FINANCIAL INTELLIGENCE</p>
+                <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] md:px-5 md:pb-5 md:pt-[max(env(safe-area-inset-top),1.25rem)] flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
+                    <div className="flex items-center gap-3 md:gap-4 min-w-0">
+                        <div className="bg-[#FFD700] text-black p-2 md:p-2.5 rounded-xl shadow-lg shrink-0"><PieChart size={20} className="md:w-6 md:h-6"/></div>
+                        <div className="min-w-0">
+                            <h3 className="font-serif font-black text-base md:text-xl tracking-wide truncate">财务审计报表</h3>
+                            <p className="text-[9px] md:text-[10px] text-gray-400 font-mono uppercase tracking-widest mt-0.5">FINANCIAL INTELLIGENCE</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={handleExport} disabled={isExporting} className="bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95">
-                            {isExporting ? <Loader2 size={16} className="animate-spin"/> : <Download size={16}/>} 导出 PDF
+                    <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+                        <button onClick={handleExportCSV} className="bg-[#1A1A1A] hover:bg-black text-[#FFD700] px-3 md:px-4 py-2 rounded-xl text-[10px] md:text-xs font-black items-center gap-2 shadow-lg transition-all active:scale-95 border border-[#FFD700]/30 hidden sm:flex">
+                            <Table2 size={16}/> 导出 Excel (CSV)
                         </button>
-                        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors active:scale-95"><X size={24}/></button>
+                        <button onClick={handleExportPDF} disabled={isExporting} className="bg-white/10 hover:bg-white/20 text-white px-2.5 md:px-3 py-2 rounded-xl text-[10px] md:text-xs font-bold flex items-center gap-1.5 md:gap-2 transition-all active:scale-95">
+                            {isExporting ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>} <span className="hidden sm:inline">导出</span> PDF
+                        </button>
+                        <button onClick={onClose} className="w-11 h-11 flex items-center justify-center hover:bg-white/10 rounded-full transition-colors active:scale-95 -mr-1"><X size={24}/></button>
                     </div>
                 </div>
 
-                <div className="bg-white border-b border-gray-200 p-3 md:p-4 flex flex-col gap-3 md:gap-4 shrink-0 shadow-sm z-10 touch-manipulation">
-                    <div className="flex flex-col md:flex-row justify-between items-center gap-2 md:gap-3 w-full">
-                        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-1.5 px-3 w-full md:w-auto justify-center shrink-0">
-                            <Calendar size={14} className="text-gray-400 shrink-0"/>
-                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-xs md:text-sm font-bold outline-none w-28 md:w-32 cursor-pointer text-center"/>
-                            <ArrowRight size={14} className="text-gray-300 shrink-0"/>
-                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-xs md:text-sm font-bold outline-none w-28 md:w-32 cursor-pointer text-center"/>
+                <div className="bg-white border-b border-gray-200 p-3 md:p-4 flex flex-col md:flex-row gap-3 md:gap-4 shrink-0 shadow-sm z-10 touch-manipulation items-center justify-between">
+                    
+                    <div className="flex items-center bg-[#1A1A1A] rounded-xl p-1 shadow-inner border border-gray-800 w-full md:w-auto justify-between md:justify-start">
+                        <button onClick={() => handleMonthChange(-1)} className="p-2 text-gray-400 hover:text-[#FFD700] hover:bg-white/10 rounded-lg transition-colors active:scale-95"><ChevronLeft size={18} /></button>
+                        <div className="flex flex-col items-center px-4 md:px-6">
+                            <div className="flex items-center gap-2 text-[#FFD700]">
+                                <Calendar size={14} />
+                                <span className="font-black text-sm tracking-wider uppercase">{new Date(startDate).toLocaleString('en-US', { month: 'short', year: 'numeric' })}</span>
+                            </div>
+                            <span className="text-[9px] text-gray-500 font-mono mt-0.5">{startDate} ~ {endDate}</span>
                         </div>
-                        
-                        <div className="flex gap-1.5 md:gap-2 bg-gray-100 p-1 rounded-xl overflow-x-auto w-full md:w-auto scrollbar-hide shrink-0 border border-gray-200/50">
+                        <button onClick={() => handleMonthChange(1)} className="p-2 text-gray-400 hover:text-[#FFD700] hover:bg-white/10 rounded-lg transition-colors active:scale-95"><ChevronRight size={18} /></button>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row items-center gap-2 md:gap-4 w-full md:w-auto">
+                        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-1.5 px-3 shrink-0 w-full md:w-auto justify-center">
+                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-xs font-bold outline-none cursor-pointer text-center text-gray-600"/>
+                            <ArrowRight size={12} className="text-gray-300"/>
+                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-xs font-bold outline-none cursor-pointer text-center text-gray-600"/>
+                        </div>
+
+                        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl overflow-x-auto w-full md:w-auto scrollbar-hide border border-gray-200/50">
                             {[
                                 { key: 'YESTERDAY', label: '昨日' },
                                 { key: 'TODAY', label: '今日' },
@@ -536,17 +738,13 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 { key: 'MONTH', label: '本月' },
                                 { key: 'LAST_MONTH', label: '上月' }
                             ].map(t => (
-                                <button 
-                                    key={t.key} 
-                                    onClick={() => setQuickDate(t.key as any)} 
-                                    className="flex-1 md:flex-none px-3 md:px-4 py-1.5 bg-white shadow-sm rounded-lg text-[10px] md:text-xs font-bold text-gray-600 hover:text-[#1A1A1A] hover:bg-gray-50 transition-colors whitespace-nowrap active:scale-95"
-                                >
-                                    {t.label}
-                                </button>
+                                <button key={t.key} onClick={() => setQuickDate(t.key as any)} className="flex-1 md:flex-none px-3 py-1.5 bg-white shadow-sm rounded-lg text-[10px] font-bold text-gray-600 hover:text-[#1A1A1A] hover:bg-gray-50 transition-colors whitespace-nowrap active:scale-95">{t.label}</button>
                             ))}
                         </div>
                     </div>
+                </div>
 
+                <div className="bg-white border-b border-gray-200 px-3 md:px-4 py-2 shrink-0">
                     <div className="flex bg-[#E2E8F0]/60 p-1 md:p-1.5 rounded-2xl w-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.06)] border border-gray-200">
                         {[
                             { id: 'OVERVIEW', label: '损益', en: 'P&L', icon: LayoutList },
@@ -567,9 +765,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             : 'text-gray-500 hover:text-[#1A1A1A] hover:bg-white/80'
                                     }`}
                                 >
-                                    {isActive && (
-                                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#FFD700]/20 to-transparent opacity-50 translate-x-[-100%] animate-[pulse_2s_infinite]"></div>
-                                    )}
+                                    {isActive && (<div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#FFD700]/20 to-transparent opacity-50 translate-x-[-100%] animate-[pulse_2s_infinite]"></div>)}
                                     <Icon className={`relative z-10 transition-transform duration-300 w-4 h-4 md:w-[18px] md:h-[18px] shrink-0 ${isActive ? 'text-[#FFD700] scale-110' : 'text-gray-400 group-hover:text-gray-600'}`}/> 
                                     <div className="relative z-10 flex flex-col lg:flex-row items-center lg:gap-1 leading-none mt-0.5 md:mt-0">
                                         <span className="text-[10px] md:text-sm font-black tracking-wide">{tab.label}</span>
@@ -581,28 +777,16 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                     </div>
                     
                     {(activeTab === 'OVERVIEW' || activeTab === 'COST' || activeTab === 'DIVIDEND') && (
-                        <div className="flex items-center justify-between bg-gray-50/80 border-t border-gray-100 px-2 md:px-4 pt-3 pb-1 -mx-2 md:mx-0">
+                        <div className="flex items-center justify-between bg-gray-50/80 border-t border-gray-100 px-2 md:px-4 pt-3 pb-1 mt-2 -mx-3 md:mx-0">
                             <div className="flex items-center gap-1.5 md:gap-2">
                                 <HelpCircle size={13} className="text-gray-400 shrink-0"/>
                                 <span className="text-[9px] md:text-[10px] text-gray-500 font-bold leading-tight">
-                                    {accountingMode === 'ACCRUAL' 
-                                        ? '权责发生制 (含未付账单)' 
-                                        : '收付实现制 (仅计已付)'}
+                                    {accountingMode === 'ACCRUAL' ? '权责发生制 (含未付账单)' : '收付实现制 (仅计已付)'}
                                 </span>
                             </div>
                             <div className="flex bg-white border border-gray-200 rounded-lg p-0.5 shrink-0 ml-2">
-                                <button 
-                                    onClick={() => setAccountingMode('ACCRUAL')}
-                                    className={`px-2 md:px-3 py-1 md:py-1.5 rounded-md text-[9px] md:text-[10px] font-black transition-all whitespace-nowrap ${accountingMode === 'ACCRUAL' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-                                >
-                                    权责发生
-                                </button>
-                                <button 
-                                    onClick={() => setAccountingMode('CASH')}
-                                    className={`px-2 md:px-3 py-1 md:py-1.5 rounded-md text-[9px] md:text-[10px] font-black transition-all whitespace-nowrap ${accountingMode === 'CASH' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-                                >
-                                    收付实现
-                                </button>
+                                <button onClick={() => setAccountingMode('ACCRUAL')} className={`px-2 md:px-3 py-1 md:py-1.5 rounded-md text-[9px] md:text-[10px] font-black transition-all whitespace-nowrap ${accountingMode === 'ACCRUAL' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>权责发生</button>
+                                <button onClick={() => setAccountingMode('CASH')} className={`px-2 md:px-3 py-1 md:py-1.5 rounded-md text-[9px] md:text-[10px] font-black transition-all whitespace-nowrap ${accountingMode === 'CASH' ? 'bg-[#1A1A1A] text-[#FFD700] shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>收付实现</button>
                             </div>
                         </div>
                     )}
@@ -672,9 +856,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                     {analytics.revenueDetails.variance !== 0 && (
                                                         <div className="flex justify-between text-[9px] text-white/60 font-mono">
                                                             <span>现金盘点差异:</span>
-                                                            <span className={analytics.revenueDetails.variance > 0 ? 'text-green-400' : 'text-red-400'}>
-                                                                {analytics.revenueDetails.variance > 0 ? '+' : ''}{formatMoney(analytics.revenueDetails.variance)}
-                                                            </span>
+                                                            <span className={analytics.revenueDetails.variance > 0 ? 'text-green-400' : 'text-red-400'}>{analytics.revenueDetails.variance > 0 ? '+' : ''}{formatMoney(analytics.revenueDetails.variance)}</span>
                                                         </div>
                                                     )}
                                                     {analytics.costs.totalCapex > 0 && (
@@ -691,6 +873,60 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             )}
                                         </div>
                                     </div>
+
+                                    {/* 🟢 新增：P&L 人工成本摘要 — 当月员工总和 vs 已出资 */}
+                                    {analytics.payrollSummary.monthlyTotal > 0 && (
+                                        <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
+                                            <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2">
+                                                <Users size={16}/> 人工成本摘要 (Labor Summary)
+                                            </h4>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                {/* 当月总和 — 浅色 */}
+                                                <div className="bg-purple-50/60 p-4 rounded-2xl border border-purple-100/80">
+                                                    <p className="text-[10px] font-bold text-purple-400 uppercase tracking-wider mb-1">当月薪资总和 (Monthly Total)</p>
+                                                    <p className="text-2xl font-black font-mono text-purple-300">{formatMoney(analytics.payrollSummary.monthlyTotal)}</p>
+                                                    <p className="text-[10px] text-purple-300 font-bold mt-1">
+                                                        {analytics.payrollSummary.staffCount} 名员工 · {analytics.payrollSummary.months.join(', ')}
+                                                    </p>
+                                                </div>
+                                                {/* 已出资 — 深色 */}
+                                                <div className="bg-purple-100 p-4 rounded-2xl border border-purple-200">
+                                                    <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wider mb-1">已出资 (Paid / Disbursed)</p>
+                                                    <p className="text-2xl font-black font-mono text-purple-900">{formatMoney(analytics.payrollSummary.paidAmount)}</p>
+                                                    <p className="text-[10px] text-purple-600 font-bold mt-1">
+                                                        含 Net Pay + 已缴 Statutory
+                                                    </p>
+                                                </div>
+                                                {/* 未出资 — 警示色 */}
+                                                <div className={`p-4 rounded-2xl border ${analytics.payrollSummary.unpaidAmount > 0 ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
+                                                    <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${analytics.payrollSummary.unpaidAmount > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                                                        未出资 (Pending Statutory)
+                                                    </p>
+                                                    <p className={`text-2xl font-black font-mono ${analytics.payrollSummary.unpaidAmount > 0 ? 'text-amber-700' : 'text-gray-300'}`}>
+                                                        {formatMoney(analytics.payrollSummary.unpaidAmount)}
+                                                    </p>
+                                                    <p className={`text-[10px] font-bold mt-1 ${analytics.payrollSummary.unpaidAmount > 0 ? 'text-amber-500' : 'text-gray-400'}`}>
+                                                        {analytics.payrollSummary.unpaidAmount > 0 ? 'EPF/SOCSO 待缴纳' : '全部已结清 ✅'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {/* 进度条 */}
+                                            {analytics.payrollSummary.monthlyTotal > 0 && (
+                                                <div className="mt-4">
+                                                    <div className="flex justify-between text-[10px] font-bold mb-1.5">
+                                                        <span className="text-purple-700">出资进度 ({((analytics.payrollSummary.paidAmount / analytics.payrollSummary.monthlyTotal) * 100).toFixed(0)}%)</span>
+                                                        <span className="text-gray-400">{formatMoney(analytics.payrollSummary.paidAmount)} / {formatMoney(analytics.payrollSummary.monthlyTotal)}</span>
+                                                    </div>
+                                                    <div className="h-3 bg-purple-100 rounded-full overflow-hidden">
+                                                        <div 
+                                                            className="h-full bg-purple-600 rounded-full transition-all duration-700"
+                                                            style={{ width: `${Math.min(100, (analytics.payrollSummary.paidAmount / analytics.payrollSummary.monthlyTotal) * 100)}%` }}
+                                                        ></div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {analytics.dailySales.length > 1 && (
                                         <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
@@ -715,14 +951,8 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                                                 <span className={`text-[8px] font-mono font-bold ${isHighest ? 'text-blue-600' : 'text-gray-400'}`}>
                                                                                     {d.sales >= 1000 ? `${(d.sales/1000).toFixed(1)}k` : d.sales.toFixed(0)}
                                                                                 </span>
-                                                                                <div 
-                                                                                    className={`w-full rounded-t-md transition-all ${isToday ? 'bg-blue-500' : isHighest ? 'bg-blue-400' : 'bg-blue-200 hover:bg-blue-300'}`}
-                                                                                    style={{ height: h }}
-                                                                                    title={`${d.date}: RM ${d.sales.toFixed(2)}`}
-                                                                                ></div>
-                                                                                <span className={`text-[7px] font-mono ${isToday ? 'text-blue-600 font-black' : 'text-gray-400'}`}>
-                                                                                    {d.date.slice(8)}
-                                                                                </span>
+                                                                                <div className={`w-full rounded-t-md transition-all ${isToday ? 'bg-blue-500' : isHighest ? 'bg-blue-400' : 'bg-blue-200 hover:bg-blue-300'}`} style={{ height: h }} title={`${d.date}: RM ${d.sales.toFixed(2)}`}></div>
+                                                                                <span className={`text-[7px] font-mono ${isToday ? 'text-blue-600 font-black' : 'text-gray-400'}`}>{d.date.slice(8)}</span>
                                                                             </div>
                                                                         );
                                                                     })}
@@ -752,62 +982,28 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                         return (
                                                             <>
                                                                 <div className="flex h-8 rounded-full overflow-hidden mb-4 bg-gray-100">
-                                                                    <div className="bg-red-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCOGS / totalOutflow) * 100}%` }} title={`COGS: ${formatMoney(analytics.costs.totalCOGS)}`}></div>
-                                                                    <div className="bg-purple-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalLabor / totalOutflow) * 100}%` }} title={`Labor: ${formatMoney(analytics.costs.totalLabor)}`}></div>
-                                                                    <div className="bg-orange-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalOPEX / totalOutflow) * 100}%` }} title={`OPEX: ${formatMoney(analytics.costs.totalOPEX)}`}></div>
-                                                                    {analytics.costs.totalCapex > 0 && (
-                                                                        <div className="bg-blue-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCapex / totalOutflow) * 100}%` }} title={`CAPEX: ${formatMoney(analytics.costs.totalCapex)}`}></div>
-                                                                    )}
+                                                                    <div className="bg-red-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCOGS / totalOutflow) * 100}%` }}></div>
+                                                                    <div className="bg-purple-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalLabor / totalOutflow) * 100}%` }}></div>
+                                                                    <div className="bg-orange-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalOPEX / totalOutflow) * 100}%` }}></div>
+                                                                    {analytics.costs.totalCapex > 0 && (<div className="bg-blue-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCapex / totalOutflow) * 100}%` }}></div>)}
                                                                 </div>
-
                                                                 <div className="space-y-2">
                                                                     <button onClick={() => handleDrillDown({ type: 'COGS' }, '销货成本 (COGS)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-red-50 transition-colors active:scale-[0.99] group">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <div className="w-3 h-3 bg-red-400 rounded-sm shrink-0"></div>
-                                                                            <span className="text-xs font-bold text-gray-600 group-hover:text-red-700">COGS 食材成本</span>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCOGS)}</span>
-                                                                            <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCOGS / totalOutflow) * 100).toFixed(1)}%</span>
-                                                                            <ChevronRight size={12} className="text-gray-300"/>
-                                                                        </div>
+                                                                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-400 rounded-sm shrink-0"></div><span className="text-xs font-bold text-gray-600 group-hover:text-red-700">COGS 食材成本</span></div>
+                                                                        <div className="flex items-center gap-2"><span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCOGS)}</span><span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCOGS / totalOutflow) * 100).toFixed(1)}%</span><ChevronRight size={12} className="text-gray-300"/></div>
                                                                     </button>
-                                                                    
                                                                     <button onClick={() => handleDrillDown({ type: 'LABOR' }, '人工薪资 (Labor)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-purple-50 transition-colors active:scale-[0.99] group">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <div className="w-3 h-3 bg-purple-400 rounded-sm shrink-0"></div>
-                                                                            <span className="text-xs font-bold text-gray-600 group-hover:text-purple-700">Labor 人工成本</span>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalLabor)}</span>
-                                                                            <span className="text-[10px] font-bold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalLabor / totalOutflow) * 100).toFixed(1)}%</span>
-                                                                            <ChevronRight size={12} className="text-gray-300"/>
-                                                                        </div>
+                                                                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-purple-400 rounded-sm shrink-0"></div><span className="text-xs font-bold text-gray-600 group-hover:text-purple-700">Labor 人工成本</span></div>
+                                                                        <div className="flex items-center gap-2"><span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalLabor)}</span><span className="text-[10px] font-bold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalLabor / totalOutflow) * 100).toFixed(1)}%</span><ChevronRight size={12} className="text-gray-300"/></div>
                                                                     </button>
-                                                                    
                                                                     <button onClick={() => handleDrillDown({ type: 'OPEX' }, '运营支出 (OPEX)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-orange-50 transition-colors active:scale-[0.99] group">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <div className="w-3 h-3 bg-orange-400 rounded-sm shrink-0"></div>
-                                                                            <span className="text-xs font-bold text-gray-600 group-hover:text-orange-700">OPEX 运营支出</span>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalOPEX)}</span>
-                                                                            <span className="text-[10px] font-bold text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalOPEX / totalOutflow) * 100).toFixed(1)}%</span>
-                                                                            <ChevronRight size={12} className="text-gray-300"/>
-                                                                        </div>
+                                                                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-orange-400 rounded-sm shrink-0"></div><span className="text-xs font-bold text-gray-600 group-hover:text-orange-700">OPEX 运营支出</span></div>
+                                                                        <div className="flex items-center gap-2"><span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalOPEX)}</span><span className="text-[10px] font-bold text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalOPEX / totalOutflow) * 100).toFixed(1)}%</span><ChevronRight size={12} className="text-gray-300"/></div>
                                                                     </button>
-
                                                                     {analytics.costs.totalCapex > 0 && (
                                                                         <button onClick={() => handleDrillDown({ type: 'CAPEX' }, '资本支出 (CAPEX)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-blue-50 transition-colors active:scale-[0.99] group border-t border-dashed border-gray-200 mt-1 pt-3">
-                                                                            <div className="flex items-center gap-2">
-                                                                                <div className="w-3 h-3 bg-blue-400 rounded-sm shrink-0"></div>
-                                                                                <span className="text-xs font-bold text-gray-600 group-hover:text-blue-700">CAPEX 资本支出</span>
-                                                                            </div>
-                                                                            <div className="flex items-center gap-2">
-                                                                                <span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCapex)}</span>
-                                                                                <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCapex / totalOutflow) * 100).toFixed(1)}%</span>
-                                                                                <ChevronRight size={12} className="text-gray-300"/>
-                                                                            </div>
+                                                                            <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-400 rounded-sm shrink-0"></div><span className="text-xs font-bold text-gray-600 group-hover:text-blue-700">CAPEX 资本支出</span></div>
+                                                                            <div className="flex items-center gap-2"><span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCapex)}</span><span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCapex / totalOutflow) * 100).toFixed(1)}%</span><ChevronRight size={12} className="text-gray-300"/></div>
                                                                         </button>
                                                                     )}
                                                                 </div>
@@ -815,9 +1011,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                         );
                                                     })()}
                                                 </div>
-                                            ) : (
-                                                <div className="text-center py-10 text-gray-400 text-xs">暂无支出数据</div>
-                                            )}
+                                            ) : (<div className="text-center py-10 text-gray-400 text-xs">暂无支出数据</div>)}
                                         </div>
 
                                         <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
@@ -840,16 +1034,12 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                                 <div className="flex-1 h-5 bg-gray-50 rounded-full overflow-hidden relative">
                                                                     <div className={`h-full ${item.color} rounded-full transition-all duration-700`} style={{ width: `${Math.min(100, Math.abs(item.pct))}%` }}></div>
                                                                 </div>
-                                                                <span className={`text-[10px] font-mono font-black w-24 text-right shrink-0 ${item.value >= 0 ? 'text-[#1A1A1A]' : 'text-red-600'}`}>
-                                                                    {formatMoney(Math.abs(item.value))}
-                                                                </span>
+                                                                <span className={`text-[10px] font-mono font-black w-24 text-right shrink-0 ${item.value >= 0 ? 'text-[#1A1A1A]' : 'text-red-600'}`}>{formatMoney(Math.abs(item.value))}</span>
                                                             </div>
                                                         ));
                                                     })()}
                                                 </div>
-                                            ) : (
-                                                <div className="text-center py-10 text-gray-400 text-xs">暂无数据</div>
-                                            )}
+                                            ) : (<div className="text-center py-10 text-gray-400 text-xs">暂无数据</div>)}
                                         </div>
                                     </div>
                                     
@@ -962,22 +1152,99 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         </div>
                                     </div>
 
+                                    {/* 🟢 改版：外卖渠道分析 — 每个平台单独显示 Gross / Net / 抽佣% */}
                                     <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm">
-                                        <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><Truck size={16}/> 渠道分析 (Channels)</h4>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div className="flex justify-between items-center p-4 bg-gray-50 rounded-xl">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="bg-white p-2 rounded-lg shadow-sm text-gray-600"><Truck size={18}/></div>
-                                                    <span className="font-bold text-sm text-gray-700">Delivery Platforms</span>
+                                        <h4 className="font-black text-sm text-[#1A1A1A] mb-2 uppercase tracking-widest flex items-center gap-2"><Truck size={16}/> 外卖渠道分析 (Delivery Channels)</h4>
+                                        <p className="text-[10px] text-gray-400 font-bold mb-5">Gross 为系统营业额 · Net 为核销后银行实收 · Commission 为平台抽佣</p>
+
+                                        {/* 总览行 */}
+                                        <div className="flex justify-between items-center p-4 bg-gray-50 rounded-xl mb-4 border border-gray-200">
+                                            <div className="flex items-center gap-3">
+                                                <div className="bg-white p-2 rounded-lg shadow-sm text-gray-600"><Truck size={18}/></div>
+                                                <div>
+                                                    <span className="font-bold text-sm text-gray-700">Delivery Total (Gross)</span>
+                                                    <p className="text-[10px] text-gray-400 font-bold">所有外卖平台营业总额</p>
                                                 </div>
-                                                <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.delivery)}</span>
                                             </div>
-                                            <div className="flex justify-between items-center p-4 bg-gray-50 rounded-xl">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="bg-white p-2 rounded-lg shadow-sm text-gray-600"><ShoppingBag size={18}/></div>
-                                                    <span className="font-bold text-sm text-gray-700">In-Store Sales</span>
-                                                </div>
+                                            <span className="font-mono font-black text-xl text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.delivery)}</span>
+                                        </div>
+
+                                        {/* 各平台详细卡片 */}
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            {(['grab', 'panda', 'shopee'] as const).map(platform => {
+                                                const recon = analytics.deliveryRecon[platform];
+                                                const colors = PLATFORM_COLORS[platform];
+                                                if (recon.gross <= 0) return null;
+                                                
+                                                const commission = recon.reconDays > 0 ? (recon.gross - recon.net) : 0;
+                                                const commissionPct = recon.reconDays > 0 && recon.gross > 0 ? ((commission / recon.gross) * 100) : 0;
+                                                const hasRecon = recon.reconDays > 0;
+                                                const allReconciled = recon.reconDays === recon.totalDays;
+
+                                                return (
+                                                    <div key={platform} className={`p-4 rounded-2xl border ${colors.border} ${colors.bg}`}>
+                                                        <div className="flex justify-between items-center mb-3">
+                                                            <span className={`text-xs font-black ${colors.text} uppercase`}>{colors.label}</span>
+                                                            {!allReconciled && recon.totalDays > 0 && (
+                                                                <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                                                    {recon.reconDays}/{recon.totalDays} 天已核销
+                                                                </span>
+                                                            )}
+                                                            {allReconciled && recon.totalDays > 0 && (
+                                                                <span className="text-[9px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
+                                                                    ✅ 全部核销
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        
+                                                        <div className="space-y-2">
+                                                            <div className="flex justify-between items-center">
+                                                                <span className="text-[10px] font-bold text-gray-500">Gross (营业额)</span>
+                                                                <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(recon.gross)}</span>
+                                                            </div>
+                                                            
+                                                            {hasRecon && (
+                                                                <>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <span className="text-[10px] font-bold text-green-600">Net (实收)</span>
+                                                                        <span className="font-mono font-black text-green-700">{formatMoney(recon.net)}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between items-center pt-2 border-t border-gray-200/50">
+                                                                        <span className="text-[10px] font-bold text-red-500">Commission (抽佣)</span>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="font-mono font-bold text-red-600 text-xs">-{formatMoney(commission)}</span>
+                                                                            <span className="text-[9px] font-black text-red-500 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">{commissionPct.toFixed(1)}%</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                            
+                                                            {!hasRecon && (
+                                                                <p className="text-[10px] text-gray-400 italic pt-1">尚未核销，无 Net 数据</p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {/* Lalamove 单独显示 (无核销机制) */}
+                                        {analytics.deliveryBreakdown.lalamove > 0 && (
+                                            <div className="mt-4 flex justify-between items-center p-3 bg-blue-50 rounded-xl border border-blue-100">
+                                                <span className="text-xs font-bold text-blue-700">Lalamove (自行配送)</span>
+                                                <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.deliveryBreakdown.lalamove)}</span>
+                                            </div>
+                                        )}
+
+                                        {/* In-Store vs Delivery 对比 */}
+                                        <div className="mt-4 pt-4 border-t border-gray-200 grid grid-cols-2 gap-4">
+                                            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                                                <span className="text-xs font-bold text-gray-600 flex items-center gap-2"><ShoppingBag size={14}/> In-Store</span>
                                                 <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.totalRevenue - analytics.revenueDetails.delivery)}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                                                <span className="text-xs font-bold text-gray-600 flex items-center gap-2"><Truck size={14}/> Delivery</span>
+                                                <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.delivery)}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -988,71 +1255,40 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
                                     <div className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-bold ${accountingMode === 'ACCRUAL' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-sky-50 text-sky-700 border border-sky-200'}`}>
                                         <Info size={12} className="shrink-0"/>
-                                        {accountingMode === 'ACCRUAL' 
-                                            ? '📋 权责发生制 — 费用含未付账单，按收货日归入。点击行项可查看付款状态。' 
-                                            : '💰 收付实现制 — 仅显示已实际付款的费用。'}
+                                        {accountingMode === 'ACCRUAL' ? '📋 权责发生制 — 费用含未付账单，按收货日归入。点击行项可查看付款状态。' : '💰 收付实现制 — 仅显示已实际付款的费用。'}
                                     </div>
                                     
                                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                                         <button onClick={() => handleDrillDown({ type: 'COGS' }, '销货成本 (COGS)')} className="bg-red-50 p-5 rounded-[2rem] border border-red-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[120px]">
-                                            <div className="flex justify-between items-center mb-2">
-                                                <p className="text-[10px] font-bold text-red-600 uppercase">COGS (Cost of Goods)</p>
-                                                <ChevronRight size={16} className="text-red-300 group-hover:text-red-500 transition-colors"/>
-                                            </div>
+                                            <div className="flex justify-between items-center mb-2"><p className="text-[10px] font-bold text-red-600 uppercase">COGS (Cost of Goods)</p><ChevronRight size={16} className="text-red-300 group-hover:text-red-500 transition-colors"/></div>
                                             <p className="text-2xl font-black text-[#1A1A1A] font-mono">{formatMoney(analytics.costs.totalCOGS)}</p>
                                             <div className="mt-2 text-[10px] font-bold text-red-400">{analytics.margins.cogs.toFixed(1)}% of Sales</div>
                                         </button>
-                                        
                                         <button onClick={() => handleDrillDown({ type: 'LABOR' }, '人工薪资 (Labor)')} className="bg-purple-50 p-5 rounded-[2rem] border border-purple-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[120px]">
-                                            <div className="flex justify-between items-center mb-2">
-                                                <p className="text-[10px] font-bold text-purple-600 uppercase">Labor (人工薪资)</p>
-                                                <ChevronRight size={16} className="text-purple-300 group-hover:text-purple-500 transition-colors"/>
-                                            </div>
+                                            <div className="flex justify-between items-center mb-2"><p className="text-[10px] font-bold text-purple-600 uppercase">Labor (人工薪资)</p><ChevronRight size={16} className="text-purple-300 group-hover:text-purple-500 transition-colors"/></div>
                                             <p className="text-2xl font-black text-[#1A1A1A] font-mono">{formatMoney(analytics.costs.totalLabor)}</p>
                                             <div className="mt-2 text-[10px] font-bold text-purple-400">{analytics.margins.labor.toFixed(1)}% of Sales</div>
                                         </button>
-
                                         <button onClick={() => handleDrillDown({ type: 'OPEX' }, '运营支出 (OPEX)')} className="bg-orange-50 p-5 rounded-[2rem] border border-orange-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[120px]">
-                                            <div className="flex justify-between items-center mb-2">
-                                                <p className="text-[10px] font-bold text-orange-600 uppercase">OPEX (运营支出)</p>
-                                                <ChevronRight size={16} className="text-orange-300 group-hover:text-orange-500 transition-colors"/>
-                                            </div>
+                                            <div className="flex justify-between items-center mb-2"><p className="text-[10px] font-bold text-orange-600 uppercase">OPEX (运营支出)</p><ChevronRight size={16} className="text-orange-300 group-hover:text-orange-500 transition-colors"/></div>
                                             <p className="text-2xl font-black text-[#1A1A1A] font-mono">{formatMoney(analytics.costs.totalOPEX)}</p>
                                             <div className="mt-2 text-[10px] font-bold text-orange-400">{analytics.margins.opex.toFixed(1)}% of Sales</div>
                                         </button>
-
                                         <button onClick={() => handleDrillDown({ type: 'CAPEX' }, '资本支出 (CAPEX)')} className="bg-blue-50 p-5 rounded-[2rem] border border-blue-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[120px]">
-                                            <div className="flex justify-between items-center mb-2">
-                                                <p className="text-[10px] font-bold text-blue-600 uppercase">CAPEX (资本支出)</p>
-                                                <ChevronRight size={16} className="text-blue-300 group-hover:text-blue-500 transition-colors"/>
-                                            </div>
+                                            <div className="flex justify-between items-center mb-2"><p className="text-[10px] font-bold text-blue-600 uppercase">CAPEX (资本支出)</p><ChevronRight size={16} className="text-blue-300 group-hover:text-blue-500 transition-colors"/></div>
                                             <p className="text-2xl font-black text-[#1A1A1A] font-mono">{formatMoney(analytics.costs.totalCapex)}</p>
                                             <div className="mt-2 text-[10px] font-bold text-blue-400">资产类，不计入当期损益</div>
                                         </button>
                                     </div>
-
-                                    {analytics.fees.totalCommission > 0 && (
-                                        <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 flex justify-between items-center text-xs text-yellow-800">
-                                            <div className="flex items-center gap-2 font-bold"><AlertCircle size={14}/> Maybank Merchant Fees Included in OPEX</div>
-                                            <div className="font-mono font-black">{formatMoney(analytics.fees.totalCommission)}</div>
-                                        </div>
-                                    )}
 
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                         <div className="bg-white p-6 rounded-[2rem] border border-gray-200">
                                             <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest border-b pb-2">COGS Breakdown (销货成本明细)</h4>
                                             <div className="space-y-2 max-h-80 overflow-y-auto touch-pan-y">
                                                 {analytics.lists.cogsList.map((g: any) => (
-                                                    <div 
-                                                        key={g.id} 
-                                                        onClick={() => handleDrillDown({ categoryId: g.id }, g.label)}
-                                                        className="flex justify-between items-center text-sm font-bold p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors group active:scale-[0.98]"
-                                                    >
+                                                    <div key={g.id} onClick={() => handleDrillDown({ categoryId: g.id }, g.label)} className="flex justify-between items-center text-sm font-bold p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors group active:scale-[0.98]">
                                                         <span className="text-gray-500 group-hover:text-[#1A1A1A]">{g.label}</span>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-mono">{formatMoney(g.amount)}</span>
-                                                            <ChevronRight size={14} className="text-gray-300 group-hover:text-black"/>
-                                                        </div>
+                                                        <div className="flex items-center gap-2"><span className="font-mono">{formatMoney(g.amount)}</span><ChevronRight size={14} className="text-gray-300 group-hover:text-black"/></div>
                                                     </div>
                                                 ))}
                                             </div>
@@ -1062,101 +1298,41 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest border-b pb-2">Labor & OPEX (人工与运营)</h4>
                                             <div className="space-y-2 max-h-80 overflow-y-auto touch-pan-y">
                                                 <p className="text-[10px] font-black text-purple-600 uppercase mt-2 pl-2">Labor</p>
-                                                <div 
-                                                    onClick={() => handleDrillDown({ categoryId: 'STAFF_ADVANCE' }, '员工预支 (Staff Advance)')}
-                                                    className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-red-400 p-3 bg-red-50/50 hover:bg-red-100 cursor-pointer rounded-r-lg transition-colors group mb-1 active:scale-[0.98]"
-                                                >
-                                                    <div className="flex items-center gap-2">
-                                                        <UserMinus size={14} className="text-red-500"/>
-                                                        <span className="text-red-700">员工预支 (Staff Advance)</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-mono font-black text-red-700">
-                                                            {formatMoney(analytics.lists.laborList.find((g:any)=>g.id==='STAFF_ADVANCE')?.amount || 0)}
-                                                        </span>
-                                                        <ChevronRight size={14} className="text-red-400"/>
-                                                    </div>
+                                                <div onClick={() => handleDrillDown({ categoryId: 'STAFF_ADVANCE' }, '员工预支 (Staff Advance)')} className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-red-400 p-3 bg-red-50/50 hover:bg-red-100 cursor-pointer rounded-r-lg transition-colors group mb-1 active:scale-[0.98]">
+                                                    <div className="flex items-center gap-2"><UserMinus size={14} className="text-red-500"/><span className="text-red-700">员工预支 (Staff Advance)</span></div>
+                                                    <div className="flex items-center gap-2"><span className="font-mono font-black text-red-700">{formatMoney(analytics.lists.laborList.find((g:any)=>g.id==='STAFF_ADVANCE')?.amount || 0)}</span><ChevronRight size={14} className="text-red-400"/></div>
                                                 </div>
-
                                                 {analytics.lists.laborList.filter((g:any) => g.id !== 'STAFF_ADVANCE').map((g: any) => (
-                                                    <div 
-                                                        key={g.id} 
-                                                        onClick={() => handleDrillDown({ categoryId: g.id }, g.label)}
-                                                        className={`flex justify-between items-center text-sm font-bold pl-2 border-l-2 p-3 cursor-pointer rounded-r-lg transition-colors group active:scale-[0.98] ${
-                                                            g.isPending 
-                                                                ? 'border-gray-200 text-gray-400 bg-gray-50/30 hover:bg-gray-50' 
-                                                                : 'border-purple-100 hover:bg-purple-50/50'
-                                                        }`}
-                                                    >
+                                                    <div key={g.id} onClick={() => handleDrillDown({ categoryId: g.id }, g.label)} className={`flex justify-between items-center text-sm font-bold pl-2 border-l-2 p-3 cursor-pointer rounded-r-lg transition-colors group active:scale-[0.98] ${g.isPending ? 'border-gray-200 text-gray-400 bg-gray-50/30 hover:bg-gray-50' : 'border-purple-100 hover:bg-purple-50/50'}`}>
                                                         <span className={g.isPending ? "italic" : "text-gray-500 group-hover:text-purple-900"}>{g.label}</span>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-mono">{formatMoney(g.amount)}</span>
-                                                            <ChevronRight size={14} className="text-gray-300 group-hover:text-purple-400"/>
-                                                        </div>
+                                                        <div className="flex items-center gap-2"><span className="font-mono">{formatMoney(g.amount)}</span><ChevronRight size={14} className="text-gray-300 group-hover:text-purple-400"/></div>
                                                     </div>
                                                 ))}
                                                 <p className="text-[10px] font-black text-orange-600 uppercase mt-4 pl-2">OPEX</p>
-                                                
-                                                {analytics.fees.totalCommission > 0 && (
-                                                    <div 
-                                                        onClick={() => handleDrillDown({ categoryId: 'MBB_COMM' }, 'Maybank Commission (Auto-Calc)')}
-                                                        className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-yellow-400 p-3 bg-yellow-50 hover:bg-yellow-100 cursor-pointer rounded-r-lg transition-colors group mb-1 active:scale-[0.98]"
-                                                    >
-                                                        <span className="text-yellow-800">银行手续费 (Maybank Commission)</span>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-mono">{formatMoney(analytics.fees.totalCommission)}</span>
-                                                            <ChevronRight size={14} className="text-yellow-600"/>
-                                                        </div>
-                                                    </div>
-                                                )}
-
                                                 {analytics.lists.opexList.map((g: any) => (
-                                                    <div 
-                                                        key={g.id} 
-                                                        onClick={() => handleDrillDown({ categoryId: g.id }, g.label)}
-                                                        className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-orange-100 p-3 hover:bg-orange-50/50 cursor-pointer rounded-r-lg transition-colors group active:scale-[0.98]"
-                                                    >
+                                                    <div key={g.id} onClick={() => handleDrillDown({ categoryId: g.id }, g.label)} className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-orange-100 p-3 hover:bg-orange-50/50 cursor-pointer rounded-r-lg transition-colors group active:scale-[0.98]">
                                                         <span className="text-gray-500 group-hover:text-orange-900">{g.label}</span>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-mono">{formatMoney(g.amount)}</span>
-                                                            <ChevronRight size={14} className="text-gray-300 group-hover:text-orange-400"/>
-                                                        </div>
+                                                        <div className="flex items-center gap-2"><span className="font-mono">{formatMoney(g.amount)}</span><ChevronRight size={14} className="text-gray-300 group-hover:text-orange-400"/></div>
                                                     </div>
                                                 ))}
-
                                                 {analytics.lists.capexList.length > 0 && (
                                                     <>
                                                         <p className="text-[10px] font-black text-blue-600 uppercase mt-4 pl-2">CAPEX 资本支出</p>
                                                         {analytics.lists.capexList.map((g: any) => (
-                                                            <div 
-                                                                key={g.id} 
-                                                                onClick={() => handleDrillDown({ categoryId: g.id }, g.label)}
-                                                                className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-blue-200 p-3 hover:bg-blue-50/50 cursor-pointer rounded-r-lg transition-colors group active:scale-[0.98]"
-                                                            >
+                                                            <div key={g.id} onClick={() => handleDrillDown({ categoryId: g.id }, g.label)} className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-blue-200 p-3 hover:bg-blue-50/50 cursor-pointer rounded-r-lg transition-colors group active:scale-[0.98]">
                                                                 <span className="text-gray-500 group-hover:text-blue-900">{g.label}</span>
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="font-mono">{formatMoney(g.amount)}</span>
-                                                                    <ChevronRight size={14} className="text-gray-300 group-hover:text-blue-400"/>
-                                                                </div>
+                                                                <div className="flex items-center gap-2"><span className="font-mono">{formatMoney(g.amount)}</span><ChevronRight size={14} className="text-gray-300 group-hover:text-blue-400"/></div>
                                                             </div>
                                                         ))}
                                                     </>
                                                 )}
-
                                                 {analytics.lists.depositList.length > 0 && (
                                                     <>
                                                         <p className="text-[10px] font-black text-gray-500 uppercase mt-4 pl-2">ASSET 押金与资产</p>
                                                         {analytics.lists.depositList.map((g: any) => (
-                                                            <div 
-                                                                key={g.id} 
-                                                                onClick={() => handleDrillDown({ categoryId: g.id }, g.label)}
-                                                                className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-gray-200 p-3 hover:bg-gray-50 cursor-pointer rounded-r-lg transition-colors group active:scale-[0.98]"
-                                                            >
+                                                            <div key={g.id} onClick={() => handleDrillDown({ categoryId: g.id }, g.label)} className="flex justify-between items-center text-sm font-bold pl-2 border-l-2 border-gray-200 p-3 hover:bg-gray-50 cursor-pointer rounded-r-lg transition-colors group active:scale-[0.98]">
                                                                 <span className="text-gray-500 group-hover:text-gray-900">{g.label}</span>
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="font-mono">{formatMoney(g.amount)}</span>
-                                                                    <ChevronRight size={14} className="text-gray-300 group-hover:text-gray-400"/>
-                                                                </div>
+                                                                <div className="flex items-center gap-2"><span className="font-mono">{formatMoney(g.amount)}</span><ChevronRight size={14} className="text-gray-300 group-hover:text-gray-400"/></div>
                                                             </div>
                                                         ))}
                                                     </>
@@ -1173,45 +1349,28 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         <div className="bg-gray-50/50 p-5 border-b border-gray-100 flex justify-between items-center">
                                             <div className="flex items-center gap-3">
                                                 <div className="bg-purple-100 text-purple-700 p-2 rounded-xl"><ListChecks size={20}/></div>
-                                                <div>
-                                                    <h3 className="font-black text-lg text-[#1A1A1A]">资金流水审计 (Cash Flow Audit)</h3>
-                                                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Running Balance from Day 1</p>
-                                                </div>
+                                                <div><h3 className="font-black text-lg text-[#1A1A1A]">资金流水审计 (Cash Flow Audit)</h3><p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Running Balance from Day 1</p></div>
                                             </div>
                                             <div className="text-right bg-white px-4 py-2 rounded-xl border border-gray-200 shadow-inner">
                                                 <p className="text-[9px] text-gray-400 font-bold uppercase">Opening Balance</p>
                                                 <p className="text-sm font-black font-mono text-green-700">{formatMoney(openingBalance)}</p>
                                             </div>
                                         </div>
-
                                         <div className="divide-y divide-gray-100">
                                             {auditTrail.length === 0 ? (
                                                 <div className="p-20 text-center text-gray-400 text-sm font-bold italic">该时段无资金变动记录</div>
                                             ) : auditTrail.map((log, idx) => (
                                                 <div key={idx} className="p-4 md:p-5 hover:bg-gray-50 transition-colors flex items-center justify-between group">
                                                     <div className="flex items-center gap-4 min-w-0">
-                                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] shrink-0 ${
-                                                            log.type === 'IN' ? 'bg-green-100 text-green-700' : 
-                                                            log.type === 'OUT' ? 'bg-red-100 text-red-700' : 
-                                                            'bg-blue-100 text-blue-700'
-                                                        }`}>
-                                                            {log.type}
-                                                        </div>
+                                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] shrink-0 ${log.type === 'IN' ? 'bg-green-100 text-green-700' : log.type === 'OUT' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{log.type}</div>
                                                         <div className="min-w-0">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="font-bold text-[#1A1A1A] text-sm truncate">{CATEGORY_LABELS[log.category] || log.category}</span>
-                                                                <span className="text-[9px] text-gray-400 font-mono bg-gray-100 px-1.5 py-0.5 rounded shrink-0">{log.date}</span>
-                                                            </div>
+                                                            <div className="flex items-center gap-2"><span className="font-bold text-[#1A1A1A] text-sm truncate">{CATEGORY_LABELS[log.category] || log.category}</span><span className="text-[9px] text-gray-400 font-mono bg-gray-100 px-1.5 py-0.5 rounded shrink-0">{log.date}</span></div>
                                                             <div className="text-xs text-gray-500 font-medium mt-0.5 truncate max-w-[200px] md:max-w-md">{log.description}</div>
                                                         </div>
                                                     </div>
                                                     <div className="text-right shrink-0">
-                                                        <div className={`font-mono font-black text-sm md:text-base ${log.type === 'IN' ? 'text-green-600' : log.type === 'OUT' ? 'text-red-600' : 'text-blue-600'}`}>
-                                                            {log.type === 'IN' ? '+' : log.type === 'OUT' ? '-' : '⇄'}{formatMoney(log.amount).replace('RM ','')}
-                                                        </div>
-                                                        <div className="text-[10px] font-mono font-bold text-gray-400 mt-1">
-                                                            Bal: {formatMoney(log.balance).replace('RM ','')}
-                                                        </div>
+                                                        <div className={`font-mono font-black text-sm md:text-base ${log.type === 'IN' ? 'text-green-600' : log.type === 'OUT' ? 'text-red-600' : 'text-blue-600'}`}>{log.type === 'IN' ? '+' : log.type === 'OUT' ? '-' : '⇄'}{formatMoney(log.amount).replace('RM ','')}</div>
+                                                        <div className="text-[10px] font-mono font-bold text-gray-400 mt-1">Bal: {formatMoney(log.balance).replace('RM ','')}</div>
                                                     </div>
                                                 </div>
                                             ))}
@@ -1225,35 +1384,19 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                     <div className="bg-[#1A1A1A] p-6 rounded-[2rem] shadow-xl text-white relative overflow-hidden">
                                         <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500 opacity-10 rounded-full blur-3xl pointer-events-none"></div>
                                         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                                            <div>
-                                                <h3 className="font-black text-xl flex items-center gap-2 text-[#FFD700]"><Briefcase size={24}/> 股东分红计算器</h3>
-                                                <p className="text-xs text-white/60 mt-1">Dividend Distribution Planner</p>
-                                            </div>
+                                            <div><h3 className="font-black text-xl flex items-center gap-2 text-[#FFD700]"><Briefcase size={24}/> 股东分红计算器</h3><p className="text-xs text-white/60 mt-1">Dividend Distribution Planner</p></div>
                                             <div className="text-right">
                                                 <p className="text-[10px] font-bold uppercase tracking-widest text-white/50">Net Cash Flow (真实可支配现金)</p>
-                                                <p className={`text-3xl font-black font-mono ${analytics.netCashFlow >= 0 ? 'text-white' : 'text-red-400'}`}>
-                                                    {formatMoney(analytics.netCashFlow)}
-                                                </p>
-                                                {analytics.costs.totalCapex > 0 && (
-                                                    <p className="text-[9px] text-red-400 mt-1">已扣除 CAPEX: {formatMoney(analytics.costs.totalCapex)}</p>
-                                                )}
+                                                <p className={`text-3xl font-black font-mono ${analytics.netCashFlow >= 0 ? 'text-white' : 'text-red-400'}`}>{formatMoney(analytics.netCashFlow)}</p>
+                                                {analytics.costs.totalCapex > 0 && (<p className="text-[9px] text-red-400 mt-1">已扣除 CAPEX: {formatMoney(analytics.costs.totalCapex)}</p>)}
                                             </div>
                                         </div>
-
                                         <div className="mt-8 bg-white/10 p-4 rounded-xl border border-white/10">
                                             <div className="flex justify-between text-xs font-bold mb-2">
                                                 <span>Retained Earnings (公司预留): <span className="text-[#FFD700]">{retentionRate}%</span></span>
                                                 <span>Distributable (股东可分): {100 - retentionRate}%</span>
                                             </div>
-                                            <input 
-                                                type="range" 
-                                                min="0" 
-                                                max="100" 
-                                                step="5"
-                                                value={retentionRate} 
-                                                onChange={(e) => setRetentionRate(parseInt(e.target.value))}
-                                                className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-[#FFD700]"
-                                            />
+                                            <input type="range" min="0" max="100" step="5" value={retentionRate} onChange={(e) => setRetentionRate(parseInt(e.target.value))} className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-[#FFD700]"/>
                                         </div>
                                     </div>
 
@@ -1267,56 +1410,31 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                             <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm flex flex-col justify-center items-center text-center">
                                                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Company Retained (预留储备金)</p>
-                                                <p className="text-3xl font-black text-blue-600 font-mono mb-4">
-                                                    {formatMoney(analytics.netCashFlow * (retentionRate / 100))}
-                                                </p>
-                                                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-blue-500" style={{ width: `${retentionRate}%` }}></div>
-                                                </div>
+                                                <p className="text-3xl font-black text-blue-600 font-mono mb-4">{formatMoney(analytics.netCashFlow * (retentionRate / 100))}</p>
+                                                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{ width: `${retentionRate}%` }}></div></div>
                                             </div>
-
                                             <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm flex flex-col justify-center items-center text-center">
                                                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Total Distributable (最终可分红)</p>
-                                                <p className="text-3xl font-black text-green-600 font-mono mb-4">
-                                                    {formatMoney(analytics.netCashFlow * ((100 - retentionRate) / 100))}
-                                                </p>
-                                                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-green-500" style={{ width: `${100 - retentionRate}%` }}></div>
-                                                </div>
+                                                <p className="text-3xl font-black text-green-600 font-mono mb-4">{formatMoney(analytics.netCashFlow * ((100 - retentionRate) / 100))}</p>
+                                                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-green-500" style={{ width: `${100 - retentionRate}%` }}></div></div>
                                             </div>
-
                                             <div className="col-span-full">
-                                                <h4 className="text-sm font-black text-[#1A1A1A] uppercase tracking-widest mb-4 ml-2 flex items-center gap-2">
-                                                    <Users size={16}/> 股东分配明细 (Breakdown)
-                                                </h4>
+                                                <h4 className="text-sm font-black text-[#1A1A1A] uppercase tracking-widest mb-4 ml-2 flex items-center gap-2"><Users size={16}/> 股东分配明细 (Breakdown)</h4>
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                                     {(treasuryConfig?.shareholders || []).map(sh => {
                                                         const distributableTotal = analytics.netCashFlow * ((100 - retentionRate) / 100);
                                                         const shareAmount = distributableTotal * (sh.equityPercentage / 100);
-                                                        
                                                         return (
                                                             <div key={sh.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between group hover:border-[#FFD700] transition-all">
                                                                 <div className="flex items-center gap-3">
-                                                                    <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center font-black text-gray-500 text-sm border-2 border-white shadow-sm">
-                                                                        {sh.name.charAt(0)}
-                                                                    </div>
-                                                                    <div>
-                                                                        <div className="font-bold text-sm text-[#1A1A1A]">{sh.name}</div>
-                                                                        <div className="text-[10px] font-black text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded w-fit mt-0.5">{sh.equityPercentage}% Equity</div>
-                                                                    </div>
+                                                                    <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center font-black text-gray-500 text-sm border-2 border-white shadow-sm">{sh.name.charAt(0)}</div>
+                                                                    <div><div className="font-bold text-sm text-[#1A1A1A]">{sh.name}</div><div className="text-[10px] font-black text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded w-fit mt-0.5">{sh.equityPercentage}% Equity</div></div>
                                                                 </div>
-                                                                <div className="text-right">
-                                                                    <div className="text-xs font-bold text-gray-400 uppercase">Payout</div>
-                                                                    <div className="text-lg font-mono font-black text-[#1A1A1A]">{formatMoney(shareAmount)}</div>
-                                                                </div>
+                                                                <div className="text-right"><div className="text-xs font-bold text-gray-400 uppercase">Payout</div><div className="text-lg font-mono font-black text-[#1A1A1A]">{formatMoney(shareAmount)}</div></div>
                                                             </div>
                                                         );
                                                     })}
-                                                    {(treasuryConfig?.shareholders || []).length === 0 && (
-                                                        <div className="col-span-full text-center py-10 text-gray-400 text-xs italic">
-                                                            暂无股东信息，请在资金管理模块设置。
-                                                        </div>
-                                                    )}
+                                                    {(treasuryConfig?.shareholders || []).length === 0 && (<div className="col-span-full text-center py-10 text-gray-400 text-xs italic">暂无股东信息，请在资金管理模块设置。</div>)}
                                                 </div>
                                             </div>
                                         </div>
@@ -1324,78 +1442,53 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 </div>
                              )}
 
+                            {/* PDF 打印隐藏区 */}
                             <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
-                                <div ref={printRef} className="w-[210mm] min-h-[297mm] bg-white p-12 font-sans text-black relative">
-                                    <div className="flex justify-between items-start border-b-4 border-black pb-4 mb-8">
-                                        <div>
-                                            <h1 className="text-3xl font-black uppercase tracking-widest mb-1">Financial Report</h1>
-                                            <p className="text-xs font-bold text-gray-500">KIM LIAN KEE (KEPONG)</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-xl font-black uppercase">{startDate} to {endDate}</p>
-                                            <p className="text-xs font-mono text-gray-400">Generated: {new Date().toLocaleDateString()}</p>
-                                        </div>
+                                <div ref={printRef} className="w-[800px] bg-white p-12 font-sans text-black relative" style={{ minHeight: '1122px' }}>
+                                    <div className="flex justify-between items-end border-b-4 border-black pb-6 mb-8">
+                                        <div><h1 className="text-4xl font-black uppercase tracking-widest mb-2 text-[#1A1A1A]">Financial Report</h1><p className="text-sm font-bold text-gray-500 uppercase tracking-widest">KIM LIAN KEE (KEPONG)</p></div>
+                                        <div className="text-right"><p className="text-xl font-bold uppercase text-[#1A1A1A]">{startDate} <span className="text-gray-400 mx-1">TO</span> {endDate}</p><p className="text-xs font-mono text-gray-400 mt-1">Generated: {new Date().toLocaleString()}</p><p className="text-[10px] text-gray-400 mt-1">Mode: {accountingMode === 'ACCRUAL' ? 'Accrual Basis (权责发生制)' : 'Cash Basis (收付实现制)'}</p></div>
                                     </div>
-
-                                    <div className="grid grid-cols-2 gap-8 mb-8 border-b border-gray-200 pb-8">
+                                    <div className="grid grid-cols-4 gap-4 mb-8">
+                                        <div className="bg-gray-100 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Total Revenue</p><p className="text-xl font-black font-mono text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.totalRevenue)}</p></div>
+                                        <div className="bg-gray-100 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Gross Profit</p><p className="text-xl font-black font-mono text-emerald-700">{formatMoney(analytics.grossProfit)}</p></div>
+                                        <div className="bg-gray-100 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Net Profit</p><p className={`text-xl font-black font-mono ${analytics.netProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{formatMoney(analytics.netProfit)}</p></div>
+                                        <div className="bg-gray-100 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Net Cash Flow</p><p className={`text-xl font-black font-mono ${analytics.netCashFlow >= 0 ? 'text-blue-700' : 'text-red-600'}`}>{formatMoney(analytics.netCashFlow)}</p></div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-10 mb-8">
                                         <div>
-                                            <p className="text-xs font-black uppercase mb-2">REVENUE (总营收)</p>
-                                            <div className="flex justify-between text-sm mb-1"><span>Total Revenue</span><span className="font-mono font-bold">RM {Number(analytics.revenueDetails.totalRevenue || 0).toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-xs text-gray-500"><span>- Cash</span><span className="font-mono">RM {Number(analytics.revenueDetails.cash || 0).toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-xs text-gray-500"><span>- Digital/Card</span><span className="font-mono">RM {Number((analytics.revenueDetails.tng || 0) + (analytics.revenueDetails.creditCard || 0) + (analytics.revenueDetails.debitCard || 0) + (analytics.revenueDetails.amex || 0)).toFixed(2)}</span></div>
-                                        </div>
-                                        <div>
-                                            <p className="text-xs font-black uppercase mb-2">EXPENSES (经营支出)</p>
-                                            <div className="flex justify-between text-sm mb-1"><span>Cost of Goods</span><span className="font-mono font-bold">RM {Number(analytics.costs.totalCOGS || 0).toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-sm mb-1"><span>Labor</span><span className="font-mono font-bold">RM {Number(analytics.costs.totalLabor || 0).toFixed(2)}</span></div>
-                                            <div className="flex justify-between text-sm mb-1"><span>OPEX</span><span className="font-mono font-bold">RM {Number(analytics.costs.totalOPEX || 0).toFixed(2)}</span></div>
-                                            
-                                            {(analytics.costs.totalCapex > 0 || analytics.costs.totalDeposits > 0) && (
-                                                <div className="mt-3 pt-2 border-t border-gray-200">
-                                                    <p className="text-[9px] font-black uppercase mb-1 text-gray-500">NON-OPERATING (资产类/非经营支出)</p>
-                                                    {analytics.costs.totalCapex > 0 && <div className="flex justify-between text-sm text-gray-700 mb-1"><span>CAPEX (资本支出)</span><span className="font-mono">RM {Number(analytics.costs.totalCapex || 0).toFixed(2)}</span></div>}
-                                                    {analytics.costs.totalDeposits > 0 && <div className="flex justify-between text-sm text-gray-700"><span>Deposit (押金)</span><span className="font-mono">RM {Number(analytics.costs.totalDeposits || 0).toFixed(2)}</span></div>}
+                                            <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 text-[#1A1A1A]">1. Revenue Breakdown</h2>
+                                            <div className="space-y-3 text-sm">
+                                                <div className="flex justify-between items-center font-bold"><span>In-Store Sales</span><span className="font-mono">{formatMoney(analytics.revenueDetails.totalRevenue - analytics.revenueDetails.delivery)}</span></div>
+                                                <div className="pl-4 space-y-1.5 text-xs text-gray-600">
+                                                    <div className="flex justify-between"><span>- Cash</span><span className="font-mono">{formatMoney(analytics.revenueDetails.cash)}</span></div>
+                                                    <div className="flex justify-between"><span>- TNG eWallet</span><span className="font-mono">{formatMoney(analytics.revenueDetails.tng)}</span></div>
+                                                    <div className="flex justify-between"><span>- Debit Card</span><span className="font-mono">{formatMoney(analytics.revenueDetails.debitCard)}</span></div>
+                                                    <div className="flex justify-between"><span>- Credit Card</span><span className="font-mono">{formatMoney(analytics.revenueDetails.creditCard)}</span></div>
+                                                    <div className="flex justify-between"><span>- Amex</span><span className="font-mono">{formatMoney(analytics.revenueDetails.amex)}</span></div>
                                                 </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="bg-gray-100 p-4 rounded mb-8">
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-lg font-black uppercase">Net Profit (经营净利)</span>
-                                            <span className="text-2xl font-mono font-black">RM {Number(analytics.netProfit || 0).toFixed(2)}</span>
-                                        </div>
-                                        {analytics.costs.totalCapex > 0 && (
-                                            <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-200 text-gray-600">
-                                                <span className="text-xs font-bold uppercase">Net Cash Flow (真实净现金)</span>
-                                                <span className="text-sm font-mono font-black">RM {Number(analytics.netCashFlow || 0).toFixed(2)}</span>
+                                                <div className="flex justify-between items-center font-bold pt-3 border-t border-dashed border-gray-200"><span>Delivery Sales</span><span className="font-mono">{formatMoney(analytics.revenueDetails.delivery)}</span></div>
+                                                <div className="pl-4 space-y-1.5 text-xs text-gray-600">
+                                                    <div className="flex justify-between"><span>- GrabFood</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.grab)}</span></div>
+                                                    <div className="flex justify-between"><span>- FoodPanda</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.panda)}</span></div>
+                                                    <div className="flex justify-between"><span>- ShopeeFood</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.shopee)}</span></div>
+                                                    <div className="flex justify-between"><span>- Lalamove</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.lalamove)}</span></div>
+                                                </div>
                                             </div>
-                                        )}
+                                        </div>
+                                        <div>
+                                            <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 text-[#1A1A1A]">2. Cost Structure</h2>
+                                            <div className="space-y-4 text-sm">
+                                                <div><div className="flex justify-between items-center font-bold"><span>COGS</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalCOGS)}</span></div><div className="text-[10px] text-gray-500 text-right mt-0.5">占营收 {analytics.margins.cogs.toFixed(1)}%</div></div>
+                                                <div><div className="flex justify-between items-center font-bold"><span>Labor</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalLabor)}</span></div><div className="text-[10px] text-gray-500 text-right mt-0.5">占营收 {analytics.margins.labor.toFixed(1)}%</div></div>
+                                                <div><div className="flex justify-between items-center font-bold"><span>OPEX</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalOPEX)}</span></div><div className="text-[10px] text-gray-500 text-right mt-0.5">占营收 {analytics.margins.opex.toFixed(1)}%</div></div>
+                                            </div>
+                                        </div>
                                     </div>
-
-                                    <p className="text-xs font-black uppercase mb-4">Audit Trail Preview</p>
-                                    <table className="w-full text-left text-[10px]">
-                                        <thead className="bg-black text-white">
-                                            <tr>
-                                                <th className="p-2">Date</th>
-                                                <th className="p-2">Category</th>
-                                                <th className="p-2">Desc</th>
-                                                <th className="p-2 text-right">Amount</th>
-                                                <th className="p-2 text-right">Balance</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {auditTrail.slice(0, 30).map((row, i) => (
-                                                <tr key={i} className="border-b border-gray-200">
-                                                    <td className="p-2 font-mono">{row?.date}</td>
-                                                    <td className="p-2 font-bold">{CATEGORY_LABELS[row?.category] || row?.category}</td>
-                                                    <td className="p-2 truncate max-w-[200px]">{row?.description}</td>
-                                                    <td className={`p-2 text-right font-mono ${row?.type === 'IN' ? 'text-green-600' : row?.type === 'OUT' ? 'text-red-600' : 'text-blue-600'}`}>{row?.type==='IN'?'+':row?.type==='OUT'?'-':'⇄'}{Number(row?.amount || 0).toFixed(2)}</td>
-                                                    <td className="p-2 text-right font-mono text-gray-500">{Number(row?.balance || 0).toFixed(2)}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                    <div className="mt-20 pt-8 border-t border-black flex justify-between px-10">
+                                        <div className="text-center"><div className="w-48 h-px bg-black mb-2"></div><p className="text-xs font-bold uppercase">Prepared By</p><p className="text-[10px] text-gray-500">Finance Dept</p></div>
+                                        <div className="text-center"><div className="w-48 h-px bg-black mb-2"></div><p className="text-xs font-bold uppercase">Approved By</p><p className="text-[10px] text-gray-500">Director / Owner</p></div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1404,65 +1497,52 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 </div>
 
                 {detailView && (
-                    <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-                        <div className="bg-white rounded-[2rem] w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-                            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                                <div>
-                                    <h3 className="font-black text-xl text-[#1A1A1A] flex items-center gap-2">
-                                        <Receipt size={24} className="text-gray-400"/>
-                                        {detailView?.title}
-                                    </h3>
-                                    <p className="text-xs text-gray-500 font-bold mt-1 uppercase tracking-widest">{detailView?.items?.length} Transactions found</p>
-                                </div>
-                                <button onClick={() => setDetailView(null)} className="p-2 hover:bg-gray-100 rounded-full active:scale-95 transition-transform"><X size={24}/></button>
+                    <div className="fixed inset-0 bg-black/80 z-[200] flex items-end md:items-center justify-center backdrop-blur-sm animate-in fade-in">
+                        <div className="bg-white w-full h-full md:h-auto md:rounded-[2rem] md:w-[95vw] md:max-w-4xl shadow-2xl flex flex-col md:max-h-[90vh] overflow-hidden">
+                            <div className="p-4 pt-[max(env(safe-area-inset-top),1rem)] md:p-6 border-b border-gray-100 flex justify-between items-start bg-gray-50/50 shrink-0">
+                                <div className="min-w-0 flex-1"><h3 className="font-black text-lg md:text-xl text-[#1A1A1A] flex items-center gap-2"><Receipt size={20} className="text-gray-400 shrink-0 md:w-6 md:h-6"/><span className="truncate">{detailView?.title}</span></h3><p className="text-xs text-gray-500 font-bold mt-1 uppercase tracking-widest">{detailView?.items?.length} Transactions found</p></div>
+                                <button onClick={() => setDetailView(null)} className="w-11 h-11 flex items-center justify-center hover:bg-gray-200 bg-gray-100 rounded-full active:scale-95 transition-all shrink-0 ml-3"><X size={22}/></button>
                             </div>
-                            
-                            <div className="flex-grow overflow-y-auto p-0 touch-pan-y">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-gray-100 text-gray-500 font-bold text-xs uppercase sticky top-0 z-10 border-b border-gray-200">
-                                        <tr>
-                                            <th className="p-4">Date</th>
-                                            <th className="p-4">Description / Payee</th>
-                                            <th className="p-4">Source</th>
-                                            <th className="p-4 text-right">Amount</th>
-                                        </tr>
-                                    </thead>
+                            <div className="flex-grow overflow-y-auto touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }}>
+                                <table className="w-full text-left text-sm hidden md:table">
+                                    <thead className="bg-gray-100 text-gray-500 font-bold text-xs uppercase sticky top-0 z-10 border-b border-gray-200"><tr><th className="p-4">Date</th><th className="p-4">Description / Payee</th><th className="p-4">Source</th><th className="p-4 text-right">Amount</th><th className="p-4 w-12">Doc</th></tr></thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {detailView?.items?.length === 0 ? (
-                                            <tr><td colSpan={4} className="p-10 text-center text-gray-400 italic">无相关记录</td></tr>
-                                        ) : (
-                                            detailView?.items?.map((item, idx) => (
+                                        {detailView?.items?.length === 0 ? (<tr><td colSpan={5} className="p-10 text-center text-gray-400 italic">无相关记录</td></tr>) : (
+                                            detailView?.items?.map((item) => (
                                                 <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
                                                     <td className="p-4 font-mono text-gray-600 whitespace-nowrap">{item.date}</td>
-                                                    <td className="p-4">
-                                                        <div className="font-bold text-[#1A1A1A]">{item.desc}</div>
-                                                        <div className="text-[10px] text-gray-400 font-mono mt-0.5">{item.id}</div>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${
-                                                            item.source === 'Settlement' ? 'bg-orange-50 text-orange-700' :
-                                                            item.source === 'Payroll' ? 'bg-purple-50 text-purple-700' :
-                                                            item.source === 'Bill Payment' ? 'bg-blue-50 text-blue-700' :
-                                                            'bg-gray-100 text-gray-700'
-                                                        }`}>
-                                                            {item.source}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4 text-right font-mono font-black text-[#1A1A1A]">
-                                                        RM {Number(item.amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
-                                                    </td>
+                                                    <td className="p-4"><div className="font-bold text-[#1A1A1A]">{item.desc}</div><div className="text-[10px] text-gray-400 font-mono mt-0.5">{item.id}</div></td>
+                                                    <td className="p-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${item.source === 'Settlement' ? 'bg-orange-50 text-orange-700' : item.source.startsWith('Payroll') ? 'bg-purple-50 text-purple-700' : item.source === 'Bill Payment' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{item.source}</span></td>
+                                                    <td className="p-4 text-right font-mono font-black text-[#1A1A1A]">RM {Number(item.amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                    <td className="p-4">{item.documentLink ? (<a href={item.documentLink} target="_blank" rel="noopener noreferrer" className="w-8 h-8 flex items-center justify-center bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors" title="查看原档"><ExternalLink size={14} className="text-blue-600"/></a>) : null}</td>
                                                 </tr>
                                             ))
                                         )}
                                     </tbody>
                                 </table>
+                                <div className="md:hidden">
+                                    {detailView?.items?.length === 0 ? (<div className="p-10 text-center text-gray-400 italic text-sm">无相关记录</div>) : (
+                                        <div className="divide-y divide-gray-100">
+                                            {detailView?.items?.map((item) => (
+                                                <div key={item.id} className="p-4 hover:bg-gray-50/50 transition-colors">
+                                                    <div className="flex items-center justify-between mb-1.5">
+                                                        <div className="flex items-center gap-2"><span className="text-[11px] font-mono font-bold text-gray-500">{item.date}</span><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${item.source === 'Settlement' ? 'bg-orange-50 text-orange-700' : item.source.startsWith('Payroll') ? 'bg-purple-50 text-purple-700' : item.source === 'Bill Payment' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{item.source}</span></div>
+                                                        <span className="font-mono font-black text-[#1A1A1A] text-sm">RM {Number(item.amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                                    </div>
+                                                    <p className="text-sm font-bold text-[#1A1A1A] leading-snug">{item.desc}</p>
+                                                    <div className="flex items-center justify-between mt-1.5">
+                                                        <span className="text-[10px] text-gray-400 font-mono truncate max-w-[70%]">{item.id}</span>
+                                                        {item.documentLink ? (<a href={item.documentLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg active:scale-95 transition-transform" onClick={(e) => e.stopPropagation()}><ExternalLink size={11}/> 查看原档</a>) : null}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            
-                            <div className="p-4 bg-gray-50 border-t border-gray-200 text-right">
-                                <span className="text-xs font-bold text-gray-500 uppercase mr-4">Total Selected</span>
-                                <span className="text-xl font-black font-mono text-[#1A1A1A]">
-                                    RM {Number(detailView?.items?.reduce((sum, i) => sum + (i.amount || 0), 0) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
-                                </span>
+                            <div className="p-4 pb-[max(env(safe-area-inset-bottom),1rem)] bg-gray-50 border-t border-gray-200 flex items-center justify-between shrink-0">
+                                <span className="text-xs font-bold text-gray-500 uppercase">Total Selected</span>
+                                <span className="text-xl font-black font-mono text-[#1A1A1A]">RM {Number(detailView?.items?.reduce((sum, i) => sum + (i.amount || 0), 0) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
                             </div>
                         </div>
                     </div>

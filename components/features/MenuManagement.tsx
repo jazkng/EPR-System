@@ -465,7 +465,7 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
 
     return (
         <div className={containerClass}>
-            <div className="bg-[#1A1A1A] p-3 md:p-4 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700] z-30 relative shadow-md">
+            <div className="bg-[#1A1A1A] px-3 pb-3 pt-[max(env(safe-area-inset-top),0.75rem)] md:px-4 md:pb-4 md:pt-[max(env(safe-area-inset-top),1rem)] flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700] z-30 relative shadow-md">
                 <div className="flex items-center gap-3 md:gap-4">
                     <div className="bg-[#FFD700] text-black p-2 rounded-xl shadow-lg"><Utensils size={20} className="md:w-6 md:h-6"/></div>
                     <div>

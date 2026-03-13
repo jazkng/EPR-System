@@ -138,7 +138,7 @@ export const PriceMonitorModule: React.FC<PriceMonitorModuleProps> = ({ onClose 
             <div className="bg-[#F5F7FA] w-full h-full md:max-w-4xl md:h-[90vh] md:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
                 
                 {/* Header */}
-                <div className="bg-[#1A1A1A] p-5 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
+                <div className="bg-[#1A1A1A] px-5 pb-5 pt-[max(env(safe-area-inset-top),1.25rem)] flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
                     <div className="flex items-center gap-4">
                         <div className="bg-[#FFD700] text-black p-3 rounded-2xl shadow-lg"><TrendingUp size={24}/></div>
                         <div>
