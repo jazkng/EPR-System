@@ -12,18 +12,20 @@ import html2canvas from 'html2canvas';
 interface DetailedPayrollEntry {
     // Earnings
     basic: number;
-    allowance: number; // Fixed Allowances
-    ot: number;        // Overtime / Commission / Variable
+    allowance: number;     
+    extraSubsidy: number;  
+    ot: number;            
     bonus: number;
-    
-    // Public Holiday Pay (3x)
-    holidayDays: number;     // Number of PH days worked
-    holidayPay: number;      // Auto-calculated: dailyRate * 2 * holidayDays (extra 2x on top of basic)
+    otherEarning: number;  
+    otherEarningNote: string;
     
     // Deductions (Company)
     latePenalty: number;
     unpaidLeave: number;
+    hostelFee: number;     
     advanceLoan: number;
+    otherDeduction: number; 
+    otherDeductionNote: string;
     
     // Statutory (Auto-calced but overrideable)
     ee_epf: number;
@@ -42,8 +44,11 @@ interface DetailedPayrollEntry {
     hasEPF: boolean;
     hasSOCSO: boolean;
     paymentMethod: 'BANK' | 'CASH' | 'CHEQUE';
-    proRateMode?: '26_DAYS' | 'CALENDAR_DAYS' | 'WORKABLE_DAYS'; // Persistent State
-    workDays?: number; // Store the manually entered days
+    proRateMode?: '26_DAYS' | 'CALENDAR_DAYS' | 'WORKABLE_DAYS'; 
+    workDays?: number; 
+    isPaid?: boolean; 
+    paidAt?: string; // 🟢 记录真实的审计付款动作时间 (Audit Time)
+    paymentExpenseId?: string; // 🟢 绑定单人生成的支出账单ID，用于退回撤销
 }
 
 interface HRPayrollProps {
@@ -51,7 +56,6 @@ interface HRPayrollProps {
 }
 
 // --- MALAYSIA STATUTORY CALCULATION HELPERS ---
-
 const calculateEPF = (gross: number, isEmployer: boolean) => {
     if (gross <= 0) return 0;
     if (!isEmployer) {
@@ -63,12 +67,6 @@ const calculateEPF = (gross: number, isEmployer: boolean) => {
 };
 
 const SOCSO_EMPLOYER_LOOKUP: Record<number, number> = {
-    // Low wage brackets (per PERKESO Jadual Caruman)
-    100: 0.40, 200: 0.70, 300: 1.20, 400: 1.75, 500: 2.30, 600: 2.80, 700: 3.35, 800: 3.90, 900: 4.40,
-    1000: 4.95, 1100: 5.45, 1200: 5.95, 1300: 6.50, 1400: 7.00, 1500: 7.50, 1600: 8.05, 1700: 8.55, 
-    1800: 9.05, 1900: 9.60, 2000: 10.10, 2100: 14.65, 2200: 16.35, 2300: 18.15, 2400: 19.85, 2500: 21.65,
-    2600: 23.35, 2700: 25.15, 2800: 26.85, 2900: 28.65,
-    // Standard brackets
     3000: 51.65, 3100: 53.35, 3200: 55.15, 3300: 56.85, 3400: 58.65,
     3500: 60.35, 3600: 62.15, 3700: 63.85, 3800: 65.65, 3900: 67.35,
     4000: 69.05, 4100: 70.85, 4200: 72.55, 4300: 74.35, 4400: 76.05,
@@ -78,48 +76,24 @@ const SOCSO_EMPLOYER_LOOKUP: Record<number, number> = {
     6000: 104.15
 };
 
-const SOCSO_EMPLOYEE_LOOKUP: Record<number, number> = {
-    100: 0.10, 200: 0.20, 300: 0.30, 400: 0.50, 500: 0.60, 600: 0.70, 700: 0.85, 800: 1.00, 900: 1.10,
-    1000: 1.25, 1100: 1.35, 1200: 1.50, 1300: 1.65, 1400: 1.75, 1500: 1.90, 1600: 2.05, 1700: 2.15,
-    1800: 2.30, 1900: 2.45, 2000: 2.55, 2100: 3.65, 2200: 4.10, 2300: 4.55, 2400: 4.95, 2500: 5.40,
-    2600: 5.85, 2700: 6.30, 2800: 6.70, 2900: 7.15,
-    3000: 7.60, 3100: 7.85, 3200: 8.10, 3300: 8.35, 3400: 8.60, 3500: 8.85, 3600: 9.10, 3700: 9.35,
-    3800: 9.65, 3900: 9.90, 4000: 10.15, 4100: 10.40, 4200: 10.65, 4300: 10.90, 4400: 11.15,
-    4500: 11.40, 4600: 11.65, 4700: 11.90, 4800: 12.15, 4900: 12.45, 5000: 12.70,
-    5100: 12.95, 5200: 13.20, 5300: 13.45, 5400: 13.70, 5500: 13.95, 5600: 14.20,
-    5700: 14.45, 5800: 14.70, 5900: 14.95, 6000: 15.20
-};
-
 const calculateSOCSO = (wage: number, isEmployer: boolean) => {
     if (wage <= 0) return 0;
     const cappedWage = Math.min(wage, 6000);
     if (cappedWage < 30) return isEmployer ? 0.40 : 0.10;
     const bracket = Math.ceil(cappedWage / 100) * 100;
     
-    const lookup = isEmployer ? SOCSO_EMPLOYER_LOOKUP : SOCSO_EMPLOYEE_LOOKUP;
-    if (lookup[bracket]) return lookup[bracket];
-    
-    // Fallback formula (should not normally be needed)
     if (!isEmployer) {
         let amount = (bracket * 0.005);
         if (bracket > 200) amount = amount - 0.25;
         return parseFloat(amount.toFixed(2));
     } else {
+        if (bracket >= 3000 && SOCSO_EMPLOYER_LOOKUP[bracket]) {
+            return SOCSO_EMPLOYER_LOOKUP[bracket];
+        }
         let amount = (bracket * 0.0175);
         if (bracket > 200) amount = amount - 0.85; 
         return parseFloat(amount.toFixed(2));
     }
-};
-
-const EIS_LOOKUP: Record<number, number> = {
-    100: 0.05, 200: 0.10, 300: 0.15, 400: 0.20, 500: 0.25, 600: 0.30, 700: 0.35, 800: 0.40, 900: 0.45,
-    1000: 0.50, 1100: 0.55, 1200: 0.60, 1300: 0.65, 1400: 0.70, 1500: 0.75, 1600: 0.80, 1700: 0.85,
-    1800: 0.90, 1900: 0.95, 2000: 1.00, 2100: 2.10, 2200: 2.20, 2300: 2.30, 2400: 2.40, 2500: 2.50,
-    2600: 2.60, 2700: 2.70, 2800: 2.80, 2900: 2.90, 3000: 3.00, 3100: 3.10, 3200: 3.20, 3300: 3.30,
-    3400: 3.40, 3500: 3.50, 3600: 3.60, 3700: 3.70, 3800: 3.80, 3900: 3.90, 4000: 4.00,
-    4100: 4.10, 4200: 4.20, 4300: 4.30, 4400: 4.40, 4500: 4.50, 4600: 4.60, 4700: 4.70,
-    4800: 4.80, 4900: 4.90, 5000: 5.00, 5100: 5.10, 5200: 5.20, 5300: 5.30, 5400: 5.40,
-    5500: 5.50, 5600: 5.60, 5700: 5.70, 5800: 5.80, 5900: 5.90, 6000: 6.00
 };
 
 const calculateEIS = (wage: number, isEmployer: boolean) => {
@@ -127,11 +101,6 @@ const calculateEIS = (wage: number, isEmployer: boolean) => {
     const cappedWage = Math.min(wage, 6000);
     if (cappedWage <= 30) return 0.05;
     const bracket = Math.ceil(cappedWage / 100) * 100;
-    
-    // EIS rate is same for employee and employer (0.2% each)
-    if (EIS_LOOKUP[bracket]) return EIS_LOOKUP[bracket];
-    
-    // Fallback
     let amount = (bracket * 0.002);
     if (bracket > 200) amount = amount - 0.10; 
     return parseFloat(amount.toFixed(2));
@@ -141,17 +110,11 @@ const calculateEIS = (wage: number, isEmployer: boolean) => {
 const getHistoricalSalary = (emp: Employee, monthStr: string) => {
     if (!emp.salaryHistory || emp.salaryHistory.length === 0) return emp.basicSalary || 0;
 
-    // Changes are effective if date <= end of target month
     const targetDate = `${monthStr}-31`; 
-
-    // Sort history: Newest first
     const sortedHistory = [...emp.salaryHistory].sort((a, b) => b.date.localeCompare(a.date));
-
-    // Identify changes that happened AFTER the target month (Future Changes)
     const futureChanges = sortedHistory.filter(rec => rec.date > targetDate);
 
     if (futureChanges.length > 0) {
-        // Reverse future adjustments to find past salary
         const totalFutureAdjustment = futureChanges.reduce((sum, rec) => sum + (rec.adjustment || 0), 0);
         return (emp.basicSalary || 0) - totalFutureAdjustment;
     }
@@ -160,7 +123,7 @@ const getHistoricalSalary = (emp: Employee, monthStr: string) => {
 };
 
 export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
-    const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+    const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); 
     const [payrollData, setPayrollData] = useState<Record<string, DetailedPayrollEntry>>({});
     const [dailyRoster, setDailyRoster] = useState<Record<string, Record<string, RosterStatus>>>({});
     const [isPosted, setIsPosted] = useState(false);
@@ -168,20 +131,15 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
     
-    // Store raw advances for history lookup
     const [monthAdvances, setMonthAdvances] = useState<ExpenseItem[]>([]);
-    
-    // Filter & Selection State
     const [showResigned, setShowResigned] = useState(false);
     const [selectedEmpIds, setSelectedEmpIds] = useState<Set<string>>(new Set());
 
-    // Modal State
     const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
     const [isAdvanceModalOpen, setIsAdvanceModalOpen] = useState(false);
     const [advForm, setAdvForm] = useState({ empId: '', amount: '', date: new Date().toISOString().split('T')[0], note: '', method: 'BANK_TRANSFER' });
     const [showAdvanceHistory, setShowAdvanceHistory] = useState(false);
 
-    // Pro-rate Tool State
     const [proRateSettings, setProRateSettings] = useState({
         days: 0,
         mode: '26_DAYS' as '26_DAYS' | 'CALENDAR_DAYS' | 'WORKABLE_DAYS', 
@@ -190,31 +148,32 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
     });
 
     const [showPayConfirm, setShowPayConfirm] = useState(false);
-    const [phDays, setPhDays] = useState<number | ''>('');
+    const [paymentDate, setPaymentDate] = useState(''); 
 
-    // PDF Ref
     const printSlipRef = useRef<HTMLDivElement>(null);
     const printSummaryRef = useRef<HTMLDivElement>(null);
 
-    // Derived States
+    useEffect(() => {
+        const [year, month] = selectedMonth.split('-').map(Number);
+        const lastDay = new Date(year, month, 0); 
+        const yyyy = lastDay.getFullYear();
+        const mm = String(lastDay.getMonth() + 1).padStart(2, '0');
+        const dd = String(lastDay.getDate()).padStart(2, '0');
+        setPaymentDate(`${yyyy}-${mm}-${dd}`);
+    }, [selectedMonth]);
+
     const displayEmployees = useMemo(() => {
-    return employees.filter(e => {
-        if (e.role.includes('Owner')) return false;
+        return employees.filter(e => {
+            if (e.role.includes('Owner')) return false;
+            if (e.joinDate && e.joinDate.substring(0, 7) > selectedMonth) return false;
 
-        // 1. 过滤未来入职的新人（比如选了2月，但3月才入职，绝对隐藏）
-        const joinMonth = e.joinDate ? e.joinDate.slice(0, 7) : '0000-00';
-        if (joinMonth > selectedMonth) return false;
-
-        // 2. 过滤历史离职人员（比如2月已离职，当前在看3月薪资）
-        if (e.isArchived && e.terminationDate) {
-            const termMonth = e.terminationDate.slice(0, 7);
-            // 只有当离职月份严格小于当前选中月份，且没开"显示离职"时，才隐藏
-            // (注: 当月离职的人会默认显示，方便 HR 做离职结清)
-            if (termMonth < selectedMonth && !showResigned) return false;
-        }
-
-        return true;
-    });
+            const isTerminated = e.isArchived || e.status === 'TERMINATED';
+            if (isTerminated) {
+                if (e.terminationDate && e.terminationDate.substring(0, 7) === selectedMonth) return true;
+                if (!showResigned) return false;
+            }
+            return true;
+        });
     }, [employees, showResigned, selectedMonth]);
 
     const localEmployees = useMemo(() => {
@@ -228,7 +187,6 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
     const editingEntry = editingEmpId ? payrollData[editingEmpId] : null;
     const editingEmp = editingEmpId ? employees.find(e => e.id === editingEmpId) : null;
     
-    // Get advances for current editing employee
     const currentEmpAdvances = useMemo(() => {
         if (!editingEmp) return [];
         return monthAdvances
@@ -238,46 +196,66 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
 
     // --- LOGIC FUNCTIONS ---
 
-    // 1. Create Default Entry (Moved inside component to access selectedMonth)
-    const createDefaultEntry = (emp: Employee, advances: ExpenseItem[]): DetailedPayrollEntry => {
-        // Strict Name Matching for Advance (from standalone_expenses)
+    const createDefaultEntry = (emp: Employee, advances: ExpenseItem[], rosterMap: Record<string, Record<string, RosterStatus>>): DetailedPayrollEntry => {
         const totalAdv = advances
-            .filter(a => a.company === emp.name) // EXACT MATCH
+            .filter(a => a.company === emp.name)
             .reduce((sum, a) => sum + (a.amount || 0), 0);
 
-        // LOAN SYNC: Also include outstanding loan balance from employee profile
-        const loanBalance = (emp.loanRecords || []).reduce((sum, r) => sum + (r.type === 'BORROW' ? r.amount : -r.amount), 0);
-
         const isLocal = emp.nationality.includes('Malaysian') || emp.nationality.includes('🇲🇾');
-        let historicalBasic = getHistoricalSalary(emp, selectedMonth);
+        const historicalBasic = getHistoricalSalary(emp, selectedMonth);
 
-        // 【核心修复1】防御拦截：如果员工在选中月份之前已经离职，其后续月份底薪强制为 0
-        if (emp.isArchived && emp.terminationDate) {
-            const termMonth = emp.terminationDate.slice(0, 7);
-            if (termMonth < selectedMonth) {
-                historicalBasic = 0;
-    }
-}
+        let calculatedBasic = historicalBasic;
+        let initialWorkDays = 0;
+        let autoNote = '';
 
-return {
-    basic: Number(historicalBasic) || 0,
+        const isJoinMonth = emp.joinDate?.startsWith(selectedMonth);
+        const isTermMonth = emp.terminationDate?.startsWith(selectedMonth);
+
+        if (isJoinMonth || isTermMonth) {
+            const [yearStr, monthStr] = selectedMonth.split('-');
+            const totalDaysInMonth = new Date(parseInt(yearStr), parseInt(monthStr), 0).getDate();
+            
+            let startDate = isJoinMonth ? new Date(emp.joinDate) : new Date(`${selectedMonth}-01`);
+            let endDate = isTermMonth ? new Date(emp.terminationDate!) : new Date(`${selectedMonth}-${totalDaysInMonth}`);
+            
+            let workedDays = 0;
+            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                const dateIso = d.toISOString().split('T')[0];
+                const status = rosterMap[dateIso]?.[emp.id] || 'WORK';
+                if (status === 'WORK') workedDays++;
+            }
+            
+            calculatedBasic = parseFloat(((historicalBasic / 26) * workedDays).toFixed(2));
+            initialWorkDays = workedDays;
+            autoNote = isTermMonth ? `[Auto-Calc] 离职结算至 ${emp.terminationDate} (${workedDays}天)` : `[Auto-Calc] 入职算起 (${workedDays}天)`;
+        }
+
+        return {
+            basic: Number(calculatedBasic) || 0,
             allowance: 0,
+            extraSubsidy: 0, 
             ot: 0,
             bonus: 0,
-            holidayDays: 0,
-            holidayPay: 0,
+            otherEarning: 0,
+            otherEarningNote: '',
             latePenalty: 0,
             unpaidLeave: 0,
-            advanceLoan: totalAdv + Math.max(0, loanBalance), // Combine advances + outstanding loans
+            hostelFee: 0,    
+            advanceLoan: totalAdv,
+            otherDeduction: 0,
+            otherDeductionNote: '',
             ee_epf: 0, ee_socso: 0, ee_eis: 0, ee_pcb: 0,
             er_epf: 0, er_socso: 0, er_eis: 0,
-            note: loanBalance > 0 ? `[Auto] Outstanding loan: RM${loanBalance.toFixed(2)}` : '',
+            note: autoNote,
             autoCalc: true,
             hasEPF: isLocal || emp.hasEPF === true,
             hasSOCSO: isLocal,
             paymentMethod: 'BANK',
             proRateMode: '26_DAYS',
-            workDays: 0
+            workDays: initialWorkDays,
+            isPaid: false,
+            paidAt: '',
+            paymentExpenseId: ''
         };
     };
 
@@ -291,13 +269,13 @@ return {
                 DataManager.getRosterData()
             ]);
 
+            const currentRoster = rosterData.roster || {};
             const existingRecord = allRecords.find(r => r.id === selectedMonth);
-            setDailyRoster(rosterData.roster || {});
+            setDailyRoster(currentRoster);
 
             const startOfMonth = `${selectedMonth}-01`;
-            const endOfMonth = `${selectedMonth}-31`; // Loose end date covers all
+            const endOfMonth = `${selectedMonth}-31`; 
             
-            // Get all expenses to filter for advances
             const snap = await getDocs(collection(db, 'standalone_expenses'));
             const allExpenses = snap.docs.map(d => d.data() as ExpenseItem);
             
@@ -307,21 +285,17 @@ return {
                 e.time <= endOfMonth
             );
             
-            // Store raw advances for history view
             setMonthAdvances(advances);
 
-            // 严格对齐时间轴，不为非当月活跃员工生成无效草稿数据
             const targetEmployees = employees.filter(e => {
                 if (e.role.includes('Owner')) return false;
-    
-                const joinMonth = e.joinDate ? e.joinDate.slice(0, 7) : '0000-00';
-                if (joinMonth > selectedMonth) return false;
-
-                if (e.isArchived && e.terminationDate) {
-                const termMonth = e.terminationDate.slice(0, 7);
-                if (termMonth < selectedMonth && !showResigned) return false;
+                if (e.joinDate && e.joinDate.substring(0, 7) > selectedMonth) return false;
+                
+                const isTerminated = e.isArchived || e.status === 'TERMINATED';
+                if (isTerminated && !showResigned) {
+                    if (e.terminationDate && e.terminationDate.substring(0, 7) === selectedMonth) return true;
+                    return false;
                 }
-    
                 return true;
             });
 
@@ -332,27 +306,25 @@ return {
                 targetEmployees.forEach(emp => {
                     const savedDetail = existingRecord.details.find(d => d.employeeId === emp.id);
                     
-                    // AUTO-SYNC FIX: Calculate real-time advance regardless of saved value
                     const realTimeAdvance = advances
                         .filter(a => a.company === emp.name)
                         .reduce((sum, a) => sum + (a.amount || 0), 0);
-                    
-                    // LOAN SYNC: Include outstanding loan from employee profile
-                    const empLoanBalance = (emp.loanRecords || []).reduce((sum: number, r: any) => sum + (r.type === 'BORROW' ? r.amount : -r.amount), 0);
-                    const totalAdvanceWithLoan = realTimeAdvance + Math.max(0, empLoanBalance);
 
                     if (savedDetail) {
                         initialData[emp.id] = {
                             basic: Number(savedDetail.basicSalary) || 0,
                             allowance: Number(savedDetail.allowance) || 0,
-                            ot: 0, 
-                            bonus: 0,
-                            holidayDays: Number(savedDetail.holidayDays) || 0,
-                            holidayPay: Number(savedDetail.holidayPay) || 0,
+                            extraSubsidy: Number(savedDetail.extraSubsidy) || 0,
+                            ot: Number((savedDetail as any).ot) || 0, 
+                            bonus: Number((savedDetail as any).bonus) || 0,
+                            otherEarning: Number((savedDetail as any).otherEarning) || 0,
+                            otherEarningNote: (savedDetail as any).otherEarningNote || '',
                             latePenalty: Number(savedDetail.penalty) || 0,
-                            unpaidLeave: 0,
-                            // FORCE OVERRIDE ADVANCE+LOAN IF IN DRAFT MODE
-                            advanceLoan: existingRecord.status === 'DRAFT' ? totalAdvanceWithLoan : (Number(savedDetail.advanceLoan) || 0),
+                            unpaidLeave: Number((savedDetail as any).unpaidLeave) || 0,
+                            hostelFee: Number(savedDetail.hostelFee) || 0,       
+                            advanceLoan: existingRecord.status === 'DRAFT' ? realTimeAdvance : (Number(savedDetail.advanceLoan) || 0),
+                            otherDeduction: Number((savedDetail as any).otherDeduction) || 0,
+                            otherDeductionNote: (savedDetail as any).otherDeductionNote || '',
                             ee_epf: Number(savedDetail.ee_epf) || 0,
                             ee_socso: Number(savedDetail.ee_socso) || 0,
                             ee_eis: Number(savedDetail.ee_eis) || 0,
@@ -366,18 +338,20 @@ return {
                             hasSOCSO: emp.nationality.includes('Malaysian'),
                             paymentMethod: savedDetail.paymentMethod || 'BANK',
                             proRateMode: savedDetail.proRateMode || '26_DAYS', 
-                            workDays: savedDetail.workDays || 0 
+                            workDays: savedDetail.workDays || 0,
+                            isPaid: !!(savedDetail as any).isPaid,
+                            paidAt: (savedDetail as any).paidAt || '',
+                            paymentExpenseId: (savedDetail as any).paymentExpenseId || ''
                         };
                     } else {
-                        // If new employee added after payroll saved, calculate default for them
-                        initialData[emp.id] = createDefaultEntry(emp, advances);
+                        initialData[emp.id] = createDefaultEntry(emp, advances, currentRoster);
                     }
                 });
             } else {
                 setIsPosted(false);
                 setIsStatutoryPaid(false);
                 targetEmployees.forEach(emp => {
-                    initialData[emp.id] = createDefaultEntry(emp, advances);
+                    initialData[emp.id] = createDefaultEntry(emp, advances, currentRoster);
                 });
             }
 
@@ -389,22 +363,19 @@ return {
         }
     };
 
-    // Load Data Effect
     useEffect(() => {
         loadPayrollForMonth();
     }, [selectedMonth, employees, showResigned]); 
 
-    // Sync ProRate Settings
     useEffect(() => {
         if (editingEmpId && payrollData[editingEmpId]) {
             const entry = payrollData[editingEmpId];
             if (entry.proRateMode) {
-                setProRateSettings(prev => ({ ...prev, mode: entry.proRateMode }));
+                setProRateSettings(prev => ({ ...prev, mode: entry.proRateMode! }));
             }
         }
     }, [editingEmpId, payrollData]);
 
-    // Recalc Days on Edit Open
     useEffect(() => {
         if (editingEmpId && editingEmp) {
             const [year, month] = selectedMonth.split('-').map(Number);
@@ -465,10 +436,11 @@ return {
             id: `adv_${Date.now()}`,
             category: 'STAFF_ADVANCE', 
             expenseType: 'SALARY',
-            company: emp.name, // Using Name for easy matching
+            company: emp.name, 
             amount: parseFloat(advForm.amount),
             note: `预支薪水 - ${advForm.note}`,
-            time: advForm.date,
+            time: advForm.date, // User selected Date
+            createdAt: new Date().toISOString(), // Audit Trail
             paymentMethod: advForm.method as any, 
             paymentStatus: 'PAID'
         };
@@ -477,7 +449,7 @@ return {
         setIsAdvanceModalOpen(false);
         setAdvForm({ empId: '', amount: '', date: new Date().toISOString().split('T')[0], note: '', method: 'BANK_TRANSFER' });
         alert("✅ 预支已记录 (Advance Recorded)");
-        loadPayrollForMonth(); // Reload to update advance amount
+        loadPayrollForMonth(); 
     };
 
     const updateEntry = (id: string, updates: Partial<DetailedPayrollEntry>) => {
@@ -625,25 +597,208 @@ return {
         if (!editingEmpId || !entry || !emp) return;
         
         const t = getTotals(entry);
-        if (t.netPay <= 0) return alert("Net Pay is 0 or negative.");
+        if (t.netPay < 0) return alert("Net Pay is negative. Please clear debts/advances first.");
 
-        const expense: ExpenseItem = {
-            id: `salary_${editingEmpId}_${selectedMonth}_${Date.now()}`,
-            category: 'SALARY',
-            expenseType: 'SALARY',
-            company: emp.name,
-            amount: t.netPay,
-            paymentStatus: 'PAID',
-            paymentMethod: method,
-            time: new Date().toISOString(),
-            note: `[Salary Payment] ${selectedMonth} - ${emp.name}`,
-            paidBy: 'COMPANY'
-        };
+        setIsLoading(true);
+        try {
+            const transactionTime = `${paymentDate}T12:00:00.000Z`;
+            const actualAuditTime = new Date().toISOString(); 
+            const expenseId = `salary_${editingEmpId}_${selectedMonth}_${Date.now()}`;
+
+            const expense: ExpenseItem = {
+                id: expenseId,
+                category: 'SALARY',
+                expenseType: 'SALARY',
+                company: emp.name,
+                amount: parseFloat(t.netPay.toFixed(2)),
+                paymentStatus: 'PAID',
+                paymentMethod: method,
+                time: transactionTime, 
+                createdAt: actualAuditTime, 
+                note: `[Salary Payment] ${selectedMonth} - ${emp.name}`,
+                paidBy: 'COMPANY'
+            };
+            
+            await DataManager.saveStandaloneExpense(expense);
+            
+            const updatedNote = (entry.note || '') + `\n[PAID] RM${t.netPay.toFixed(2)} via ${method} on ${paymentDate}`;
+            
+            // Local Update
+            const updatedEntry = { ...entry, isPaid: true, paidAt: actualAuditTime, paymentExpenseId: expenseId, note: updatedNote };
+            setPayrollData(prev => ({ ...prev, [editingEmpId]: updatedEntry }));
+
+            // DB Update 
+            const currentRecords = await DataManager.getPayrollRecords();
+            let recordToUpdate = currentRecords.find(r => r.id === selectedMonth);
+            
+            if (!recordToUpdate) {
+                recordToUpdate = { id: selectedMonth, month: selectedMonth, totalAmount: 0, totalNetPay: 0, totalGovtPay: 0, staffCount: 0, status: 'DRAFT', details: [] as any };
+            }
+            
+            const currentDetails = Object.entries({...payrollData, [editingEmpId]: updatedEntry}).map(([id, e]: [string, any]) => {
+                const em = employees.find(x => x.id === id);
+                const tm = getTotals(e);
+                return {
+                    employeeId: id, employeeName: em?.name || 'Unknown',
+                    basicSalary: e.basic, allowance: e.allowance + e.ot + e.bonus,
+                    extraSubsidy: e.extraSubsidy, penalty: e.latePenalty + e.unpaidLeave,
+                    hostelFee: e.hostelFee, advanceLoan: e.advanceLoan,
+                    otherEarning: e.otherEarning, otherEarningNote: e.otherEarningNote,
+                    otherDeduction: e.otherDeduction, otherDeductionNote: e.otherDeductionNote,
+                    ot: e.ot, bonus: e.bonus, unpaidLeave: e.unpaidLeave,
+                    ee_epf: e.ee_epf, ee_socso: e.ee_socso, ee_eis: e.ee_eis, ee_pcb: e.ee_pcb,
+                    er_epf: e.er_epf, er_socso: e.er_socso, er_eis: e.er_eis,
+                    netPay: tm.netPay, totalCost: tm.totalCompanyCost, note: e.note,
+                    paymentMethod: e.paymentMethod || 'BANK', proRateMode: e.proRateMode || '26_DAYS', workDays: e.workDays || 0,
+                    isPaid: e.isPaid, paidAt: e.paidAt, paymentExpenseId: e.paymentExpenseId
+                };
+            });
+            
+            await DataManager.savePayrollRecord({ ...recordToUpdate, details: currentDetails as any });
+            
+            alert(`✅ 支付成功！\n已从资金管理 (${method === 'CASH' ? '现金' : '银行'}) 扣除 RM ${t.netPay.toFixed(2)}。\n记账日期：${paymentDate}`);
+            setShowPayConfirm(false);
+        } catch(err) {
+            console.error("Auto-save paid status failed", err);
+            alert("支付记录失败，请检查网络！");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // 🟢 核心新增：个人退回付款功能 (Revoke Payment)
+    // 🟢 核心新增：个人退回付款功能 (Revoke Payment)
+    const handleRevokeIndividualPayment = async () => {
+        if (!editingEmpId) return;
+        const entry = payrollData[editingEmpId];
+        if (!entry || !entry.isPaid) return;
+
+        if (isPosted) {
+            return alert("⚠️ 整个月份已批量结账！请在下方大盘点击【撤销结账 (Revert)】，之后再进行单人修改。");
+        }
+
+        if (!confirm("⚠️ 确定要撤销这笔付款吗？(Undo Payment)\n\n系统将自动从【资金管理】删除这笔支出，并恢复【未付款】状态。")) return;
         
-        await DataManager.saveStandaloneExpense(expense);
-        updateEntry(editingEmpId, { note: (entry.note || '') + `\n[PAID] RM${t.netPay.toFixed(2)} via ${method} on ${new Date().toLocaleDateString()}` });
-        alert(`✅ 支付成功！\n已从资金管理 (${method === 'CASH' ? '现金' : '银行'}) 扣除 RM ${t.netPay.toFixed(2)}`);
-        setShowPayConfirm(false);
+        setIsLoading(true);
+        try {
+            if (entry!.paymentExpenseId) {
+                await deleteDoc(doc(db, 'standalone_expenses', entry!.paymentExpenseId));
+            }
+            
+            const updatedNote = (entry!.note || '').replace(/\[PAID\] RM[\d.]+ via (CASH|BANK_TRANSFER) on [\d-]+/, '').trim();
+            const updatedEntry = { ...entry!, isPaid: false, paidAt: '', paymentExpenseId: '', note: updatedNote };
+            
+            setPayrollData(prev => ({ ...prev, [editingEmpId]: updatedEntry }));
+            
+            const currentRecords = await DataManager.getPayrollRecords();
+            let recordToUpdate = currentRecords.find(r => r.id === selectedMonth);
+            if (recordToUpdate) {
+                const currentDetails = Object.entries({...payrollData, [editingEmpId]: updatedEntry}).map(([id, e]: [string, any]) => {
+                    const em = employees.find(x => x.id === id);
+                    const tm = getTotals(e);
+                    return {
+                        employeeId: id, employeeName: em?.name || 'Unknown',
+                        basicSalary: e.basic, allowance: e.allowance + e.ot + e.bonus,
+                        extraSubsidy: e.extraSubsidy, penalty: e.latePenalty + e.unpaidLeave,
+                        hostelFee: e.hostelFee, advanceLoan: e.advanceLoan,
+                        otherEarning: e.otherEarning, otherEarningNote: e.otherEarningNote,
+                        otherDeduction: e.otherDeduction, otherDeductionNote: e.otherDeductionNote,
+                        ot: e.ot, bonus: e.bonus, unpaidLeave: e.unpaidLeave,
+                        ee_epf: e.ee_epf, ee_socso: e.ee_socso, ee_eis: e.ee_eis, ee_pcb: e.ee_pcb,
+                        er_epf: e.er_epf, er_socso: e.er_socso, er_eis: e.er_eis,
+                        netPay: tm.netPay, totalCost: tm.totalCompanyCost, note: e.note,
+                        paymentMethod: e.paymentMethod || 'BANK', proRateMode: e.proRateMode || '26_DAYS', workDays: e.workDays || 0,
+                        isPaid: e.isPaid, paidAt: e.paidAt, paymentExpenseId: e.paymentExpenseId
+                    };
+                });
+                await DataManager.savePayrollRecord({ ...recordToUpdate, details: currentDetails as any });
+            }
+
+            alert("✅ 撤销成功！该员工已退回未付款状态，资金流水已消除。");
+        } catch (error) {
+            console.error("Revoke error", error);
+            alert("撤销失败，请检查网络！");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // 🟢 核心新增：批量撤销选中员工的付款 (Batch Undo Payment)
+    const handleBatchRevokePayment = async () => {
+        if (isPosted) {
+            return alert("⚠️ 整个月份已大盘结账！请在底部点击【撤销结账 (Revert)】，之后再进行修改。");
+        }
+
+        const paidSelectedIds = Array.from(selectedEmpIds).filter(id => payrollData[id]?.isPaid);
+
+        if (paidSelectedIds.length === 0) {
+            return alert("⚠️ 选中的员工中没有【已付款】的记录，无法撤销。");
+        }
+
+        if (!confirm(`⚠️ 确定要批量撤销这 ${paidSelectedIds.length} 位员工的付款吗？(Batch Undo)\n\n系统将自动从【资金管理】删除这些支出流水，并恢复为【未付款】状态。`)) return;
+
+        setIsLoading(true);
+        try {
+            // 1. 并发删除选中的独立支出单库
+            const deletePromises = paidSelectedIds.map(async (id) => {
+                const entry = payrollData[id];
+                if (entry?.paymentExpenseId) {
+                    await deleteDoc(doc(db, 'standalone_expenses', entry.paymentExpenseId));
+                }
+            });
+            await Promise.all(deletePromises);
+
+            // 2. 更新本地状态 (清除备注和支付标记)
+            const updatedPayrollData = { ...payrollData };
+            paidSelectedIds.forEach(id => {
+                const entry = updatedPayrollData[id];
+                const updatedNote = (entry.note || '').replace(/\[PAID\] RM[\d.]+ via (CASH|BANK_TRANSFER) on [\d-]+/g, '').trim();
+                updatedPayrollData[id] = {
+                    ...entry,
+                    isPaid: false,
+                    paidAt: '',
+                    paymentExpenseId: '',
+                    note: updatedNote
+                };
+            });
+            setPayrollData(updatedPayrollData);
+
+            // 3. 更新总表数据库
+            const currentRecords = await DataManager.getPayrollRecords();
+            let recordToUpdate = currentRecords.find(r => r.id === selectedMonth);
+            
+            if (recordToUpdate) {
+                const currentDetails = Object.entries(updatedPayrollData).map(([id, e]: [string, any]) => {
+                    const em = employees.find(x => x.id === id);
+                    const tm = getTotals(e);
+                    return {
+                        employeeId: id, employeeName: em?.name || 'Unknown',
+                        basicSalary: e.basic, allowance: e.allowance + e.ot + e.bonus,
+                        extraSubsidy: e.extraSubsidy, penalty: e.latePenalty + e.unpaidLeave,
+                        hostelFee: e.hostelFee, advanceLoan: e.advanceLoan,
+                        otherEarning: e.otherEarning, otherEarningNote: e.otherEarningNote,
+                        otherDeduction: e.otherDeduction, otherDeductionNote: e.otherDeductionNote,
+                        ot: e.ot, bonus: e.bonus, unpaidLeave: e.unpaidLeave,
+                        ee_epf: e.ee_epf, ee_socso: e.ee_socso, ee_eis: e.ee_eis, ee_pcb: e.ee_pcb,
+                        er_epf: e.er_epf, er_socso: e.er_socso, er_eis: e.er_eis,
+                        netPay: tm.netPay, totalCost: tm.totalCompanyCost, note: e.note,
+                        paymentMethod: e.paymentMethod || 'BANK', proRateMode: e.proRateMode || '26_DAYS', workDays: e.workDays || 0,
+                        isPaid: e.isPaid, paidAt: e.paidAt, paymentExpenseId: e.paymentExpenseId
+                    };
+                });
+                await DataManager.savePayrollRecord({ ...recordToUpdate, details: currentDetails as any });
+            }
+
+            // 撤销完成后清空选中状态，方便下一步操作
+            setSelectedEmpIds(new Set());
+
+            alert(`✅ 批量撤销成功！已退回 ${paidSelectedIds.length} 位员工至未付款状态。`);
+        } catch (error) {
+            console.error("Batch Revoke error", error);
+            alert("撤销失败，请检查网络！");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handlePrintSingleSlip = async () => {
@@ -677,13 +832,15 @@ return {
         } catch(e) { console.error(e); alert("Summary Print Failed"); } finally { setIsGeneratingPdf(false); }
     };
 
+    // 🟢 核心修复：强制数字精度保留2位小数，杜绝后台保存 .0000001
     const getTotals = (entry: DetailedPayrollEntry) => {
-        const gross = entry.basic + entry.allowance + entry.ot + entry.bonus;
-        const employeeDeductions = entry.latePenalty + entry.unpaidLeave + entry.advanceLoan + entry.ee_epf + entry.ee_socso + entry.ee_eis + entry.ee_pcb;
-        const netPay = gross - employeeDeductions;
-        const employerCost = entry.er_epf + entry.er_socso + entry.er_eis;
-        const totalCompanyCost = gross + employerCost;
-        const totalGovtPay = (entry.ee_epf + entry.er_epf) + (entry.ee_socso + entry.er_socso) + (entry.ee_eis + entry.er_eis) + entry.ee_pcb;
+        const gross = Number((entry.basic + entry.allowance + entry.extraSubsidy + entry.ot + entry.bonus + entry.otherEarning).toFixed(2));
+        const employeeDeductions = Number((entry.latePenalty + entry.unpaidLeave + entry.hostelFee + entry.advanceLoan + entry.otherDeduction + entry.ee_epf + entry.ee_socso + entry.ee_eis + entry.ee_pcb).toFixed(2));
+        const netPay = Number((gross - employeeDeductions).toFixed(2));
+        
+        const employerCost = Number((entry.er_epf + entry.er_socso + entry.er_eis).toFixed(2));
+        const totalCompanyCost = Number((gross + employerCost).toFixed(2));
+        const totalGovtPay = Number((entry.ee_epf + entry.er_epf + entry.ee_socso + entry.er_socso + entry.ee_eis + entry.er_eis + entry.ee_pcb).toFixed(2));
 
         return { gross, netPay, totalCompanyCost, employerCost, deductions: employeeDeductions, totalGovtPay };
     };
@@ -710,14 +867,18 @@ return {
                     employeeName: emp?.name || 'Unknown',
                     basicSalary: entry.basic,
                     allowance: entry.allowance + entry.ot + entry.bonus,
-                    holidayDays: entry.holidayDays || 0,
-                    holidayPay: entry.holidayPay || 0,
+                    extraSubsidy: entry.extraSubsidy, 
                     penalty: entry.latePenalty + entry.unpaidLeave,
+                    hostelFee: entry.hostelFee,       
                     advanceLoan: entry.advanceLoan,
+                    otherEarning: entry.otherEarning, otherEarningNote: entry.otherEarningNote,
+                    otherDeduction: entry.otherDeduction, otherDeductionNote: entry.otherDeductionNote,
+                    ot: entry.ot, bonus: entry.bonus, unpaidLeave: entry.unpaidLeave,
                     ee_epf: entry.ee_epf, ee_socso: entry.ee_socso, ee_eis: entry.ee_eis, ee_pcb: entry.ee_pcb,
                     er_epf: entry.er_epf, er_socso: entry.er_socso, er_eis: entry.er_eis,
                     netPay: t.netPay, totalCost: t.totalCompanyCost, note: entry.note,
-                    paymentMethod: entry.paymentMethod || 'BANK', proRateMode: entry.proRateMode || '26_DAYS', workDays: entry.workDays || 0
+                    paymentMethod: entry.paymentMethod || 'BANK', proRateMode: entry.proRateMode || '26_DAYS', workDays: entry.workDays || 0,
+                    isPaid: entry.isPaid || false, paidAt: entry.paidAt || '', paymentExpenseId: entry.paymentExpenseId || ''
                 };
             });
             const record: PayrollRecord = {
@@ -731,7 +892,7 @@ return {
     };
 
     const handleRevertStatus = async () => {
-        if (!confirm("⚠️ 确定要撤销结账吗？(Revert to Draft)\n\n这将重新启用编辑功能，并自动删除之前自动生成的“资金管理”支出记录。")) return;
+        if (!confirm("⚠️ 确定要撤销结账吗？(Revert to Draft)\n\n这将自动删除之前批量生成的“资金管理”大盘支出记录。已经单独打款的个人记录将保持不受影响。")) return;
         
         setIsLoading(true);
         try {
@@ -739,12 +900,34 @@ return {
             const currentRecord = records.find(r => r.id === selectedMonth);
             
             if (currentRecord) {
+                 const updatedDetails = currentRecord.details.map(d => {
+                     if (!d.paymentExpenseId) {
+                         return { ...d, isPaid: false, paidAt: '' };
+                     }
+                     return d;
+                 });
                  const record: PayrollRecord = {
                     ...currentRecord,
                     status: 'DRAFT',
-                    isStatutoryPaid: false
+                    isStatutoryPaid: false,
+                    details: updatedDetails as any
                 };
                 await DataManager.savePayrollRecord(record);
+                
+                // Update local payrollData state to reflect the reverted status
+                setPayrollData(prev => {
+                    const newData = { ...prev };
+                    updatedDetails.forEach(d => {
+                        if (newData[d.employeeId]) {
+                            newData[d.employeeId] = {
+                                ...newData[d.employeeId],
+                                isPaid: d.isPaid,
+                                paidAt: d.paidAt
+                            };
+                        }
+                    });
+                    return newData;
+                });
             }
             
             try {
@@ -755,7 +938,7 @@ return {
 
             setIsPosted(false);
             setIsStatutoryPaid(false);
-            alert("✅ 已撤销结账 (Reverted to Draft)");
+            alert("✅ 已撤销大盘结账 (Reverted to Draft)");
         } catch (e) { console.error(e); alert("撤销失败"); } finally { setIsLoading(false); }
     };
 
@@ -764,7 +947,7 @@ return {
         
         setIsLoading(true);
         try {
-            const payDate = new Date().toISOString();
+            const transactionTime = `${paymentDate}T12:00:00.000Z`;
             const statExp: ExpenseItem = {
                 id: `payroll_stat_${selectedMonth}`,
                 category: 'SALARY',
@@ -773,7 +956,8 @@ return {
                 amount: grandTotals.govt,
                 paymentStatus: 'PAID',
                 paymentMethod: 'BANK_TRANSFER',
-                time: payDate,
+                time: transactionTime,
+                createdAt: new Date().toISOString(), // Audit Timestamp
                 note: `[Statutory Payment] Contributions for ${selectedMonth}`,
                 paidBy: 'COMPANY'
             };
@@ -796,7 +980,7 @@ return {
     };
 
     const handleSavePayroll = async () => {
-        if (!confirm(`确认结算 ${selectedMonth} 薪资？\n\n注意：此操作将仅扣除员工实发薪资 (Net Pay)。`)) return;
+        if (!confirm(`确认批量结算 ${selectedMonth} 薪资？\n\n注意：此操作将自动跳过【已单独支付】的员工，为您省去重复记账的麻烦。`)) return;
         
         setIsLoading(true);
         try {
@@ -806,13 +990,18 @@ return {
                 return {
                     employeeId: id, employeeName: emp?.name || 'Unknown',
                     basicSalary: entry.basic, allowance: entry.allowance + entry.ot + entry.bonus,
-                    holidayDays: entry.holidayDays || 0,
-                    holidayPay: entry.holidayPay || 0,
-                    penalty: entry.latePenalty + entry.unpaidLeave, advanceLoan: entry.advanceLoan,
+                    extraSubsidy: entry.extraSubsidy, penalty: entry.latePenalty + entry.unpaidLeave,
+                    hostelFee: entry.hostelFee, advanceLoan: entry.advanceLoan,
+                    otherEarning: entry.otherEarning, otherEarningNote: entry.otherEarningNote,
+                    otherDeduction: entry.otherDeduction, otherDeductionNote: entry.otherDeductionNote,
+                    ot: entry.ot, bonus: entry.bonus, unpaidLeave: entry.unpaidLeave,
                     ee_epf: entry.ee_epf, ee_socso: entry.ee_socso, ee_eis: entry.ee_eis, ee_pcb: entry.ee_pcb,
                     er_epf: entry.er_epf, er_socso: entry.er_socso, er_eis: entry.er_eis,
                     netPay: t.netPay, totalCost: t.totalCompanyCost, note: entry.note,
-                    paymentMethod: entry.paymentMethod || 'BANK', proRateMode: entry.proRateMode || '26_DAYS', workDays: entry.workDays || 0
+                    paymentMethod: entry.paymentMethod || 'BANK', proRateMode: entry.proRateMode || '26_DAYS', workDays: entry.workDays || 0,
+                    isPaid: true, // 批量结账下发，所有人视为已支付
+                    paidAt: entry.paidAt || new Date().toISOString(), // 赋予没单人发过的人当前审计时间
+                    paymentExpenseId: entry.paymentExpenseId || ''
                 };
             });
             const record: PayrollRecord = {
@@ -833,13 +1022,17 @@ return {
             let netCashTotal = 0;
             let netBankTotal = 0;
 
+            // 智能跳过已经发过的薪水，避免双重扣钱
             Object.values(payrollData).forEach((entry: DetailedPayrollEntry) => {
-                const t = getTotals(entry);
-                if (entry.paymentMethod === 'CASH') { netCashTotal += t.netPay; } 
-                else { netBankTotal += t.netPay; }
+                if (!entry.isPaid) {
+                    const t = getTotals(entry);
+                    if (entry.paymentMethod === 'CASH') { netCashTotal += t.netPay; } 
+                    else { netBankTotal += t.netPay; }
+                }
             });
 
-            const payDate = new Date().toISOString(); 
+            const transactionTime = `${paymentDate}T12:00:00.000Z`;
+            const actualAuditTime = new Date().toISOString();
 
             if (netCashTotal > 0) {
                 const cashExp: ExpenseItem = {
@@ -850,7 +1043,8 @@ return {
                     amount: netCashTotal,
                     paymentStatus: 'PAID',
                     paymentMethod: 'CASH',
-                    time: payDate,
+                    time: transactionTime,
+                    createdAt: actualAuditTime,
                     note: `[Auto-Sync] Net Pay via Cash for ${selectedMonth}`,
                     paidBy: 'COMPANY'
                 };
@@ -866,16 +1060,29 @@ return {
                     amount: netBankTotal,
                     paymentStatus: 'PAID',
                     paymentMethod: 'BANK_TRANSFER',
-                    time: payDate,
+                    time: transactionTime,
+                    createdAt: actualAuditTime,
                     note: `[Auto-Sync] Net Pay via Bank for ${selectedMonth}`,
                     paidBy: 'COMPANY'
                 };
                 await DataManager.saveStandaloneExpense(bankExp);
             }
 
+            // 更新本地前端显示所有人为Paid
+            setPayrollData(prev => {
+                const updated = {...prev};
+                Object.keys(updated).forEach(id => {
+                    if (!updated[id].isPaid) {
+                        updated[id].isPaid = true;
+                        updated[id].paidAt = actualAuditTime;
+                    }
+                });
+                return updated;
+            });
+
             setIsPosted(true);
             setIsStatutoryPaid(false);
-            alert("✅ 结算成功 (Employees Paid)");
+            alert(`✅ 批量结算成功 (Employees Paid)\n财务记账日期已分配至: ${paymentDate}`);
         } catch (e) { console.error("Payroll Save Error", e); alert("保存失败"); } finally { setIsLoading(false); }
     };
 
@@ -888,12 +1095,16 @@ return {
         const isNewJoiner = emp.joinDate?.startsWith(selectedMonth);
         const isSelected = selectedEmpIds.has(emp.id);
         const isLocal = emp.nationality.includes('Malaysian') || emp.nationality.includes('🇲🇾');
+        
+        // 判断是否仍有政府税未缴
+        const hasStatutory = entry.ee_epf > 0 || entry.ee_socso > 0 || entry.ee_eis > 0 || entry.ee_pcb > 0;
+        const showStatutoryPending = isLocal && hasStatutory && !isStatutoryPaid;
 
         return (
             <div 
                 key={emp.id} 
                 onClick={() => { setEditingEmpId(emp.id); setShowPayConfirm(false); setShowAdvanceHistory(false); }}
-                className={`w-full bg-white rounded-2xl p-4 shadow-sm border hover:shadow-md transition-all flex flex-col md:flex-row items-start md:items-center gap-4 group cursor-pointer active:scale-[0.99] ${emp.isArchived ? 'border-red-200 bg-red-50/10' : isSelected ? 'border-[#1A1A1A] ring-1 ring-[#1A1A1A]' : 'border-gray-200 hover:border-[#FFD700]'}`}
+                className={`w-full bg-white rounded-2xl p-4 shadow-sm border hover:shadow-md transition-all flex flex-col md:flex-row items-start md:items-center gap-4 group cursor-pointer active:scale-[0.99] ${emp.isArchived ? 'border-red-200 bg-red-50/10' : isSelected ? 'border-[#1A1A1A] ring-1 ring-[#1A1A1A]' : entry.isPaid ? 'border-emerald-300 bg-emerald-50/20' : 'border-gray-200 hover:border-[#FFD700]'}`}
             >
                 <div className="flex items-center gap-4 w-full md:w-1/3">
                     <div 
@@ -902,7 +1113,7 @@ return {
                     >
                         {isSelected ? <CheckSquare size={20} className="text-[#1A1A1A]"/> : <Square size={20}/>}
                     </div>
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-gray-400 border-2 shadow-sm overflow-hidden shrink-0 ${emp.isArchived ? 'bg-red-100 border-red-200 grayscale' : 'bg-gray-100 border-white group-hover:border-[#FFD700]'}`}>
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-gray-400 border-2 shadow-sm overflow-hidden shrink-0 ${emp.isArchived ? 'bg-red-100 border-red-200 grayscale' : entry.isPaid ? 'bg-emerald-100 border-emerald-300 text-emerald-600' : 'bg-gray-100 border-white group-hover:border-[#FFD700]'}`}>
                         {emp.avatar ? <img src={emp.avatar} className="w-full h-full object-cover"/> : emp.name.charAt(0)}
                     </div>
                     <div className="text-left min-w-0">
@@ -911,13 +1122,36 @@ return {
                             {emp.isArchived && <span className="bg-red-100 text-red-600 text-[9px] font-bold px-1.5 py-0.5 rounded">离职</span>}
                             {isNewJoiner && <span className="bg-blue-100 text-blue-600 text-[9px] font-bold px-1.5 py-0.5 rounded">新人 (New)</span>}
                         </div>
-                        <div className="text-[10px] text-gray-400 uppercase font-bold tracking-tight">{emp.role.split('(')[0]}</div>
+                        <div className="text-[10px] text-gray-400 uppercase font-bold tracking-tight mt-0.5">{emp.role.split('(')[0]}</div>
+                        
+                        {/* 🟢 新增：显示休息天数与住宿状态 */}
+                        <div className="flex items-center gap-1.5 mt-1">
+                            <span className="text-[8.5px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+                                休息: {emp.monthlyRestDays || 4} 天
+                            </span>
+                            {emp.hasHostel && (
+                                <span className="text-[8.5px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                                    🏠 员工宿舍
+                                </span>
+                            )}
+                        </div>
+
+                        {/* 🟢 付款状态与 Audit Timestamp 展示 */}
+                        {entry.isPaid && (
+                            <div className="flex flex-col items-start gap-1 mt-1.5">
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded border flex items-center gap-1 ${showStatutoryPending ? 'bg-amber-100 text-amber-700 border-amber-300' : 'bg-emerald-100 text-emerald-700 border-emerald-300'}`}>
+                                    <CheckCircle2 size={12}/> 
+                                    {showStatutoryPending ? '已发薪 (待缴政府)' : '✅ 薪资已全清 (Fully Paid)'}
+                                </span>
+                                {entry.paidAt && <span className="text-[8.5px] text-gray-400 font-bold ml-0.5">付于 (Audit Time): {new Date(entry.paidAt).toLocaleString()}</span>}
+                            </div>
+                        )}
                     </div>
                 </div>
                 <div className="w-full md:w-2/3 flex flex-row justify-between items-center md:justify-end gap-2 md:gap-6 text-right mt-2 md:mt-0">
                     {entry.advanceLoan > 0 && (
                         <div className="hidden md:block">
-                            <div className="text-[9px] text-red-400 uppercase font-bold mb-0.5">Advance/Loan</div>
+                            <div className="text-[9px] text-red-400 uppercase font-bold mb-0.5">Advance</div>
                             <div className="text-xs font-mono font-bold text-red-600">-RM {entry.advanceLoan.toFixed(2)}</div>
                         </div>
                     )}
@@ -933,9 +1167,9 @@ return {
                         <div className="text-[9px] text-gray-400 uppercase font-bold mb-0.5">Total Cost</div>
                         <div className="text-xs md:text-sm font-mono font-bold text-gray-600">RM {totals.totalCompanyCost.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
                     </div>
-                    <div className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-xl border transition-colors ${emp.isArchived ? 'bg-red-100 border-red-200' : 'bg-emerald-50 border-emerald-100 group-hover:bg-emerald-100'}`}>
-                        <div className={`text-[9px] uppercase font-bold mb-0.5 ${emp.isArchived ? 'text-red-600' : 'text-emerald-600'}`}>Net Pay</div>
-                        <div className={`text-base md:text-lg font-mono font-black ${emp.isArchived ? 'text-red-700' : 'text-emerald-700'}`}>RM {totals.netPay.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+                    <div className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-xl border transition-colors ${emp.isArchived ? 'bg-red-100 border-red-200' : entry.isPaid ? 'bg-emerald-500 border-emerald-600 text-white' : 'bg-emerald-50 border-emerald-100 group-hover:bg-emerald-100'}`}>
+                        <div className={`text-[9px] uppercase font-bold mb-0.5 ${emp.isArchived ? 'text-red-600' : entry.isPaid ? 'text-emerald-100' : 'text-emerald-600'}`}>Net Pay</div>
+                        <div className={`text-base md:text-lg font-mono font-black ${emp.isArchived ? 'text-red-700' : entry.isPaid ? 'text-white' : 'text-emerald-700'}`}>RM {totals.netPay.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
                     </div>
                 </div>
             </div>
@@ -1010,6 +1244,18 @@ return {
                         Select All
                     </button>
                     {selectedEmpIds.size > 0 && <span className="text-xs font-bold text-[#1A1A1A]">{selectedEmpIds.size} Selected</span>}
+                    
+                    {/* 🟢 新增：批量撤销按钮 (仅在选中了至少1个已付款人员时显示) */}
+                    {selectedEmpIds.size > 0 && Array.from(selectedEmpIds).some(id => payrollData[id]?.isPaid) && !isPosted && (
+                        <button 
+                            onClick={handleBatchRevokePayment} 
+                            disabled={isLoading}
+                            className="ml-auto bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold border border-red-200 hover:bg-red-100 flex items-center gap-1 active:scale-95 transition-transform disabled:opacity-50"
+                        >
+                            {isLoading ? <Loader2 size={14} className="animate-spin"/> : <RotateCcw size={14}/>} 
+                            批量撤销 (Undo)
+                        </button>
+                    )}
                 </div>
 
                 <div className="max-w-5xl mx-auto space-y-8">
@@ -1066,7 +1312,7 @@ return {
                             </>
                         ) : (
                             <button onClick={handleSavePayroll} disabled={isLoading} className="w-full md:w-auto bg-[#1A1A1A] text-[#FFD700] px-8 py-3 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 hover:bg-black active:scale-95 transition-all text-sm md:text-base disabled:opacity-50">
-                                {isLoading ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} 确认并入账 (Pay Employees)
+                                {isLoading ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} 一键全部入账 (Pay All)
                             </button>
                         )}
                     </div>
@@ -1093,10 +1339,9 @@ return {
                 </div>
             )}
 
-            {/* === CALCULATOR MODAL (OPTIMIZED FOR IPAD) === */}
+            {/* === CALCULATOR MODAL === */}
             {editingEmpId && editingEntry && editingEmp && (
                 <div className="fixed inset-0 bg-black/60 z-[100] flex items-end md:items-center justify-center p-0 md:p-4 backdrop-blur-sm animate-in fade-in">
-                    {/* UPDATED: h-[100dvh] for mobile full height, md:h-[95vh] for tablet, padding bottom added */}
                     <div className="bg-[#F8F9FA] w-full h-[100dvh] md:max-w-3xl md:h-[95vh] md:rounded-[2rem] flex flex-col overflow-hidden shadow-2xl animate-in slide-in-from-bottom-10 border border-gray-200 relative">
                         
                         {/* Header */}
@@ -1155,7 +1400,6 @@ return {
                                         </button>
                                     </div>
 
-                                    {/* NEW: Final Settlement Button for Terminated Staff */}
                                     {(editingEmp.isArchived || editingEmp.status === 'TERMINATED') && (
                                         <div className="mt-3 pt-3 border-t border-blue-200">
                                             <button 
@@ -1176,17 +1420,15 @@ return {
                                 </div>
                             )}
 
-                            {/* EARNINGS */}
+                            {/* 🟢 EARNINGS */}
                             <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200 relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1.5 h-full bg-green-500"></div>
                                 <h4 className="text-xs font-black text-green-700 uppercase mb-4 flex items-center gap-2 tracking-widest pl-2"><Plus size={14}/> 收入 (Earnings)</h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    {/* BASIC SALARY - SPLIT INTO ORIGINAL AND ACTUAL */}
                                     <div className="col-span-full sm:col-span-2 grid grid-cols-2 gap-4 bg-gray-50 p-3 rounded-xl border border-gray-100">
                                         <div>
                                             <label className="text-[9px] font-bold text-gray-400 uppercase mb-1 block">Monthly Rate (档案底薪)</label>
                                             <div className="w-full p-3 bg-gray-100 border border-transparent rounded-xl text-sm font-bold text-gray-400 outline-none text-right">
-                                                {/* Use getHistoricalSalary to show what the salary SHOULD be for this month based on history */}
                                                 {getHistoricalSalary(editingEmp, selectedMonth).toFixed(2)}
                                             </div>
                                         </div>
@@ -1197,8 +1439,8 @@ return {
                                             </div>
                                             <input 
                                                 type="number" 
-                                                disabled={isPosted} 
-                                                value={editingEntry.basic.toFixed(2)} // Enforce 2 decimal display
+                                                disabled={isPosted || editingEntry.isPaid} 
+                                                value={editingEntry.basic.toFixed(2)} 
                                                 onChange={e => updateEntry(editingEmpId, {basic: parseFloat(e.target.value)||0})} 
                                                 className="w-full p-3 bg-white border-2 border-green-200 rounded-xl text-sm font-black text-[#1A1A1A] outline-none focus:border-green-500 text-right shadow-sm" 
                                                 inputMode="decimal"
@@ -1206,86 +1448,55 @@ return {
                                         </div>
                                     </div>
 
-                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Fixed Allowance (津贴)</label><input type="number" disabled={isPosted} value={editingEntry.allowance} onChange={e => updateEntry(editingEmpId, {allowance: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
-                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">OT / Commission</label><input type="number" disabled={isPosted} value={editingEntry.ot} onChange={e => updateEntry(editingEmpId, {ot: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
-                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Bonus (奖金)</label><input type="number" disabled={isPosted} value={editingEntry.bonus} onChange={e => updateEntry(editingEmpId, {bonus: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
-                                    {/* 🎌 公假协助计算器 (纯 UI 辅助，不重复计入总额) */}
-                                    <div className="col-span-full bg-orange-50 p-4 rounded-xl border border-orange-200 flex flex-col sm:flex-row sm:items-end gap-3 mb-2">
-                                        <div className="flex-grow">
-                                            <label className="text-[10px] font-black text-orange-800 uppercase mb-1 flex items-center gap-1">
-                                                🎌 公假助手 (PH Extra Pay: Basic / 26 × 2)
-                                            </label>
-                                            <div className="flex items-center gap-2">
-                                                <input 
-                                                    type="number" 
-                                                    value={phDays} 
-                                                    disabled={isPosted}
-                                                    onChange={e => setPhDays(e.target.value ? parseFloat(e.target.value) : '')} 
-                                                    className="w-full sm:w-32 p-3 bg-white border border-orange-200 rounded-xl text-sm font-black text-[#1A1A1A] outline-none focus:border-orange-500 shadow-sm" 
-                                                    placeholder="输入天数"
-                                                    inputMode="decimal"
-                                                />
-                                                <span className="text-sm font-black text-orange-700 whitespace-nowrap bg-orange-100 px-3 py-2 rounded-lg border border-orange-200">
-                                                    = RM {phDays ? ((editingEntry.basic / 26) * 2 * Number(phDays)).toFixed(2) : '0.00'}
-                                                </span>
-                                            </div>
-                                            <p className="text-[9px] text-orange-600/70 mt-1 font-bold">注: 计算结果为额外2倍(底薪已含1倍)。点击右侧按钮后，金额将自动累加至上方【OT】内。</p>
+                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Fixed Allowance (津贴)</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.allowance} onChange={e => updateEntry(editingEmpId, {allowance: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
+                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Subsidy (油费等额外补贴)</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.extraSubsidy} onChange={e => updateEntry(editingEmpId, {extraSubsidy: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
+                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">OT / Commission</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.ot} onChange={e => updateEntry(editingEmpId, {ot: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
+                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Bonus (奖金)</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.bonus} onChange={e => updateEntry(editingEmpId, {bonus: parseFloat(e.target.value)||0})} className={inputClassName} inputMode="decimal"/></div>
+                                    
+                                    {/* 🟢 新增: 其他收入 (带备注) */}
+                                    <div className="col-span-full">
+                                        <label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Other Earning (其他收入 / 账目抵消)</label>
+                                        <div className="flex gap-2">
+                                            <input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.otherEarning} onChange={e => updateEntry(editingEmpId, {otherEarning: parseFloat(e.target.value)||0})} className={`${inputClassName} w-1/3 text-green-700`} inputMode="decimal" placeholder="0.00"/>
+                                            <input type="text" disabled={isPosted || editingEntry.isPaid} value={editingEntry.otherEarningNote} onChange={e => updateEntry(editingEmpId, {otherEarningNote: e.target.value})} className="w-2/3 p-4 bg-white border-2 border-gray-200 rounded-xl text-sm font-bold text-black outline-none focus:border-green-500 transition-all shadow-sm disabled:bg-gray-50" placeholder="备注 (例如：同事代还抵消)"/>
                                         </div>
-                                        <button 
-                                            disabled={!phDays || isPosted}
-                                            onClick={() => {
-                                                if (!phDays) return;
-                                                const phAmount = parseFloat(((editingEntry.basic / 26) * 2 * Number(phDays)).toFixed(2));
-                                                updateEntry(editingEmpId, { 
-                                                    ot: editingEntry.ot + phAmount,
-                                                    // 备注自动留底，方便财务对账
-                                                    note: (editingEntry.note ? editingEntry.note + '\n' : '') + `[PH Pay] ${phDays} days = RM${phAmount}`
-                                                });
-                                                setPhDays(''); // 结清重置输入框
-                                            }}
-                                            className="w-full sm:w-auto px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-black shadow-md active:scale-95 transition-all whitespace-nowrap disabled:opacity-50 disabled:bg-gray-400"
-                                        >
-                                            + 算入 OT (Add to OT)
-                                        </button>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* DEDUCTIONS */}
+                            {/* 🟢 DEDUCTIONS */}
                             <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200 relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1.5 h-full bg-red-500"></div>
                                 <h4 className="text-xs font-black text-red-700 uppercase mb-4 flex items-center gap-2 tracking-widest pl-2"><MinusCircle size={14}/> 扣除 (Deductions)</h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Late Penalty (迟到)</label><input type="number" disabled={isPosted} value={editingEntry.latePenalty} onChange={e => updateEntry(editingEmpId, {latePenalty: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/></div>
-                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Unpaid Leave (无薪假)</label><input type="number" disabled={isPosted} value={editingEntry.unpaidLeave} onChange={e => updateEntry(editingEmpId, {unpaidLeave: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/></div>
-                                    
-                                    {/* ADVANCE + LOAN SYNC */}
-                                    <div className="relative">
+                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Late Penalty (迟到)</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.latePenalty} onChange={e => updateEntry(editingEmpId, {latePenalty: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/></div>
+                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Unpaid Leave (无薪假)</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.unpaidLeave} onChange={e => updateEntry(editingEmpId, {unpaidLeave: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/></div>
+                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Hostel Fee (住宿费扣除)</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.hostelFee} onChange={e => updateEntry(editingEmpId, {hostelFee: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/></div>
+                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Tax (PCB)</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.ee_pcb} onChange={e => updateEntry(editingEmpId, {ee_pcb: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/></div>
+
+                                    <div className="relative sm:col-span-2 md:col-span-1">
                                         <div className="flex justify-between items-center mb-1">
-                                            <label className="input-label text-[10px] font-bold text-gray-400 uppercase block">Advance/Loan (预支/借款)</label>
-                                            <div className="flex gap-1">
-                                                {(() => {
-                                                    const empLoan = (editingEmp?.loanRecords || []).reduce((s: number, r: any) => s + (r.type === 'BORROW' ? r.amount : -r.amount), 0);
-                                                    return empLoan > 0 ? (
-                                                        <span className="text-[9px] bg-red-50 text-red-600 px-2 py-0.5 rounded-lg border border-red-100 font-bold">
-                                                            💰 欠款: RM{empLoan.toFixed(0)}
-                                                        </span>
-                                                    ) : null;
-                                                })()}
-                                                {currentEmpAdvances.length > 0 && (
-                                                    <button 
-                                                        onClick={() => setShowAdvanceHistory(true)}
-                                                        className="text-[9px] bg-red-50 text-red-600 px-2 py-0.5 rounded-lg border border-red-100 hover:bg-red-100 flex items-center gap-1 font-bold"
-                                                    >
-                                                        <History size={10}/> {currentEmpAdvances.length} records
-                                                    </button>
-                                                )}
-                                            </div>
+                                            <label className="input-label text-[10px] font-bold text-gray-400 uppercase block">Advance/Loan (预支)</label>
+                                            {currentEmpAdvances.length > 0 && (
+                                                <button 
+                                                    onClick={() => setShowAdvanceHistory(true)}
+                                                    className="text-[9px] bg-red-50 text-red-600 px-2 py-0.5 rounded-lg border border-red-100 hover:bg-red-100 flex items-center gap-1 font-bold"
+                                                >
+                                                    <History size={10}/> {currentEmpAdvances.length} records
+                                                </button>
+                                            )}
                                         </div>
-                                        <input type="number" disabled={isPosted} value={editingEntry.advanceLoan} onChange={e => updateEntry(editingEmpId, {advanceLoan: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/>
+                                        <input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.advanceLoan} onChange={e => updateEntry(editingEmpId, {advanceLoan: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/>
                                     </div>
 
-                                    <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Tax (PCB)</label><input type="number" disabled={isPosted} value={editingEntry.ee_pcb} onChange={e => updateEntry(editingEmpId, {ee_pcb: parseFloat(e.target.value)||0})} className={`${inputClassName} text-red-600`} inputMode="decimal"/></div>
+                                    {/* 🟢 新增: 其他扣除 (带备注) */}
+                                    <div className="col-span-full">
+                                        <label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">Other Deduction (其他扣除 / 帮同事还款)</label>
+                                        <div className="flex gap-2">
+                                            <input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.otherDeduction} onChange={e => updateEntry(editingEmpId, {otherDeduction: parseFloat(e.target.value)||0})} className={`${inputClassName} w-1/3 text-red-600`} inputMode="decimal" placeholder="0.00"/>
+                                            <input type="text" disabled={isPosted || editingEntry.isPaid} value={editingEntry.otherDeductionNote} onChange={e => updateEntry(editingEmpId, {otherDeductionNote: e.target.value})} className="w-2/3 p-4 bg-white border-2 border-gray-200 rounded-xl text-sm font-bold text-black outline-none focus:border-red-500 transition-all shadow-sm disabled:bg-gray-50" placeholder="备注 (例如：帮某某还预支)"/>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1297,25 +1508,25 @@ return {
                                     <span className="ml-2 text-[9px] text-gray-400 font-normal bg-gray-100 px-2 py-0.5 rounded">(Editable / 可编辑)</span>
                                 </h4>
                                 
-                                {/* RECALCULATE BUTTON - RESTORES AUTO CALC */}
-                                <div className="mb-4">
-                                    <button 
-                                        onClick={() => triggerRecalculateStatutory(editingEmpId)} 
-                                        className="text-[10px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-lg flex items-center gap-2 transition-colors w-full justify-center"
-                                        title="Recalculate based on Current Basic Salary"
-                                    >
-                                        <RefreshCw size={12}/> 重置为自动计算 (Reset to Auto)
-                                    </button>
-                                </div>
+                                {!editingEntry.isPaid && (
+                                    <div className="mb-4">
+                                        <button 
+                                            onClick={() => triggerRecalculateStatutory(editingEmpId)} 
+                                            className="text-[10px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-lg flex items-center gap-2 transition-colors w-full justify-center"
+                                            title="Recalculate based on Current Basic Salary"
+                                        >
+                                            <RefreshCw size={12}/> 重置为自动计算 (Reset to Auto)
+                                        </button>
+                                    </div>
+                                )}
                                 
                                 <div className="space-y-4">
-                                    {/* EPF ROW */}
                                     <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
                                         <div className="flex items-center justify-between sm:justify-start gap-4 min-w-[120px]">
                                             <span className="text-xs font-black text-gray-600">EPF (KWSP)</span>
                                             <button 
                                                 onClick={() => toggleStatutory(editingEmpId, 'EPF')}
-                                                disabled={isPosted}
+                                                disabled={isPosted || editingEntry.isPaid}
                                                 className={`transition-colors ${editingEntry.hasEPF ? 'text-green-600' : 'text-gray-400'}`}
                                             >
                                                 {editingEntry.hasEPF ? <ToggleRight size={32} fill="currentColor"/> : <ToggleLeft size={32}/>}
@@ -1323,20 +1534,19 @@ return {
                                         </div>
                                         {editingEntry.hasEPF && (
                                             <div className="flex gap-4 w-full">
-                                                <div className="flex-1"><label className="text-[9px] text-gray-400 font-bold uppercase block mb-1">Employee (11%)</label><input type="number" disabled={isPosted} value={editingEntry.ee_epf.toFixed(2)} onChange={e => updateEntry(editingEmpId, {ee_epf: parseFloat(e.target.value)||0})} className={`${inputClassName} py-2 text-sm`} inputMode="decimal"/></div>
-                                                <div className="flex-1"><label className="text-[9px] text-gray-400 font-bold uppercase block mb-1">Employer (13%)</label><input type="number" disabled={isPosted} value={editingEntry.er_epf.toFixed(2)} onChange={e => updateEntry(editingEmpId, {er_epf: parseFloat(e.target.value)||0})} className={`${inputClassName} py-2 text-sm`} inputMode="decimal"/></div>
+                                                <div className="flex-1"><label className="text-[9px] text-gray-400 font-bold uppercase block mb-1">Employee (11%)</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.ee_epf.toFixed(2)} onChange={e => updateEntry(editingEmpId, {ee_epf: parseFloat(e.target.value)||0})} className={`${inputClassName} py-2 text-sm`} inputMode="decimal"/></div>
+                                                <div className="flex-1"><label className="text-[9px] text-gray-400 font-bold uppercase block mb-1">Employer (13%)</label><input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.er_epf.toFixed(2)} onChange={e => updateEntry(editingEmpId, {er_epf: parseFloat(e.target.value)||0})} className={`${inputClassName} py-2 text-sm`} inputMode="decimal"/></div>
                                             </div>
                                         )}
                                         {!editingEntry.hasEPF && <span className="text-xs text-gray-400 italic">Skipped</span>}
                                     </div>
 
-                                    {/* SOCSO/EIS ROW - SPLIT INTO TWO ROWS */}
                                     <div className="p-3 rounded-xl bg-gray-50 border border-gray-100">
                                         <div className="flex items-center justify-between mb-2">
                                              <span className="text-xs font-black text-gray-600">SOCSO & EIS</span>
                                              <button 
                                                 onClick={() => toggleStatutory(editingEmpId, 'SOCSO')}
-                                                disabled={isPosted}
+                                                disabled={isPosted || editingEntry.isPaid}
                                                 className={`transition-colors ${editingEntry.hasSOCSO ? 'text-green-600' : 'text-gray-400'}`}
                                             >
                                                 {editingEntry.hasSOCSO ? <ToggleRight size={32} fill="currentColor"/> : <ToggleLeft size={32}/>}
@@ -1345,32 +1555,30 @@ return {
 
                                         {editingEntry.hasSOCSO ? (
                                             <div className="space-y-3">
-                                                {/* SOCSO ROW */}
                                                 <div className="flex flex-col sm:flex-row gap-2">
                                                     <div className="w-24 pt-2 text-[10px] font-bold text-gray-500 uppercase">SOCSO</div>
                                                     <div className="flex gap-2 flex-1">
                                                         <div className="flex-1">
                                                             <label className="text-[8px] text-gray-400 font-bold uppercase block mb-0.5">Employee</label>
-                                                            <input type="number" disabled={isPosted} value={editingEntry.ee_socso.toFixed(2)} onChange={e => updateEntry(editingEmpId, {ee_socso: parseFloat(e.target.value)||0})} className={`${inputClassName} py-1.5 text-xs`} placeholder="0.00" inputMode="decimal"/>
+                                                            <input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.ee_socso.toFixed(2)} onChange={e => updateEntry(editingEmpId, {ee_socso: parseFloat(e.target.value)||0})} className={`${inputClassName} py-1.5 text-xs`} placeholder="0.00" inputMode="decimal"/>
                                                         </div>
                                                         <div className="flex-1">
                                                             <label className="text-[8px] text-gray-400 font-bold uppercase block mb-0.5">Employer</label>
-                                                            <input type="number" disabled={isPosted} value={editingEntry.er_socso.toFixed(2)} onChange={e => updateEntry(editingEmpId, {er_socso: parseFloat(e.target.value)||0})} className={`${inputClassName} py-1.5 text-xs`} placeholder="0.00" inputMode="decimal"/>
+                                                            <input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.er_socso.toFixed(2)} onChange={e => updateEntry(editingEmpId, {er_socso: parseFloat(e.target.value)||0})} className={`${inputClassName} py-1.5 text-xs`} placeholder="0.00" inputMode="decimal"/>
                                                         </div>
                                                     </div>
                                                 </div>
 
-                                                {/* EIS ROW */}
                                                 <div className="flex flex-col sm:flex-row gap-2">
                                                     <div className="w-24 pt-2 text-[10px] font-bold text-gray-500 uppercase">EIS</div>
                                                     <div className="flex gap-2 flex-1">
                                                         <div className="flex-1">
                                                             <label className="text-[8px] text-gray-400 font-bold uppercase block mb-0.5">Employee</label>
-                                                            <input type="number" disabled={isPosted} value={editingEntry.ee_eis.toFixed(2)} onChange={e => updateEntry(editingEmpId, {ee_eis: parseFloat(e.target.value)||0})} className={`${inputClassName} py-1.5 text-xs`} placeholder="0.00" inputMode="decimal"/>
+                                                            <input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.ee_eis.toFixed(2)} onChange={e => updateEntry(editingEmpId, {ee_eis: parseFloat(e.target.value)||0})} className={`${inputClassName} py-1.5 text-xs`} placeholder="0.00" inputMode="decimal"/>
                                                         </div>
                                                         <div className="flex-1">
                                                             <label className="text-[8px] text-gray-400 font-bold uppercase block mb-0.5">Employer</label>
-                                                            <input type="number" disabled={isPosted} value={editingEntry.er_eis.toFixed(2)} onChange={e => updateEntry(editingEmpId, {er_eis: parseFloat(e.target.value)||0})} className={`${inputClassName} py-1.5 text-xs`} placeholder="0.00" inputMode="decimal"/>
+                                                            <input type="number" disabled={isPosted || editingEntry.isPaid} value={editingEntry.er_eis.toFixed(2)} onChange={e => updateEntry(editingEmpId, {er_eis: parseFloat(e.target.value)||0})} className={`${inputClassName} py-1.5 text-xs`} placeholder="0.00" inputMode="decimal"/>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1388,7 +1596,7 @@ return {
                             </div>
 
                             {/* NOTE */}
-                            <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">备注 (Note)</label><textarea className="w-full p-4 bg-white border border-gray-200 rounded-xl text-sm outline-none resize-none h-24 focus:border-[#1A1A1A] transition-colors" placeholder="Optional..." value={editingEntry.note} onChange={e => updateEntry(editingEmpId, {note: e.target.value})} disabled={isPosted}></textarea></div>
+                            <div><label className="input-label text-[10px] font-bold text-gray-400 uppercase mb-1 block">备注 (Note)</label><textarea className="w-full p-4 bg-white border border-gray-200 rounded-xl text-sm outline-none resize-none h-24 focus:border-[#1A1A1A] transition-colors" placeholder="Optional..." value={editingEntry.note} onChange={e => updateEntry(editingEmpId, {note: e.target.value})} disabled={isPosted || editingEntry.isPaid}></textarea></div>
                             
                             {/* PAYMENT METHOD SELECTOR */}
                             <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
@@ -1396,8 +1604,8 @@ return {
                                 <select 
                                     value={editingEntry.paymentMethod} 
                                     onChange={e => updateEntry(editingEmpId, {paymentMethod: e.target.value as any})}
-                                    disabled={isPosted}
-                                    className="w-full p-4 bg-gray-50 border border-gray-300 rounded-xl text-sm font-bold outline-none focus:border-[#1A1A1A] transition-colors"
+                                    disabled={isPosted || editingEntry.isPaid}
+                                    className="w-full p-4 bg-gray-50 border border-gray-300 rounded-xl text-sm font-bold outline-none focus:border-[#1A1A1A] transition-colors disabled:opacity-50"
                                 >
                                     <option value="BANK">Bank Transfer (银行转账)</option>
                                     <option value="CASH">Cash (现金)</option>
@@ -1406,6 +1614,7 @@ return {
                             </div>
 
                         </div>
+
                         {/* Footer (Fixed) */}
                         <div className="p-4 md:p-5 bg-white border-t border-gray-200 shrink-0 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] safe-area-bottom z-10">
                             <div className="text-right mb-4">
@@ -1415,27 +1624,52 @@ return {
                             <div className="flex gap-2">
                                 {!showPayConfirm ? (
                                     <>
-                                        <button onClick={handlePrintSingleSlip} disabled={isGeneratingPdf} className="flex-1 bg-white border border-gray-200 text-gray-600 py-3 md:py-4 rounded-xl font-bold text-xs md:text-sm hover:bg-gray-50 flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                                        <button onClick={handlePrintSingleSlip} disabled={isGeneratingPdf} className="flex-[0.5] bg-white border border-gray-200 text-gray-600 py-3 md:py-4 rounded-xl font-bold text-xs md:text-sm hover:bg-gray-50 flex items-center justify-center gap-2 active:scale-95 transition-transform">
                                             {isGeneratingPdf ? <Loader2 size={16} className="animate-spin"/> : <Printer size={16}/>} 打印
                                         </button>
                                         
                                         {!isPosted && (
-                                            <button onClick={() => setShowPayConfirm(true)} className="flex-1 bg-green-600 text-white py-3 md:py-4 rounded-xl font-bold text-xs md:text-sm shadow-md hover:bg-green-700 flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                                                <CreditCard size={16}/> 发放薪资 (Pay)
-                                            </button>
+                                            editingEntry.isPaid ? (
+                                                <button 
+                                                    onClick={handleRevokeIndividualPayment} 
+                                                    className="flex-1 py-3 md:py-4 rounded-xl font-bold text-xs md:text-sm shadow-md flex items-center justify-center gap-2 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 active:scale-95 transition-transform"
+                                                >
+                                                    <RotateCcw size={16}/> 撤销此付款 (Undo)
+                                                </button>
+                                            ) : (
+                                                <button 
+                                                    onClick={() => setShowPayConfirm(true)} 
+                                                    className="flex-1 bg-green-600 text-white py-3 md:py-4 rounded-xl font-bold text-xs md:text-sm shadow-md hover:bg-green-700 flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                                                >
+                                                    <CreditCard size={16}/> 发放薪资 (Pay)
+                                                </button>
+                                            )
                                         )}
 
-                                        <button onClick={handleSaveSingleDraft} className="flex-[2] bg-[#1A1A1A] text-[#FFD700] py-3 md:py-4 rounded-xl font-black text-xs md:text-sm shadow-lg hover:bg-black transition-colors flex items-center justify-center gap-2 active:scale-95 transition-transform"><Save size={18}/> 保存 (Save)</button>
+                                        {!editingEntry.isPaid && (
+                                            <button onClick={handleSaveSingleDraft} className="flex-[1.5] bg-[#1A1A1A] text-[#FFD700] py-3 md:py-4 rounded-xl font-black text-xs md:text-sm shadow-lg hover:bg-black transition-colors flex items-center justify-center gap-2 active:scale-95 transition-transform"><Save size={18}/> 保存计算 (Save)</button>
+                                        )}
                                     </>
                                 ) : (
-                                    <div className="flex-1 flex gap-2 animate-in fade-in slide-in-from-bottom-2">
-                                        <button onClick={() => handleSettlePayment('BANK_TRANSFER')} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold text-xs hover:bg-blue-700 flex flex-col items-center justify-center">
-                                            <Building2 size={16} className="mb-1"/> Bank Pay
-                                        </button>
-                                        <button onClick={() => handleSettlePayment('CASH')} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold text-xs hover:bg-green-700 flex flex-col items-center justify-center">
-                                            <Banknote size={16} className="mb-1"/> Cash Pay
-                                        </button>
-                                        <button onClick={() => setShowPayConfirm(false)} className="px-4 bg-gray-100 text-gray-500 rounded-xl font-bold text-xs hover:bg-gray-200">Cancel</button>
+                                    <div className="flex-1 flex flex-col sm:flex-row gap-2 animate-in fade-in slide-in-from-bottom-2 items-center bg-gray-50 p-2 rounded-xl border border-gray-200">
+                                        <div className="flex flex-col w-full sm:w-auto">
+                                            <span className="text-[9px] text-gray-400 font-bold uppercase ml-1 mb-0.5">记账日期 (Sync to Funds)</span>
+                                            <input 
+                                                type="date" 
+                                                value={paymentDate}
+                                                onChange={(e) => setPaymentDate(e.target.value)}
+                                                className="p-3 border border-gray-300 rounded-lg text-xs font-bold text-[#1A1A1A] outline-none w-full" 
+                                            />
+                                        </div>
+                                        <div className="flex gap-2 w-full">
+                                            <button onClick={() => handleSettlePayment('BANK_TRANSFER')} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-bold text-xs hover:bg-blue-700 flex items-center justify-center gap-1 shadow-sm active:scale-95">
+                                                <Building2 size={14}/> 银行
+                                            </button>
+                                            <button onClick={() => handleSettlePayment('CASH')} className="flex-1 bg-green-600 text-white py-3 rounded-lg font-bold text-xs hover:bg-green-700 flex items-center justify-center gap-1 shadow-sm active:scale-95">
+                                                <Banknote size={14}/> 现金
+                                            </button>
+                                            <button onClick={() => setShowPayConfirm(false)} className="px-3 bg-white text-gray-500 rounded-lg border border-gray-300 font-bold text-xs hover:bg-gray-100 active:scale-95"><X size={16}/></button>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -1447,7 +1681,6 @@ return {
             {/* ADVANCE HISTORY MODAL OVERLAY */}
             {showAdvanceHistory && (
                 <div className="fixed inset-0 z-[150] flex items-center justify-center p-4" onClick={() => setShowAdvanceHistory(false)}>
-                     {/* Invisible backdrop to catch clicks */}
                      <div className="absolute inset-0 bg-black/10 backdrop-blur-[1px]"></div>
                      
                      <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-gray-200 animate-in zoom-in-95 relative z-10 overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -1485,7 +1718,7 @@ return {
                 </div>
             )}
             
-            {/* HIDDEN PRINT SLIP (A4 Layout) - RESTRUCTURED */}
+            {/* 🟢 HIDDEN PRINT SLIP (A4 Layout) */}
             <div style={{ position: 'fixed', left: '-10000px', top: 0, zIndex: -50 }}>
                 <div ref={printSlipRef} className="w-[210mm] min-h-[297mm] bg-white p-12 text-black font-sans relative flex flex-col">
                     {editingEntry && editingEmp && (
@@ -1497,7 +1730,6 @@ return {
                                         <div className="w-12 h-12 bg-black text-white flex items-center justify-center font-black text-2xl rounded-lg">K</div>
                                         <div>
                                             <h1 className="text-2xl font-black uppercase tracking-widest leading-none">KIM LIAN KEE (KEPONG) SDN. BHD.</h1>
-                                            {/* Subtitle Removed */}
                                         </div>
                                     </div>
                                 </div>
@@ -1507,44 +1739,16 @@ return {
                                 </div>
                             </div>
 
-                            {/* Employee Info Grid - MODIFIED TO 3 COLUMNS */}
                             <div className="grid grid-cols-3 gap-y-6 gap-x-4 mb-8 bg-gray-50 p-6 rounded-xl border border-gray-200">
-                                <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Employee Name</p>
-                                    <p className="text-lg font-black">{editingEmp.name}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Employee ID</p>
-                                    <p className="text-lg font-mono font-bold">{editingEmp.id}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Position / Dept</p>
-                                    <p className="text-sm font-bold">{editingEmp.role.split('(')[0]}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">IC / Passport</p>
-                                    <p className="text-sm font-mono font-bold">{editingEmp.icNumber || '-'}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Join Date</p>
-                                    <p className="text-sm font-bold">{editingEmp.joinDate || '-'}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Bank Name</p>
-                                    <p className="text-sm font-bold">{editingEmp.bankName || '-'}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Account No.</p>
-                                    <p className="text-sm font-mono font-bold">{editingEmp.bankAccount || '-'}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">EPF No.</p>
-                                    <p className="text-sm font-mono font-bold">{editingEmp.epfNo || '-'}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">SOCSO / EIS No.</p>
-                                    <p className="text-sm font-mono font-bold">{editingEmp.socsoNo || '-'}</p>
-                                </div>
+                                <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Employee Name</p><p className="text-lg font-black">{editingEmp.name}</p></div>
+                                <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Employee ID</p><p className="text-lg font-mono font-bold">{editingEmp.id}</p></div>
+                                <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Position / Dept</p><p className="text-sm font-bold">{editingEmp.role.split('(')[0]}</p></div>
+                                <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">IC / Passport</p><p className="text-sm font-mono font-bold">{editingEmp.icNumber || '-'}</p></div>
+                                <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Join Date</p><p className="text-sm font-bold">{editingEmp.joinDate || '-'}</p></div>
+                                <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Bank Name</p><p className="text-sm font-bold">{editingEmp.bankName || '-'}</p></div>
+                                <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Account No.</p><p className="text-sm font-mono font-bold">{editingEmp.bankAccount || '-'}</p></div>
+                                <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">EPF No.</p><p className="text-sm font-mono font-bold">{editingEmp.epfNo || '-'}</p></div>
+                                <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">SOCSO / EIS No.</p><p className="text-sm font-mono font-bold">{editingEmp.socsoNo || '-'}</p></div>
                             </div>
 
                             {/* Main Content: 2 Columns */}
@@ -1553,19 +1757,21 @@ return {
                                 {/* LEFT: EARNINGS -> DEDUCTIONS -> NET */}
                                 <div className="flex flex-col gap-8">
                                     
-                                    {/* EARNINGS */}
+                                    {/* 🟢 EARNINGS */}
                                     <div>
                                         <div className="flex justify-between border-b-2 border-black pb-1 mb-2"><h4 className="text-sm font-black uppercase">EARNINGS (收入)</h4><span className="text-xs font-bold text-gray-500">MYR</span></div>
                                         <div className="space-y-2 text-sm">
                                             <div className="flex justify-between"><span>Basic Salary (底薪)</span><span className="font-mono">{editingEntry.basic.toFixed(2)}</span></div>
                                             {editingEntry.allowance > 0 && <div className="flex justify-between"><span>Allowances (津贴)</span><span className="font-mono">{editingEntry.allowance.toFixed(2)}</span></div>}
+                                            {editingEntry.extraSubsidy > 0 && <div className="flex justify-between"><span>Subsidies (补贴/油费)</span><span className="font-mono">{editingEntry.extraSubsidy.toFixed(2)}</span></div>}
                                             {editingEntry.ot > 0 && <div className="flex justify-between"><span>Overtime / Comm (加班/佣金)</span><span className="font-mono">{editingEntry.ot.toFixed(2)}</span></div>}
                                             {editingEntry.bonus > 0 && <div className="flex justify-between"><span>Bonus (奖金)</span><span className="font-mono">{editingEntry.bonus.toFixed(2)}</span></div>}
+                                            {editingEntry.otherEarning > 0 && <div className="flex justify-between"><span>Other ({editingEntry.otherEarningNote || '其他收入'})</span><span className="font-mono">{editingEntry.otherEarning.toFixed(2)}</span></div>}
                                             <div className="flex justify-between font-bold pt-2 border-t border-gray-200 mt-2"><span>GROSS PAY (总收入)</span><span className="font-mono">{getTotals(editingEntry).gross.toFixed(2)}</span></div>
                                         </div>
                                     </div>
 
-                                    {/* DEDUCTIONS (LESS) */}
+                                    {/* 🟢 DEDUCTIONS (LESS) */}
                                     <div>
                                         <div className="flex justify-between border-b-2 border-black pb-1 mb-2"><h4 className="text-sm font-black uppercase">LESS / DEDUCTIONS (扣除)</h4><span className="text-xs font-bold text-gray-500">MYR</span></div>
                                         <div className="space-y-2 text-sm">
@@ -1575,6 +1781,8 @@ return {
                                             {editingEntry.ee_pcb > 0 && <div className="flex justify-between"><span>PCB (Tax)</span><span className="font-mono">{editingEntry.ee_pcb.toFixed(2)}</span></div>}
                                             {editingEntry.advanceLoan > 0 && <div className="flex justify-between"><span>Advance / Loan (预支)</span><span className="font-mono">{editingEntry.advanceLoan.toFixed(2)}</span></div>}
                                             {(editingEntry.latePenalty + editingEntry.unpaidLeave) > 0 && <div className="flex justify-between"><span>Late / Unpaid (迟到/缺席)</span><span className="font-mono">{(editingEntry.latePenalty + editingEntry.unpaidLeave).toFixed(2)}</span></div>}
+                                            {editingEntry.hostelFee > 0 && <div className="flex justify-between"><span>Hostel Fee (住宿费扣除)</span><span className="font-mono">{editingEntry.hostelFee.toFixed(2)}</span></div>}
+                                            {editingEntry.otherDeduction > 0 && <div className="flex justify-between"><span>Other ({editingEntry.otherDeductionNote || '其他扣除'})</span><span className="font-mono">{editingEntry.otherDeduction.toFixed(2)}</span></div>}
                                             <div className="flex justify-between font-bold pt-2 border-t border-gray-200 mt-2"><span>TOTAL DEDUCTIONS (总扣除)</span><span className="font-mono">{getTotals(editingEntry).deductions.toFixed(2)}</span></div>
                                         </div>
                                     </div>
@@ -1592,48 +1800,11 @@ return {
                                 {/* RIGHT: INFORMATION (STATUTORY BREAKDOWN) */}
                                 <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 h-full">
                                     <h4 className="text-sm font-black uppercase border-b-2 border-gray-300 pb-2 mb-4 text-gray-500">INFORMATION (CONTRIBUTIONS)</h4>
-                                    
                                     <div className="space-y-6 text-xs">
-                                        {/* EPF */}
-                                        <div>
-                                            <p className="font-bold text-gray-500 mb-1 uppercase">EPF (KWSP)</p>
-                                            <table className="w-full">
-                                                <tbody>
-                                                    <tr><td className="py-1">Employee Share (11%)</td><td className="text-right font-mono">{editingEntry.ee_epf.toFixed(2)}</td></tr>
-                                                    <tr><td className="py-1">Employer Share (13%)</td><td className="text-right font-mono">{editingEntry.er_epf.toFixed(2)}</td></tr>
-                                                    <tr className="font-bold border-t border-gray-300"><td className="py-1">Total Contribution</td><td className="text-right font-mono">{(editingEntry.ee_epf + editingEntry.er_epf).toFixed(2)}</td></tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
-
-                                        {/* SOCSO */}
-                                        <div>
-                                            <p className="font-bold text-gray-500 mb-1 uppercase">SOCSO (PERKESO)</p>
-                                            <table className="w-full">
-                                                <tbody>
-                                                    <tr><td className="py-1">Employee Share</td><td className="text-right font-mono">{editingEntry.ee_socso.toFixed(2)}</td></tr>
-                                                    <tr><td className="py-1">Employer Share</td><td className="text-right font-mono">{editingEntry.er_socso.toFixed(2)}</td></tr>
-                                                    <tr className="font-bold border-t border-gray-300"><td className="py-1">Total Contribution</td><td className="text-right font-mono">{(editingEntry.ee_socso + editingEntry.er_socso).toFixed(2)}</td></tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
-
-                                         {/* EIS */}
-                                        <div>
-                                            <p className="font-bold text-gray-500 mb-1 uppercase">EIS (SIP)</p>
-                                            <table className="w-full">
-                                                <tbody>
-                                                    <tr><td className="py-1">Employee Share</td><td className="text-right font-mono">{editingEntry.ee_eis.toFixed(2)}</td></tr>
-                                                    <tr><td className="py-1">Employer Share</td><td className="text-right font-mono">{editingEntry.er_eis.toFixed(2)}</td></tr>
-                                                    <tr className="font-bold border-t border-gray-300"><td className="py-1">Total Contribution</td><td className="text-right font-mono">{(editingEntry.ee_eis + editingEntry.er_eis).toFixed(2)}</td></tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
-
-                                        {/* Payment Info */}
-                                        <div className="pt-8 mt-8 border-t border-gray-200">
-                                             <div className="flex justify-between mb-1"><span>Issued Date:</span><span className="font-bold">{new Date().toLocaleDateString()}</span></div>
-                                        </div>
+                                        <div><p className="font-bold text-gray-500 mb-1 uppercase">EPF (KWSP)</p><table className="w-full"><tbody><tr><td className="py-1">Employee Share (11%)</td><td className="text-right font-mono">{editingEntry.ee_epf.toFixed(2)}</td></tr><tr><td className="py-1">Employer Share (13%)</td><td className="text-right font-mono">{editingEntry.er_epf.toFixed(2)}</td></tr><tr className="font-bold border-t border-gray-300"><td className="py-1">Total Contribution</td><td className="text-right font-mono">{(editingEntry.ee_epf + editingEntry.er_epf).toFixed(2)}</td></tr></tbody></table></div>
+                                        <div><p className="font-bold text-gray-500 mb-1 uppercase">SOCSO (PERKESO)</p><table className="w-full"><tbody><tr><td className="py-1">Employee Share</td><td className="text-right font-mono">{editingEntry.ee_socso.toFixed(2)}</td></tr><tr><td className="py-1">Employer Share</td><td className="text-right font-mono">{editingEntry.er_socso.toFixed(2)}</td></tr><tr className="font-bold border-t border-gray-300"><td className="py-1">Total Contribution</td><td className="text-right font-mono">{(editingEntry.ee_socso + editingEntry.er_socso).toFixed(2)}</td></tr></tbody></table></div>
+                                        <div><p className="font-bold text-gray-500 mb-1 uppercase">EIS (SIP)</p><table className="w-full"><tbody><tr><td className="py-1">Employee Share</td><td className="text-right font-mono">{editingEntry.ee_eis.toFixed(2)}</td></tr><tr><td className="py-1">Employer Share</td><td className="text-right font-mono">{editingEntry.er_eis.toFixed(2)}</td></tr><tr className="font-bold border-t border-gray-300"><td className="py-1">Total Contribution</td><td className="text-right font-mono">{(editingEntry.ee_eis + editingEntry.er_eis).toFixed(2)}</td></tr></tbody></table></div>
+                                        <div className="pt-8 mt-8 border-t border-gray-200"><div className="flex justify-between mb-1"><span>Issued Date:</span><span className="font-bold">{new Date().toLocaleDateString()}</span></div></div>
                                     </div>
                                 </div>
                             </div>
@@ -1644,18 +1815,9 @@ return {
                                 <p className="text-[9px] text-gray-500 mb-8 leading-relaxed">
                                     I hereby acknowledge that I have received the sum stated above as full payment of my salary for the period indicated. I confirm that the details, including deductions for EPF, SOCSO, EIS, and PCB (if applicable), are correct. I further declare that I have no further claims against the company regarding this payment period. Any discrepancies must be reported to HR within 7 days of receipt.
                                 </p>
-
                                 <div className="grid grid-cols-2 gap-16 text-center text-xs">
-                                    <div>
-                                        <div className="border-b border-black mb-2 h-12"></div>
-                                        <p className="font-bold uppercase">EMPLOYER SIGNATURE</p>
-                                        <p className="text-[9px] text-gray-400">Kim Lian Kee</p>
-                                    </div>
-                                    <div>
-                                        <div className="border-b border-black mb-2 h-12"></div>
-                                        <p className="font-bold uppercase">EMPLOYEE SIGNATURE</p>
-                                        <p className="text-[9px] text-gray-400">I acknowledge receipt of the above salary.</p>
-                                    </div>
+                                    <div><div className="border-b border-black mb-2 h-12"></div><p className="font-bold uppercase">EMPLOYER SIGNATURE</p><p className="text-[9px] text-gray-400">Kim Lian Kee</p></div>
+                                    <div><div className="border-b border-black mb-2 h-12"></div><p className="font-bold uppercase">EMPLOYEE SIGNATURE</p><p className="text-[9px] text-gray-400">I acknowledge receipt of the above salary.</p></div>
                                 </div>
                                 <p className="text-[9px] text-gray-300 text-center mt-6 uppercase tracking-[0.2em]">THIS IS A COMPUTER GENERATED DOCUMENT • {new Date().toISOString().split('T')[0]}</p>
                             </div>
@@ -1664,7 +1826,7 @@ return {
                 </div>
             </div>
 
-            {/* HIDDEN PRINT SUMMARY TABLE (Landscape A4) */}
+            {/* 🟢 HIDDEN PRINT SUMMARY TABLE (Landscape A4) */}
             <div style={{ position: 'fixed', left: '-10000px', top: 0, zIndex: -50 }}>
                 <div ref={printSummaryRef} className="w-[297mm] min-h-[210mm] bg-white p-10 font-sans text-black relative">
                     <div className="flex justify-between items-end border-b-2 border-black pb-4 mb-6">
@@ -1681,12 +1843,12 @@ return {
                                 <th className="p-2 border-r border-gray-300">ID</th>
                                 <th className="p-2 border-r border-gray-300">Name</th>
                                 <th className="p-2 text-right border-r border-gray-300">Basic</th>
-                                <th className="p-2 text-right border-r border-gray-300">Allowances</th>
+                                <th className="p-2 text-right border-r border-gray-300">Allow+Sub</th>
                                 <th className="p-2 text-right border-r border-gray-300">OT/Bonus</th>
-                                <th className="p-2 text-right border-r border-gray-300">Advance</th>
-                                <th className="p-2 text-right border-r border-gray-300">EPF (EE)</th>
-                                <th className="p-2 text-right border-r border-gray-300">SOCSO (EE)</th>
-                                <th className="p-2 text-right border-r border-gray-300">EIS (EE)</th>
+                                <th className="p-2 text-right border-r border-gray-300 text-green-700">Other(Earn)</th>
+                                <th className="p-2 text-right border-r border-gray-300 text-red-700">Other(Ded)</th>
+                                <th className="p-2 text-right border-r border-gray-300">Hostel+Adv</th>
+                                <th className="p-2 text-right border-r border-gray-300">EPF/SOCSO</th>
                                 <th className="p-2 text-right border-r border-gray-300 font-black">NET PAY</th>
                                 <th className="p-2 text-center">Method</th>
                             </tr>
@@ -1703,12 +1865,12 @@ return {
                                         <td className="p-2 border-r border-gray-100 font-mono">{emp.id}</td>
                                         <td className="p-2 border-r border-gray-100 font-bold">{emp.name}</td>
                                         <td className="p-2 text-right border-r border-gray-100">{entry.basic.toFixed(2)}</td>
-                                        <td className="p-2 text-right border-r border-gray-100">{entry.allowance.toFixed(2)}</td>
-                                        <td className="p-2 text-right border-r border-gray-100">{(entry.ot + entry.bonus + (entry.holidayPay || 0)).toFixed(2)}</td>
-                                        <td className="p-2 text-right border-r border-gray-100 text-red-600">{entry.advanceLoan > 0 ? `(${entry.advanceLoan.toFixed(2)})` : '-'}</td>
-                                        <td className="p-2 text-right border-r border-gray-100 text-red-600">{entry.ee_epf > 0 ? `(${entry.ee_epf.toFixed(2)})` : '-'}</td>
-                                        <td className="p-2 text-right border-r border-gray-100 text-red-600">{entry.ee_socso > 0 ? `(${entry.ee_socso.toFixed(2)})` : '-'}</td>
-                                        <td className="p-2 text-right border-r border-gray-100 text-red-600">{entry.ee_eis > 0 ? `(${entry.ee_eis.toFixed(2)})` : '-'}</td>
+                                        <td className="p-2 text-right border-r border-gray-100">{(entry.allowance + entry.extraSubsidy).toFixed(2)}</td>
+                                        <td className="p-2 text-right border-r border-gray-100">{(entry.ot + entry.bonus).toFixed(2)}</td>
+                                        <td className="p-2 text-right border-r border-gray-100 text-green-700">{entry.otherEarning > 0 ? entry.otherEarning.toFixed(2) : '-'}</td>
+                                        <td className="p-2 text-right border-r border-gray-100 text-red-700">{entry.otherDeduction > 0 ? `(${entry.otherDeduction.toFixed(2)})` : '-'}</td>
+                                        <td className="p-2 text-right border-r border-gray-100 text-red-600">{(entry.hostelFee + entry.advanceLoan) > 0 ? `(${(entry.hostelFee + entry.advanceLoan).toFixed(2)})` : '-'}</td>
+                                        <td className="p-2 text-right border-r border-gray-100 text-red-600">{(entry.ee_epf + entry.ee_socso + entry.ee_eis) > 0 ? `(${(entry.ee_epf + entry.ee_socso + entry.ee_eis).toFixed(2)})` : '-'}</td>
                                         <td className="p-2 text-right border-r border-gray-100 font-black">{t.netPay.toFixed(2)}</td>
                                         <td className="p-2 text-center text-[9px]">{entry.paymentMethod}</td>
                                     </tr>
