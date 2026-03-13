@@ -150,6 +150,9 @@ export class DataManager {
     }
     static async saveSettlement(record: SettlementRecord): Promise<void> { await setDoc(doc(db, 'settlements', record.id), record); }
     static async deleteSettlement(id: string): Promise<void> { await deleteDoc(doc(db, 'settlements', id)); }
+    static async updateSettlementReconStatus(settlementId: string, reconStatus: Record<string, boolean>): Promise<void> {
+    await updateDoc(doc(db, 'settlements', settlementId), { reconStatus });
+    }
     static async updateExpenseInSettlement(settlementId: string, expense: ExpenseItem): Promise<void> {
         const ref = doc(db, 'settlements', settlementId);
         await runTransaction(db, async (transaction) => {
