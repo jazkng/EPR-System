@@ -1,4 +1,3 @@
-
 import { Employee, RoleDefinition, RoleGuide, AllowanceKey } from '../../types';
 
 // ==========================================
@@ -10,7 +9,7 @@ export const GENERAL_EMPLOYEE_RULES = [
     '🧼 仪容仪表：必须穿戴整齐制服、围裙、包鞋。厨房人员必须戴帽子，长发需盘起。',
     '🍜 员工用餐：仅限 16:30前 或 21:30-22:00 轮流用餐。',
     '🚬 吸烟规定：仅限后巷指定区域，严禁穿着围裙吸烟，回岗必须洗手漱口。',
-    '🗣️ 待客之道：见到顾客必须点头微笑说“欢迎光临”，离开说“谢谢光临”。',
+    '🗣️ 待客之道：见到顾客必须点头微笑说"欢迎光临"，离开说"谢谢光临"。',
     "🚫 安全红线：厨房地面保持干燥防滑，端热汤/铁板必须使用托盘或隔热布。",
     '🌛 打烊纪律：01:30 Last Call 后不再接单，02:00 前完成所有清洁工作并经主管检查后方可离店。'
 ];
@@ -85,6 +84,59 @@ export const DEFAULT_ROLE_GUIDES: Record<string, RoleGuide> = {
     confirmedExpectation: '独立带班，培训新员工，提升翻台率。'
   },
 
+  // ------------------------------------------------------------------ ✅ NEW
+  // HR & STORE MANAGEMENT
+  // ------------------------------------------------------------------
+  '人事管理 (HR Management)': {
+    description: '负责招聘、员工档案管理、薪资处理及劳资关系维护，确保公司人力资源健康运作。',
+    coreValue: '公平 · 保密 · 合规',
+    safetyRedLine: '严禁泄露员工薪资与个人档案 / 严禁偏私处理纪律事件',
+    employeeRules: GENERAL_EMPLOYEE_RULES,
+    duties: [
+        '维护员工档案 (入职/离职/调岗/薪资变动)',
+        '处理月度薪资计算与发放 (EPF/SOCSO/PCB)',
+        '跟进员工警告记录与纪律流程',
+        '协调招聘广告、面试与入职引导',
+        '管理员工排班与假期申请审批',
+        '确保公司遵守劳工法令 (Employment Act 1955)'
+    ],
+    troubleshooting: [
+        { issue: "员工投诉薪资计算错误", solution: "立即调出当月考勤与薪资单核对，24小时内给出书面答复，确认有误则下次发薪补足差额。" },
+        { issue: "员工突然离职不辞而别 (Abscond)", solution: "按流程发送书面通知至其登记地址，记录档案为 '旷工离职' ，并更新系统状态。" },
+        { issue: "收到前员工索取薪资单纪录", solution: "核实身份后，依劳工法令在5个工作日内提供，只能提供本人档案。" }
+    ],
+    salaryRange: { min: 2800, max: 3800 },
+    specialIncentive: '零错误薪资奖 (Payroll Accuracy Bonus)',
+    enabledAllowances: ['ATTENDANCE', 'MEAL', 'HOSTEL'],
+    probationExpectation: '熟悉系统档案操作，薪资核算无误差。',
+    confirmedExpectation: '独立完成月度薪资流程，员工档案100%完整无漏项。'
+  },
+
+  '店面管理 (Store Management)': {
+    description: '专注门店日常运营管理。负责库存、采购、设备维护及营业指标跟进，确保门店高效运转。',
+    coreValue: '效率 · 节约 · 稳定运营',
+    safetyRedLine: '严禁私自挪用库存物资 / 严禁授权不明的供应商进货',
+    employeeRules: GENERAL_EMPLOYEE_RULES,
+    duties: [
+        '监控每日营业额与达标率',
+        '跟进库存盘点，确保食材与物资充足',
+        '协调与供应商的采购、报价及交货',
+        '负责设备日常检查与维修申报',
+        '维护门店卫生与安全标准 (SOP Inspection)',
+        '协助经理完成月底盘点与成本报告'
+    ],
+    troubleshooting: [
+        { issue: "供应商无法按时交货", solution: "立即联系备用供应商，同时通知厨房调整当日菜单以应对食材短缺。" },
+        { issue: "设备故障 (如冰箱/炸炉/洗碗机)", solution: "立即拍照记录故障状况，联系指定维修师傅，同时安排替代方案确保运营不中断。" },
+        { issue: "月底盘点与系统数据出现差异", solution: "重新清点实物，检查入库与出库记录，找出差异原因并形成书面报告。" }
+    ],
+    salaryRange: { min: 2800, max: 3800 },
+    specialIncentive: '成本节约奖 (Cost Saving Bonus) & 设备零故障奖',
+    enabledAllowances: ['ATTENDANCE', 'MEAL', 'HOSTEL'],
+    probationExpectation: '熟悉供应链流程，库存盘点准确无重大差异。',
+    confirmedExpectation: '独立完成月度采购与成本控制，设备维护及时无影响营业。'
+  },
+
   // ------------------------------------------------------------------
   // FRONT OF HOUSE (楼面)
   // ------------------------------------------------------------------
@@ -124,7 +176,7 @@ export const DEFAULT_ROLE_GUIDES: Record<string, RoleGuide> = {
     ],
     troubleshooting: [
         { issue: "顾客投诉等了 30 分钟还没上菜", solution: "先道歉，立即去厨房查看单据位置。如果是漏单，优先补做并送上一杯免费凉茶致歉。" },
-        { issue: "顾客点菜犹豫不决", solution: "主动引导：“不如试下我们的招牌福建面？两个人吃中份刚好，再加个炸鸡翅？”" },
+        { issue: "顾客点菜犹豫不决", solution: "主动引导：'不如试下我们的招牌福建面？两个人吃中份刚好，再加个炸鸡翅？" },
         { issue: "福建面卖完了 (极少发生)", solution: "立即通知所有服务员，并向顾客推荐广府鸳鸯或罗面作为替代。" }
     ],
     salaryRange: { min: 2300, max: 2800 },
@@ -147,7 +199,7 @@ export const DEFAULT_ROLE_GUIDES: Record<string, RoleGuide> = {
     ],
     troubleshooting: [
         { issue: "不小心把汤洒在客人身上", solution: "立即道歉，提供纸巾擦拭。不管客人是否生气，必须马上报告经理处理赔偿事宜。" },
-        { issue: "客人要求加汤/加猪油渣", solution: "微笑着说“好的，稍等”，立即去厨房取，不要让客人等超过 3 分钟。" },
+        { issue: "客人要求加汤/加猪油渣", solution: "微笑着说'好的，稍等'，立即去厨房取，不要让客人等超过 3 分钟。" },
         { issue: "发现桌子摇晃不稳", solution: "立即找硬纸皮垫脚，确保客人用餐体验舒适。" }
     ],
     salaryRange: { min: 1800, max: 2200 },
@@ -181,7 +233,7 @@ export const DEFAULT_ROLE_GUIDES: Record<string, RoleGuide> = {
     employeeRules: GENERAL_EMPLOYEE_RULES,
     duties: ['高峰期支援', '基础服务/清洁', '听从调配'],
     troubleshooting: [
-        { issue: "不知道该做什么", solution: "主动询问 Supervisor 或 Captain：“有什么需要帮忙的吗？”不要站在角落玩手机。" }
+        { issue: "不知道该做什么", solution: "主动询问 Supervisor 或 Captain：'有什么需要帮忙的吗？不要站在角落玩手机。" }
     ],
     salaryRange: { min: 0, max: 0 }, // Hourly
     specialIncentive: '当日出薪 (Daily Pay)',
@@ -392,7 +444,7 @@ export const DEFAULT_ROLE_GUIDES: Record<string, RoleGuide> = {
     employeeRules: GENERAL_EMPLOYEE_RULES,
     duties: ['基础备料 (剥蒜/洗菜)', '传递食材', '学习烹饪技巧'],
     troubleshooting: [
-        { issue: "不知道该做什么", solution: "主动问头手或占板：“有什么我可以先准备的？”不要发呆。" },
+        { issue: "不知道该做什么", solution: "主动问头手或占板：'有什么我可以先准备的？'不要发呆。" },
         { issue: "被师傅骂", solution: "虚心接受，记住错误点，下次不再犯。不要顶嘴。" }
     ],
     salaryRange: { min: 1500, max: 1800 },
@@ -438,6 +490,10 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     { id: 'f5', title: 'Waiter (服务员)', department: 'FOH', rankCategory: 'ENTRY_LEVEL', duties: ['服务'], allowedModules: [] },
     { id: 'f6', title: 'Cleaner (清洁员)', department: 'FOH', rankCategory: 'ENTRY_LEVEL', duties: ['清洁'], allowedModules: [] },
     { id: 'f7', title: 'Part-Time (兼职)', department: 'FOH', rankCategory: 'ENTRY_LEVEL', duties: ['机动'], allowedModules: [] },
+
+    // ✅ NEW ROLES
+    { id: 'm_hr',    title: '人事管理 (HR Management)',    department: 'MANAGEMENT', rankCategory: 'MANAGEMENT', duties: ['招聘', '档案管理', '薪资处理', '劳资关系'], allowedModules: ['HR_FILES', 'REPORTS', 'ROSTER', 'ASSESSMENT'] },
+    { id: 'm_store', title: '店面管理 (Store Management)', department: 'MANAGEMENT', rankCategory: 'MANAGEMENT', duties: ['库存管理', '采购协调', '设备维护', '营业跟进'], allowedModules: ['INVENTORY_KITCHEN', 'INVENTORY_BAR', 'INVENTORY_GENERAL', 'SUPPLIER_CONTACTS', 'LOGBOOK', 'SOP_INSPECT', 'REPORTS'] },
 ];
 
 export const DEFAULT_STAFF: Employee[] = [
