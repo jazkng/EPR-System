@@ -7,9 +7,10 @@ import {
     StoreConfig, AttendanceRecord, SystemBackup, TreasuryConfig, FundTransfer,
     WarrantyRecord, InventoryLog, InventoryTask,
     Proposal, OKR, MarketingCampaign, StoreEvent,
-    MisconductRecord, WarningRecord
+    MisconductRecord, WarningRecord,
+    TaskCompletion // 🟢 新增导入
 } from "../types";
-import { APP_VERSION } from "../components/constants/versionHistory";
+import { APP_VERSION } from "../constants/versionHistory";
 
 export class DataManager {
 
@@ -64,87 +65,107 @@ export class DataManager {
 
     static async updateEmployeeMisconduct(empId: string, type: 'SMALL' | 'MEDIUM' | 'BIG', issue: string, fine?: number): Promise<string> {
         const empRef = doc(db, 'employees', empId);
-        const empSnap = await getDoc(empRef);
-        if (!empSnap.exists()) return 'Employee not found';
-        
-        const emp = empSnap.data() as Employee;
-        const stats = emp.misconductStats || { smallCount: 0, mediumCount: 0, yellowCount: 0 };
-        const warnings = emp.warningHistory || [];
-        const attributes = emp.attributes || { efficiency: 60, service: 60, culinary: 60, leadership: 60, discipline: 60 };
+        let finalResultMsg = '';
 
-        let resultMsg = '';
-        let triggerYellow = false;
-        let triggerRed = false;
-
-        if (type === 'SMALL') {
-            stats.smallCount += 1;
-            if (stats.smallCount >= 5) {
-                stats.smallCount = 0; 
-                triggerYellow = true;
-                resultMsg = '⚠️ 累计 5 小错 -> 触发黄色警告 (Yellow Warning)';
-            } else {
-                resultMsg = `⚠️ 记 1 小错 (当前: ${stats.smallCount}/5)`;
+        // 🛡️ 防御性编程：强制使用 runTransaction 防止并发覆盖员工记录
+        await runTransaction(db, async (transaction) => {
+            const empSnap = await transaction.get(empRef);
+            if (!empSnap.exists()) {
+                finalResultMsg = 'Employee not found';
+                return;
             }
-        } else if (type === 'MEDIUM') {
-            stats.mediumCount += 1;
-            if (stats.mediumCount >= 3) {
-                stats.mediumCount = 0; 
-                triggerYellow = true;
-                resultMsg = '⚠️ 累计 3 中错 -> 触发黄色警告 (Yellow Warning)';
-            } else {
-                resultMsg = `⚠️ 记 1 中错 (当前: ${stats.mediumCount}/3)`;
-            }
-        } else if (type === 'BIG') {
-            triggerYellow = true;
-            resultMsg = '🛑 大错 -> 直接触发黄色警告 (Direct Yellow Warning)';
-        }
-
-        const today = new Date().toISOString().split('T')[0];
-
-        if (triggerYellow) {
-            stats.yellowCount += 1;
-            warnings.unshift({
-                id: `warn_${Date.now()}`, date: today, type: 'WRITTEN',
-                reason: `[System] ${resultMsg} - ${issue}`, issuer: 'System (Logbook)', fineAmount: fine
-            });
-            attributes.discipline = Math.max(0, attributes.discipline - 10);
             
-            if (stats.yellowCount >= 3) {
-                stats.yellowCount = 0;
-                triggerRed = true;
-                resultMsg += ' -> 累计 3 黄 -> 🔴 触发红色警告 (Red Warning)';
+            const emp = empSnap.data() as Employee;
+            // 确保深拷贝，防止直接修改带来的不可预知副作用
+            const stats = JSON.parse(JSON.stringify(emp.misconductStats || { smallCount: 0, mediumCount: 0, yellowCount: 0 }));
+            const warnings = JSON.parse(JSON.stringify(emp.warningHistory || []));
+            const attributes = JSON.parse(JSON.stringify(emp.attributes || { efficiency: 60, service: 60, culinary: 60, leadership: 60, discipline: 60 }));
+
+            let resultMsg = '';
+            let triggerYellow = false;
+            let triggerRed = false;
+
+            if (type === 'SMALL') {
+                stats.smallCount += 1;
+                if (stats.smallCount >= 5) {
+                    stats.smallCount = 0; 
+                    triggerYellow = true;
+                    resultMsg = '⚠️ 累计 5 小错 -> 触发黄色警告 (Yellow Warning)';
+                } else {
+                    resultMsg = `⚠️ 记 1 小错 (当前: ${stats.smallCount}/5)`;
+                }
+            } else if (type === 'MEDIUM') {
+                stats.mediumCount += 1;
+                if (stats.mediumCount >= 3) {
+                    stats.mediumCount = 0; 
+                    triggerYellow = true;
+                    resultMsg = '⚠️ 累计 3 中错 -> 触发黄色警告 (Yellow Warning)';
+                } else {
+                    resultMsg = `⚠️ 记 1 中错 (当前: ${stats.mediumCount}/3)`;
+                }
+            } else if (type === 'BIG') {
+                triggerYellow = true;
+                resultMsg = '🛑 大错 -> 直接触发黄色警告 (Direct Yellow Warning)';
             }
-        }
 
-        if (triggerRed) {
-            warnings.unshift({
-                id: `warn_red_${Date.now()}`, date: today, type: 'FINAL', 
-                reason: `[System] 3 Yellow Warnings Triggered Red Warning - ${issue}`, issuer: 'System (Logbook)', fineAmount: 0 
-            });
-            attributes.discipline = Math.max(0, attributes.discipline - 20); 
-        }
+            const today = new Date().toISOString().split('T')[0];
 
-        if (!triggerYellow && !triggerRed) {
-             warnings.unshift({
-                id: `mistake_${Date.now()}`, date: today, type: 'VERBAL', 
-                reason: `[Mistake: ${type}] ${issue}`, issuer: 'System (Logbook)', fineAmount: fine
-            });
-            attributes.discipline = Math.max(0, attributes.discipline - (type === 'MEDIUM' ? 3 : 1));
-        }
+            if (triggerYellow) {
+                stats.yellowCount += 1;
+                warnings.unshift({
+                    id: `warn_${Date.now()}_${Math.random().toString(36).substring(2,7)}`, // 增加随机后缀防主键冲突
+                    date: today, type: 'WRITTEN',
+                    reason: `[System] ${resultMsg} - ${issue}`, issuer: 'System (Logbook)', fineAmount: fine
+                });
+                attributes.discipline = Math.max(0, attributes.discipline - 10);
+                
+                if (stats.yellowCount >= 3) {
+                    stats.yellowCount = 0;
+                    triggerRed = true;
+                    resultMsg += ' -> 累计 3 黄 -> 🔴 触发红色警告 (Red Warning)';
+                }
+            }
 
-        await updateDoc(empRef, { misconductStats: stats, warningHistory: warnings, attributes: attributes });
-        return resultMsg;
+            if (triggerRed) {
+                warnings.unshift({
+                    id: `warn_red_${Date.now()}_${Math.random().toString(36).substring(2,7)}`, 
+                    date: today, type: 'FINAL', 
+                    reason: `[System] 3 Yellow Warnings Triggered Red Warning - ${issue}`, issuer: 'System (Logbook)', fineAmount: 0 
+                });
+                attributes.discipline = Math.max(0, attributes.discipline - 20); 
+            }
+
+            if (!triggerYellow && !triggerRed) {
+                 warnings.unshift({
+                    id: `mistake_${Date.now()}_${Math.random().toString(36).substring(2,7)}`, 
+                    date: today, type: 'VERBAL', 
+                    reason: `[Mistake: ${type}] ${issue}`, issuer: 'System (Logbook)', fineAmount: fine
+                });
+                attributes.discipline = Math.max(0, attributes.discipline - (type === 'MEDIUM' ? 3 : 1));
+            }
+
+            // 在事务中提交更新
+            transaction.update(empRef, { misconductStats: stats, warningHistory: warnings, attributes: attributes });
+            finalResultMsg = resultMsg;
+        });
+
+        return finalResultMsg;
     }
 
     // ==========================================
-    // 🟢 SETTLEMENTS (已合并修复计费限制)
+    // 🟢 SETTLEMENTS
     // ==========================================
-    static async getSettlements(monthStr?: string): Promise<SettlementRecord[]> {
+    // 👑 修复：加入 forBackup 保护备份完整性
+    static async getSettlements(monthStr?: string, forBackup: boolean = false): Promise<SettlementRecord[]> {
         const colRef = collection(db, 'settlements');
-        const q = monthStr 
-            ? query(colRef, where('date', '>=', `${monthStr}-01`), where('date', '<=', `${monthStr}-31`), orderBy('date', 'desc'), limit(31))
-            : query(colRef, orderBy('date', 'desc'), limit(30));
-
+        let q;
+        if (forBackup) {
+            q = colRef; // ⚠️ 老板备份模式：全量拉取，解除限制
+        } else if (monthStr) {
+            q = query(colRef, where('date', '>=', `${monthStr}-01`), where('date', '<=', `${monthStr}-31`), orderBy('date', 'desc'), limit(31));
+        } else {
+            q = query(colRef, orderBy('date', 'desc'), limit(30));
+        }
         const snap = await getDocs(q);
         return snap.docs.map(d => d.data() as SettlementRecord).sort((a, b) => b.date.localeCompare(a.date)); 
     }
@@ -176,8 +197,11 @@ export class DataManager {
     static async saveRecurringBill(bill: RecurringBill): Promise<void> { await setDoc(doc(db, 'recurring_bills', bill.id), bill); }
     static async deleteRecurringBill(id: string): Promise<void> { await deleteDoc(doc(db, 'recurring_bills', id)); }
 
-    static async getBillPayments(): Promise<BillPaymentRecord[]> {
-        const snap = await getDocs(collection(db, 'bill_payments'));
+    // 👑 防爆护栏：默认只拿最近 300 条
+    static async getBillPayments(forBackup: boolean = false): Promise<BillPaymentRecord[]> {
+        const colRef = collection(db, 'bill_payments');
+        const q = forBackup ? colRef : query(colRef, orderBy('date', 'desc'), limit(300));
+        const snap = await getDocs(q);
         return snap.docs.map(d => d.data() as BillPaymentRecord);
     }
     static async saveBillPayment(payment: BillPaymentRecord): Promise<void> { await setDoc(doc(db, 'bill_payments', payment.id), payment); }
@@ -192,7 +216,7 @@ export class DataManager {
     static async saveStandaloneExpense(expense: ExpenseItem): Promise<void> { await setDoc(doc(db, 'standalone_expenses', expense.id), expense); }
 
     // ==========================================
-    // 🟢 进销存模块 (已修复计费爆炸漏洞)
+    // 🟢 进销存模块
     // ==========================================
     static async getStock(type: 'KITCHEN' | 'BAR' | 'GENERAL' | 'FUEL'): Promise<StockItem[]> {
         let colName = 'stock_general';
@@ -229,14 +253,11 @@ export class DataManager {
         if (type === 'BAR') colName = 'stock_bar';
         if (type === 'FUEL') colName = 'stock_fuel';
         
-        // Use runTransaction for atomic batch updates to prevent concurrent overwrites
         await runTransaction(db, async (transaction) => {
-            // Phase 1: Read all documents first (Firestore requirement)
             const reads = await Promise.all(
                 items.map(item => transaction.get(doc(db, colName, item.id)))
             );
             
-            // Phase 2: Write all updates
             items.forEach((item, idx) => {
                 const ref = doc(db, colName, item.id);
                 const existing = reads[idx].exists() ? reads[idx].data() : {};
@@ -252,9 +273,6 @@ export class DataManager {
     }
     static async saveInventoryTask(task: InventoryTask): Promise<void> { await setDoc(doc(db, 'inventory_tasks', task.id), task); }
 
-    // ==========================================
-    // 🟢 Translations
-    // ==========================================
     static async getTranslations(lang: string): Promise<Record<string, Record<string, string>>> {
         const snap = await getDoc(doc(db, 'translations', lang));
         if (snap.exists()) {
@@ -285,8 +303,10 @@ export class DataManager {
     static async saveSupplier(supplier: Supplier): Promise<void> { await setDoc(doc(db, 'suppliers', supplier.id), supplier); }
     static async deleteSupplier(id: string): Promise<void> { await deleteDoc(doc(db, 'suppliers', id)); }
 
-    static async getPurchaseOrders(): Promise<PurchaseOrder[]> {
-        const snap = await getDocs(collection(db, 'purchase_orders'));
+    static async getPurchaseOrders(forBackup: boolean = false): Promise<PurchaseOrder[]> {
+        const colRef = collection(db, 'purchase_orders');
+        const q = forBackup ? colRef : query(colRef, orderBy('date', 'desc'), limit(200));
+        const snap = await getDocs(q);
         return snap.docs.map(d => d.data() as PurchaseOrder);
     }
     static async savePurchaseOrder(po: PurchaseOrder): Promise<void> { await setDoc(doc(db, 'purchase_orders', po.id), po); }
@@ -319,10 +339,11 @@ export class DataManager {
     }
 
     // ==========================================
-    // 🟢 交接日志模块 (已修复计费漏洞)
+    // 🟢 交接日志模块
     // ==========================================
-    static async getLogs(): Promise<LogEntry[]> {
-        const q = query(collection(db, 'logs'), orderBy('id', 'desc'), limit(200));
+    static async getLogs(forBackup: boolean = false): Promise<LogEntry[]> {
+        const colRef = collection(db, 'logs');
+        const q = forBackup ? colRef : query(colRef, orderBy('id', 'desc'), limit(200));
         const snap = await getDocs(q);
         return snap.docs.map(d => d.data() as LogEntry).sort((a,b) => b.id.localeCompare(a.id));
     }
@@ -392,6 +413,7 @@ export class DataManager {
     }
     static async saveRoleConfig(guides: Record<string, RoleGuide>, sops: Record<string, any>): Promise<void> { await setDoc(doc(db, 'config', 'roles'), { guides, sops }); }
 
+    // 旧版 SOP (保留兼容)
     static async getSOPProgress(date: string, empId: string): Promise<any[]> {
         const d = await getDoc(doc(db, 'sop_progress', `${date}_${empId}`));
         return d.exists() ? d.data().items : null;
@@ -404,12 +426,62 @@ export class DataManager {
     }
     static async saveTreasuryConfig(config: TreasuryConfig): Promise<void> { await setDoc(doc(db, 'config', 'treasury'), config); }
     
-    static async getFundTransfers(): Promise<FundTransfer[]> {
-        const snapshot = await getDocs(collection(db, 'fund_transfers'));
+    static async getFundTransfers(forBackup: boolean = false): Promise<FundTransfer[]> {
+        const colRef = collection(db, 'fund_transfers');
+        const q = forBackup ? colRef : query(colRef, orderBy('date', 'desc'), limit(300));
+        const snapshot = await getDocs(q);
         return snapshot.docs.map(d => d.data() as FundTransfer).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }
     static async saveFundTransfer(transfer: FundTransfer): Promise<void> { await setDoc(doc(db, 'fund_transfers', transfer.id), transfer); }
     static async deleteFundTransfer(id: string): Promise<void> { await deleteDoc(doc(db, 'fund_transfers', id)); }
+
+    // ==========================================
+    // 🟢 任务打卡记录 (防计费爆炸的聚合存储) - 新增
+    // ==========================================
+    static async getTaskCompletions(date: string): Promise<TaskCompletion[]> {
+        try {
+            const q = query(collection(db, 'task_completions'), where('date', '==', date));
+            const snapshot = await getDocs(q);
+            return snapshot.docs.map(doc => doc.data() as TaskCompletion);
+        } catch (error) {
+            console.error("Error fetching task completions for date:", error);
+            return [];
+        }
+    }
+
+    static async getTaskCompletionsByRange(startDate: string, endDate: string): Promise<TaskCompletion[]> {
+        try {
+            const q = query(
+                collection(db, 'task_completions'),
+                where('date', '>=', startDate),
+                where('date', '<=', endDate),
+                orderBy('date', 'desc'),
+                limit(100) // 护栏限制
+            );
+            const snapshot = await getDocs(q);
+            return snapshot.docs.map(doc => doc.data() as TaskCompletion);
+        } catch (error) {
+            console.error("Error fetching task completions by range:", error);
+            return [];
+        }
+    }
+
+    static async saveTaskCompletion(completion: TaskCompletion): Promise<void> {
+        try {
+            const docId = completion.id || `${completion.date}_GENERAL`; 
+            const finalData = {
+                ...completion,
+                id: docId,
+                updatedAt: new Date().toISOString()
+            };
+            const ref = doc(db, 'task_completions', docId);
+            // merge: true 确保并发时不会覆盖其他人已打卡的内容
+            await setDoc(ref, finalData, { merge: true });
+        } catch (error) {
+            console.error("Error saving task completion:", error);
+            throw error;
+        }
+    }
 
     // ==========================================
     // 🟢 战略规划模块
@@ -492,15 +564,26 @@ export class DataManager {
         const [
             employees, settlements, recurringBills, billPayments, stockKitchen, stockBar, stockGeneral, stockFuel,
             suppliers, purchaseOrders, menu, queue, logs, payroll, attendance, roster, config,
-            treasuryConfig, fundTransfers, warranties, standaloneExpenses, proposals, okrs, campaigns, events
+            treasuryConfig, fundTransfers, warranties, standaloneExpenses, proposals, okrs, campaigns, events,
+            taskCompletions 
         ] = await Promise.all([
-            this.getEmployees(), this.getSettlements(), this.getRecurringBills(), this.getBillPayments(),
+            this.getEmployees(), 
+            this.getSettlements(undefined, true), // 👑 解除30天限制，备份所有的结算记录！
+            this.getRecurringBills(), 
+            this.getBillPayments(true),           // 👑 备份所有的账单！
             this.getStock('KITCHEN'), this.getStock('BAR'), this.getStock('GENERAL'), this.getStock('FUEL'),
-            this.getSuppliers(), this.getPurchaseOrders(), this.getMenu(), this.getQueueTickets(),
-            this.getLogs(), this.getPayrollRecords(), getDocs(collection(db, 'attendance')).then(s => s.docs.map(d => d.data() as AttendanceRecord)),
-            this.getRosterData(), this.getConfig(), this.getTreasuryConfig(), this.getFundTransfers(),
-            this.getWarranties(), getDocs(collection(db, 'standalone_expenses')).then(s => s.docs.map(d => d.data() as ExpenseItem)),
-            this.getProposals(), this.getOKRs(), this.getCampaigns(), this.getEvents()
+            this.getSuppliers(), 
+            this.getPurchaseOrders(true),         // 👑 备份所有的采购单！
+            this.getMenu(), this.getQueueTickets(),
+            this.getLogs(true),                   // 👑 备份所有的交接日志！
+            this.getPayrollRecords(), 
+            getDocs(collection(db, 'attendance')).then(s => s.docs.map(d => d.data() as AttendanceRecord)),
+            this.getRosterData(), this.getConfig(), this.getTreasuryConfig(), 
+            this.getFundTransfers(true),          // 👑 备份所有的资金进出！
+            this.getWarranties(), 
+            getDocs(collection(db, 'standalone_expenses')).then(s => s.docs.map(d => d.data() as ExpenseItem)),
+            this.getProposals(), this.getOKRs(), this.getCampaigns(), this.getEvents(),
+            getDocs(collection(db, 'task_completions')).then(s => s.docs.map(d => d.data() as TaskCompletion)) 
         ]);
 
         return {
@@ -509,7 +592,8 @@ export class DataManager {
                 employees, settlements, recurringBills, billPayments, stockKitchen, stockBar, stockGeneral, stockFuel,
                 suppliers, purchaseOrders, menu, queue, logs, payroll, attendance, roster, config,
                 treasuryConfig: treasuryConfig || undefined, fundTransfers: fundTransfers || undefined, warranties: warranties || undefined,
-                standaloneExpenses: standaloneExpenses || [], strategy: { proposals, okrs, campaigns, events }
+                standaloneExpenses: standaloneExpenses || [], strategy: { proposals, okrs, campaigns, events },
+                taskCompletions: taskCompletions || [] // 🟢 存入备份包
             }
         };
     }
@@ -538,7 +622,8 @@ export class DataManager {
             clearCol('employees'), clearCol('settlements'), clearCol('recurring_bills'), clearCol('bill_payments'), clearCol('stock_kitchen'), clearCol('stock_bar'),
             clearCol('stock_general'), clearCol('stock_fuel'), clearCol('suppliers'), clearCol('purchase_orders'), clearCol('menu'), clearCol('queue_tickets'),
             clearCol('logs'), clearCol('payroll'), clearCol('attendance'), clearCol('fund_transfers'), clearCol('standalone_expenses'), clearCol('warranties'),
-            clearCol('strategy_proposals'), clearCol('strategy_okrs'), clearCol('strategy_campaigns'), clearCol('strategy_events')
+            clearCol('strategy_proposals'), clearCol('strategy_okrs'), clearCol('strategy_campaigns'), clearCol('strategy_events'),
+            clearCol('task_completions') // 🟢 清空旧记录
         ]);
 
         await Promise.all([
@@ -549,7 +634,8 @@ export class DataManager {
             setDoc(doc(db, 'roster', 'main'), data.roster?.roster || {}), setDoc(doc(db, 'roster', 'notes'), data.roster?.notes || {}), setDoc(doc(db, 'config', 'store'), data.config || {}),
             data.treasuryConfig ? setDoc(doc(db, 'config', 'treasury'), data.treasuryConfig) : Promise.resolve(),
             restoreCol('fund_transfers', data.fundTransfers || []), restoreCol('standalone_expenses', data.standaloneExpenses || []), restoreCol('warranties', data.warranties || []),
-            data.strategy ? Promise.all([ restoreCol('strategy_proposals', data.strategy.proposals || []), restoreCol('strategy_okrs', data.strategy.okrs || []), restoreCol('strategy_campaigns', data.strategy.campaigns || []), restoreCol('strategy_events', data.strategy.events || []) ]) : Promise.resolve()
+            data.strategy ? Promise.all([ restoreCol('strategy_proposals', data.strategy.proposals || []), restoreCol('strategy_okrs', data.strategy.okrs || []), restoreCol('strategy_campaigns', data.strategy.campaigns || []), restoreCol('strategy_events', data.strategy.events || []) ]) : Promise.resolve(),
+            restoreCol('task_completions', data.taskCompletions || []) // 🟢 恢复打卡记录
         ]);
     }
 }
