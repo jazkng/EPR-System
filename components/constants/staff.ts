@@ -1,4 +1,4 @@
-import { Employee, RoleDefinition, RoleGuide, AllowanceKey } from '../../types';
+import { Employee, RoleDefinition, RoleGuide, AllowanceKey } from '../types';
 
 // ==========================================
 // 通用员工守则 (General Employee Rules)
@@ -457,7 +457,7 @@ export const DEFAULT_ROLE_GUIDES: Record<string, RoleGuide> = {
   // OWNER ROLE DEFAULT
   'Owner (老板)': {
     description: 'Company Owner',
-    coreValue: 'Ownership',
+    coreValue: 'Ownership', 
     safetyRedLine: 'No Limits',
     duties: ['Strategic Planning', 'Financial Control', 'Business Development'],
     troubleshooting: [],
@@ -492,8 +492,10 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     { id: 'f7', title: 'Part-Time (兼职)', department: 'FOH', rankCategory: 'ENTRY_LEVEL', duties: ['机动'], allowedModules: [] },
 
     // ✅ NEW ROLES
-    { id: 'm_hr',    title: '人事管理 (HR Management)',    department: 'MANAGEMENT', rankCategory: 'MANAGEMENT', duties: ['招聘', '档案管理', '薪资处理', '劳资关系'], allowedModules: ['HR_FILES', 'REPORTS', 'ROSTER', 'ASSESSMENT'] },
-    { id: 'm_store', title: '店面管理 (Store Management)', department: 'MANAGEMENT', rankCategory: 'MANAGEMENT', duties: ['库存管理', '采购协调', '设备维护', '营业跟进'], allowedModules: ['INVENTORY_KITCHEN', 'INVENTORY_BAR', 'INVENTORY_GENERAL', 'SUPPLIER_CONTACTS', 'LOGBOOK', 'SOP_INSPECT', 'REPORTS'] },
+    { id: 'm_hr',    title: 'HR Management (人事管理)',    department: 'MANAGEMENT', rankCategory: 'MANAGEMENT', duties: ['招聘', '档案管理', '薪资处理', '劳资关系'], allowedModules: ['HR_FILES', 'REPORTS', 'ROSTER', 'ASSESSMENT'] },
+    { id: 'm_store', title: 'Store Management (店面管理)', department: 'MANAGEMENT', rankCategory: 'MANAGEMENT', duties: ['库存管理', '采购协调', '设备维护', '营业跟进'], allowedModules: ['INVENTORY_KITCHEN', 'INVENTORY_BAR', 'INVENTORY_GENERAL', 'SUPPLIER_CONTACTS', 'LOGBOOK', 'SOP_INSPECT', 'REPORTS'] },
+    { id: 'x_delivery', title: 'Delivery (外卖)', department: 'FOH', rankCategory: 'ENTRY_LEVEL', duties: ['外卖配送'], allowedModules: [] },
+    { id: 'x_order_checker', title: 'Order Checker (看单)', department: 'FOH', rankCategory: 'ENTRY_LEVEL', duties: ['核单'], allowedModules: [] },
 ];
 
 export const DEFAULT_STAFF: Employee[] = [

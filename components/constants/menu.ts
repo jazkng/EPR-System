@@ -1,5 +1,5 @@
 
-import { MenuCategory, MenuItem } from '../../types';
+import { MenuCategory, MenuItem } from '../types';
 
 // ==========================================
 // MENU CATEGORIES

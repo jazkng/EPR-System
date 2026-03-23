@@ -1,5 +1,5 @@
 
-import { CatalogItem, Supplier } from '../../types';
+import { CatalogItem, Supplier } from '../types';
 
 // ==========================================
 // 1. UOM OPTIONS (通用备用单位)

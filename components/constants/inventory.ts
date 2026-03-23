@@ -1,5 +1,5 @@
 
-import { StockItem } from '../../types';
+import { StockItem } from '../types';
 
 // ============================================================================
 // CODING SYSTEM (UPDATED):
