@@ -10,7 +10,7 @@ import { LogOut, Menu, Settings, Calculator } from 'lucide-react';
 import { StoreConfigModal } from './components/features/StoreConfigModal';
 import { WhatsNewModal } from './components/ui/WhatsNewModal';
 import { DataManager } from './utils/dataManager'; 
-import { APP_VERSION } from './components/constants/versionHistory';
+import { APP_VERSION } from './constants/versionHistory';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserRole | null>(null);

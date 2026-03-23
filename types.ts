@@ -247,6 +247,7 @@ export interface Employee {
     customGuide?: RoleGuide; 
     customSop?: { start: { title: string, tasks: SOPItem[] }, end: { title: string, tasks: SOPItem[] } };
     misconductStats?: MisconductStats;
+    isAttendanceExempt?: boolean; // 新增：免打卡标记
     loanRecords?: LoanRecord[];
     terminationType?: 'RESIGNED' | 'FIRED' | 'CONTRACT_END' | 'ABSCONDED';
     noticeDate?: string;
@@ -652,4 +653,21 @@ export interface StoreEvent {
     type: 'PROMO' | 'HOLIDAY' | 'TEAM_BUILDING';
     status: 'UPCOMING' | 'COMPLETED';
     checklist?: EventChecklistItem[];
+}
+
+// ==========================================
+// 任务打卡/SOP完成记录 (按天/岗位聚合，防 Firebase 计费爆炸)
+// ==========================================
+export interface TaskCompletion {
+    id: string;          // 建议格式: "YYYY-MM-DD_ROSTER-ID" 或 "YYYY-MM-DD_DEPARTMENT"
+    date: string;        // "YYYY-MM-DD" 用于范围查询
+    department?: string; // 归属部门或岗位 (可选)
+    tasks: Record<string, {  // Key 为具体任务的 ID
+        completedBy: string; // 员工姓名或 ID
+        completedAt: string; // ISO 时间戳
+        status: 'COMPLETED' | 'SKIPPED' | 'FAILED' | 'PENDING';
+        notes?: string;      // 异常备注
+        photoUrl?: string;   // SOP 拍照留底 (可选)
+    }>;
+    updatedAt: string;   // 最后更新时间
 }
