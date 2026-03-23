@@ -1570,53 +1570,370 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                              )}
 
                             <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
-                                <div ref={printRef} className="w-[800px] bg-white p-12 font-sans text-black relative" style={{ minHeight: '1122px' }}>
-                                    <div className="flex justify-between items-end border-b-4 border-black pb-6 mb-8">
-                                        <div><h1 className="text-4xl font-black uppercase tracking-widest mb-2 text-[#1A1A1A]">Financial Report</h1><p className="text-sm font-bold text-gray-500 uppercase tracking-widest">KIM LIAN KEE (KEPONG)</p></div>
-                                        <div className="text-right"><p className="text-xl font-bold uppercase text-[#1A1A1A]">{startDate} <span className="text-gray-400 mx-1">TO</span> {endDate}</p><p className="text-xs font-mono text-gray-400 mt-1">Generated: {new Date().toLocaleString()}</p><p className="text-[10px] text-gray-400 mt-1">Mode: {accountingMode === 'ACCRUAL' ? 'Accrual Basis (权责发生制)' : 'Cash Basis (收付实现制)'}</p></div>
-                                    </div>
-                                    <div className="grid grid-cols-4 gap-4 mb-8">
-                                        <div className="bg-gray-100 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Total Revenue</p><p className="text-xl font-black font-mono text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.totalRevenue)}</p></div>
-                                        <div className="bg-gray-100 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Gross Profit</p><p className="text-xl font-black font-mono text-emerald-700">{formatMoney(analytics.grossProfit)}</p></div>
-                                        <div className="bg-gray-100 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Net Profit</p><p className={`text-xl font-black font-mono ${analytics.netProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{formatMoney(analytics.netProfit)}</p></div>
-                                        <div className="bg-gray-100 p-4 rounded-xl border border-gray-200"><p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Net Cash Flow</p><p className={`text-xl font-black font-mono ${analytics.netCashFlow >= 0 ? 'text-blue-700' : 'text-red-600'}`}>{formatMoney(analytics.netCashFlow)}</p></div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-10 mb-8">
-                                        <div>
-                                            <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 text-[#1A1A1A]">1. Revenue Breakdown</h2>
-                                            <div className="space-y-3 text-sm">
-                                                <div className="flex justify-between items-center font-bold"><span>In-Store Sales</span><span className="font-mono">{formatMoney(analytics.revenueDetails.totalRevenue - analytics.revenueDetails.delivery)}</span></div>
-                                                <div className="pl-4 space-y-1.5 text-xs text-gray-600">
-                                                    <div className="flex justify-between"><span>- Cash</span><span className="font-mono">{formatMoney(analytics.revenueDetails.cash)}</span></div>
-                                                    <div className="flex justify-between"><span>- TNG eWallet</span><span className="font-mono">{formatMoney(analytics.revenueDetails.tng)}</span></div>
-                                                    <div className="flex justify-between"><span>- Debit Card</span><span className="font-mono">{formatMoney(analytics.revenueDetails.debitCard)}</span></div>
-                                                    <div className="flex justify-between"><span>- Credit Card</span><span className="font-mono">{formatMoney(analytics.revenueDetails.creditCard)}</span></div>
-                                                    <div className="flex justify-between"><span>- Amex</span><span className="font-mono">{formatMoney(analytics.revenueDetails.amex)}</span></div>
-                                                </div>
-                                                <div className="flex justify-between items-center font-bold pt-3 border-t border-dashed border-gray-200"><span>Delivery Sales</span><span className="font-mono">{formatMoney(analytics.revenueDetails.delivery)}</span></div>
-                                                <div className="pl-4 space-y-1.5 text-xs text-gray-600">
-                                                    <div className="flex justify-between"><span>- GrabFood</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.grab)}</span></div>
-                                                    <div className="flex justify-between"><span>- FoodPanda</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.panda)}</span></div>
-                                                    <div className="flex justify-between"><span>- ShopeeFood</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.shopee)}</span></div>
-                                                    <div className="flex justify-between"><span>- Lalamove</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.lalamove)}</span></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 text-[#1A1A1A]">2. Cost Structure</h2>
-                                            <div className="space-y-4 text-sm">
-                                                <div><div className="flex justify-between items-center font-bold"><span>COGS</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalCOGS)}</span></div><div className="text-[10px] text-gray-500 text-right mt-0.5">占营收 {analytics.margins.cogs.toFixed(1)}%</div></div>
-                                                <div><div className="flex justify-between items-center font-bold"><span>Labor</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalLabor)}</span></div><div className="text-[10px] text-gray-500 text-right mt-0.5">占营收 {analytics.margins.labor.toFixed(1)}%</div></div>
-                                                <div><div className="flex justify-between items-center font-bold"><span>OPEX</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalOPEX)}</span></div><div className="text-[10px] text-gray-500 text-right mt-0.5">占营收 {analytics.margins.opex.toFixed(1)}%</div></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="mt-20 pt-8 border-t border-black flex justify-between px-10">
-                                        <div className="text-center"><div className="w-48 h-px bg-black mb-2"></div><p className="text-xs font-bold uppercase">Prepared By</p><p className="text-[10px] text-gray-500">Finance Dept</p></div>
-                                        <div className="text-center"><div className="w-48 h-px bg-black mb-2"></div><p className="text-xs font-bold uppercase">Approved By</p><p className="text-[10px] text-gray-500">Director / Owner</p></div>
-                                    </div>
-                                </div>
+    <div ref={printRef} className="w-[800px] bg-white font-sans text-black relative">
+        
+        {/* ==================== PAGE 1: HEADER + KPI + REVENUE + COST ==================== */}
+        <div className="p-12" style={{ minHeight: '1122px', position: 'relative' }}>
+            {/* HEADER */}
+            <div className="flex justify-between items-end border-b-4 border-black pb-6 mb-8">
+                <div>
+                    <h1 className="text-4xl font-black uppercase tracking-widest mb-2 text-[#1A1A1A]">Financial Report</h1>
+                    <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">KIM LIAN KEE (KEPONG)</p>
+                    <p className="text-[9px] font-bold text-[#D4A017] uppercase tracking-widest mt-1">★ SHAREHOLDER EDITION</p>
+                </div>
+                <div className="text-right">
+                    <p className="text-xl font-bold uppercase text-[#1A1A1A]">{startDate} <span className="text-gray-400 mx-1">TO</span> {endDate}</p>
+                    <p className="text-xs font-mono text-gray-400 mt-1">Generated: {new Date().toLocaleString()}</p>
+                    <p className="text-[10px] text-gray-400 mt-1">Mode: {accountingMode === 'ACCRUAL' ? 'Accrual Basis (权责发生制)' : 'Cash Basis (收付实现制)'}</p>
+                </div>
+            </div>
+ 
+            {/* KPI BOXES */}
+            <div className="grid grid-cols-4 gap-4 mb-8">
+                <div className="bg-gray-100 p-4 rounded-xl border border-gray-200">
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Total Revenue 总营收</p>
+                    <p className="text-xl font-black font-mono text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.totalRevenue)}</p>
+                </div>
+                <div className="bg-gray-100 p-4 rounded-xl border border-gray-200">
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Gross Profit 毛利润</p>
+                    <p className="text-xl font-black font-mono text-emerald-700">{formatMoney(analytics.grossProfit)}</p>
+                </div>
+                <div className="bg-gray-100 p-4 rounded-xl border border-gray-200">
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Net Profit 净利润</p>
+                    <p className={`text-xl font-black font-mono ${analytics.netProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{formatMoney(analytics.netProfit)}</p>
+                </div>
+                <div className="bg-gray-100 p-4 rounded-xl border border-gray-200">
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Net Cash Flow 现金流</p>
+                    <p className={`text-xl font-black font-mono ${analytics.netCashFlow >= 0 ? 'text-blue-700' : 'text-red-600'}`}>{formatMoney(analytics.netCashFlow)}</p>
+                </div>
+            </div>
+ 
+            {/* TWO-COLUMN: Revenue + Cost */}
+            <div className="grid grid-cols-2 gap-10 mb-8">
+                {/* LEFT: Revenue Breakdown */}
+                <div>
+                    <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 text-[#1A1A1A]">1. Revenue Breakdown <span className="font-normal text-gray-400 text-xs">营收明细</span></h2>
+                    <div className="space-y-3 text-sm">
+                        <div className="flex justify-between items-center font-bold"><span>In-Store Sales 堂食收入</span><span className="font-mono">{formatMoney(analytics.revenueDetails.totalRevenue - analytics.revenueDetails.delivery)}</span></div>
+                        <div className="pl-4 space-y-1.5 text-xs text-gray-600">
+                            <div className="flex justify-between"><span>- Cash 现金</span><span className="font-mono">{formatMoney(analytics.revenueDetails.cash)}</span></div>
+                            <div className="flex justify-between"><span>- TNG eWallet 电子钱包</span><span className="font-mono">{formatMoney(analytics.revenueDetails.tng)}</span></div>
+                            <div className="flex justify-between"><span>- Debit Card 借记卡</span><span className="font-mono">{formatMoney(analytics.revenueDetails.debitCard)}</span></div>
+                            <div className="flex justify-between"><span>- Credit Card 信用卡</span><span className="font-mono">{formatMoney(analytics.revenueDetails.creditCard)}</span></div>
+                            <div className="flex justify-between"><span>- Amex</span><span className="font-mono">{formatMoney(analytics.revenueDetails.amex)}</span></div>
+                        </div>
+                        <div className="flex justify-between items-center font-bold pt-3 border-t border-dashed border-gray-200"><span>Delivery Sales 外卖收入</span><span className="font-mono">{formatMoney(analytics.revenueDetails.delivery)}</span></div>
+                        <div className="pl-4 space-y-1.5 text-xs text-gray-600">
+                            <div className="flex justify-between"><span>- GrabFood</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.grab)}</span></div>
+                            <div className="flex justify-between"><span>- FoodPanda</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.panda)}</span></div>
+                            <div className="flex justify-between"><span>- ShopeeFood</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.shopee)}</span></div>
+                            <div className="flex justify-between"><span>- Lalamove</span><span className="font-mono">{formatMoney(analytics.deliveryBreakdown.lalamove)}</span></div>
+                        </div>
+                        <div className="pt-3 border-t border-dashed border-gray-200 space-y-1.5 text-xs text-gray-500">
+                            <div className="flex justify-between"><span>Refunds 退款</span><span className="font-mono">{formatMoney(analytics.revenueDetails.refunds)}</span></div>
+                            <div className="flex justify-between"><span>Cash Variance 现金差异</span><span className="font-mono">{formatMoney(analytics.revenueDetails.variance)}</span></div>
+                        </div>
+                    </div>
+                </div>
+ 
+                {/* RIGHT: Cost Structure */}
+                <div>
+                    <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 text-[#1A1A1A]">2. Cost Structure <span className="font-normal text-gray-400 text-xs">成本结构</span></h2>
+                    <div className="space-y-4 text-sm">
+                        <div>
+                            <div className="flex justify-between items-center font-bold"><span>COGS 销货成本</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalCOGS)}</span></div>
+                            <div className="text-[10px] text-gray-500 text-right mt-0.5">占营收 {analytics.margins.cogs.toFixed(1)}%</div>
+                            <div className="w-full h-1.5 bg-gray-100 rounded-full mt-1"><div className="h-full bg-red-400 rounded-full" style={{ width: `${Math.min(analytics.margins.cogs, 100)}%` }}></div></div>
+                        </div>
+                        <div>
+                            <div className="flex justify-between items-center font-bold"><span>Labor 人工成本</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalLabor)}</span></div>
+                            <div className="text-[10px] text-gray-500 text-right mt-0.5">占营收 {analytics.margins.labor.toFixed(1)}%</div>
+                            <div className="w-full h-1.5 bg-gray-100 rounded-full mt-1"><div className="h-full bg-red-400 rounded-full" style={{ width: `${Math.min(analytics.margins.labor * 1.8, 100)}%` }}></div></div>
+                        </div>
+                        <div>
+                            <div className="flex justify-between items-center font-bold"><span>OPEX 运营杂费</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalOPEX)}</span></div>
+                            <div className="text-[10px] text-gray-500 text-right mt-0.5">占营收 {analytics.margins.opex.toFixed(1)}%</div>
+                            <div className="w-full h-1.5 bg-gray-100 rounded-full mt-1"><div className="h-full bg-red-400 rounded-full" style={{ width: `${Math.min(analytics.margins.opex * 2, 100)}%` }}></div></div>
+                        </div>
+                        <div className="pt-3 border-t-2 border-black">
+                            <div className="flex justify-between items-center font-black text-base"><span>Total Costs 总成本</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalCOGS + analytics.costs.totalLabor + analytics.costs.totalOPEX)}</span></div>
+                            <div className="text-[10px] text-gray-500 text-right mt-0.5">
+                                占营收 {analytics.revenueDetails.totalRevenue ? ((analytics.costs.totalCOGS + analytics.costs.totalLabor + analytics.costs.totalOPEX) / analytics.revenueDetails.totalRevenue * 100).toFixed(1) : '0'}%
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+ 
+            {/* SECTION 3: CAPEX & DEPOSITS */}
+            <div className="mb-6">
+                <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 text-[#1A1A1A]">3. CAPEX &amp; Deposits <span className="font-normal text-gray-400 text-xs">资本支出与押金（资产类）</span></h2>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <p className="text-xs font-bold text-amber-800 mb-3">⚠ 以下属于资产类支出，不计入经营成本，但影响现金流。</p>
+                    <div className="space-y-2 text-sm">
+                        <div className="flex justify-between font-bold"><span>CAPEX 资本支出 (设备/装修)</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalCapex)}</span></div>
+                        <div className="flex justify-between font-bold"><span>Deposits 押金 (租赁/水电)</span><span className="font-mono text-red-700">{formatMoney(analytics.costs.totalDeposits)}</span></div>
+                    </div>
+                </div>
+            </div>
+ 
+            {/* FOOTER PAGE 1 */}
+            <div className="absolute bottom-8 left-12 right-12 border-t border-gray-200 pt-3 flex justify-between text-[9px] text-gray-400">
+                <span>KIM LIAN KEE (KEPONG) — Shareholder Financial Report</span>
+                <span className="text-red-500 font-bold">CONFIDENTIAL</span>
+                <span>Page 1</span>
+            </div>
+        </div>
+ 
+        {/* ==================== PAGE 2: CASH FLOW + KPI + SHAREHOLDER ==================== */}
+        <div className="p-12" style={{ minHeight: '1122px', position: 'relative' }}>
+            
+            {/* SECTION 4: CASH FLOW ANALYSIS */}
+            <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 text-[#1A1A1A]">4. Cash Flow Analysis <span className="font-normal text-gray-400 text-xs">现金流分析</span></h2>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-4">
+                <div className="space-y-2 text-sm">
+                    <div className="flex justify-between"><span>Net Profit 经营净利</span><span className="font-mono font-bold text-emerald-700">+ {formatMoney(analytics.netProfit)}</span></div>
+                    <div className="flex justify-between"><span>CAPEX 资本支出</span><span className="font-mono font-bold text-red-600">− {formatMoney(analytics.costs.totalCapex)}</span></div>
+                    <div className="flex justify-between"><span>Deposits 押金支出</span><span className="font-mono font-bold text-red-600">− {formatMoney(analytics.costs.totalDeposits)}</span></div>
+                    <div className="flex justify-between"><span>Other Cash Movements 其他现金变动</span><span className="font-mono font-bold text-red-600">− {formatMoney(Math.abs(analytics.netCashFlow - analytics.netProfit + analytics.costs.totalCapex + analytics.costs.totalDeposits))}</span></div>
+                    <div className="pt-2 border-t-2 border-black flex justify-between font-black text-base">
+                        <span>Net Cash Flow 实际现金流</span>
+                        <span className={`font-mono ${analytics.netCashFlow >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{formatMoney(analytics.netCashFlow)}</span>
+                    </div>
+                </div>
+            </div>
+            {analytics.netCashFlow < 0 && (
+                <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-3 mb-6">
+                    <p className="text-xs text-yellow-800"><span className="font-bold">说明：</span>本期现金流为负数，主因是 CAPEX 及押金等非经营性支出。剔除资本支出后，经营性现金流为 {formatMoney(analytics.netProfit)}。</p>
+                </div>
+            )}
+ 
+            {/* SECTION 5: KEY PROFIT METRICS */}
+            <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 mt-6 text-[#1A1A1A]">5. Key Profit Metrics <span className="font-normal text-gray-400 text-xs">核心利润指标</span></h2>
+            <div className="space-y-2 mb-6">
+                {[
+                    { label: 'Gross Profit Margin 毛利率', pct: analytics.revenueDetails.totalRevenue ? (analytics.grossProfit / analytics.revenueDetails.totalRevenue * 100).toFixed(1) + '%' : '0%', amount: formatMoney(analytics.grossProfit), bench: '行业标准: 55-65%' },
+                    { label: 'Net Profit Margin 净利率', pct: analytics.netMargin.toFixed(1) + '%', amount: formatMoney(analytics.netProfit), bench: '行业标准: 8-15%' },
+                    { label: 'COGS Ratio 食材成本率', pct: analytics.margins.cogs.toFixed(1) + '%', amount: formatMoney(analytics.costs.totalCOGS), bench: '行业标准: 28-35%' },
+                    { label: 'Labor Ratio 人工成本率', pct: analytics.margins.labor.toFixed(1) + '%', amount: formatMoney(analytics.costs.totalLabor), bench: '行业标准: 20-25%' },
+                    { label: 'OPEX Ratio 运营费用率', pct: analytics.margins.opex.toFixed(1) + '%', amount: formatMoney(analytics.costs.totalOPEX), bench: '行业标准: 10-15%' },
+                ].map((m, i) => (
+                    <div key={i} className="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5">
+                        <span className="flex-1 font-bold text-xs">{m.label}</span>
+                        <span className="font-black text-sm text-blue-700 w-16 text-center">{m.pct}</span>
+                        <span className="text-xs text-gray-500 w-28 text-right font-mono">{m.amount}</span>
+                        <span className="text-[10px] text-gray-400 w-28 text-right">{m.bench}</span>
+                    </div>
+                ))}
+            </div>
+ 
+            {/* SECTION 6: SHAREHOLDER EQUITY & DIVIDEND */}
+            <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-4 mt-6 text-[#1A1A1A]">6. Shareholder Equity &amp; Dividend <span className="font-normal text-gray-400 text-xs">股东权益与分红</span></h2>
+            
+            {/* Dividend Calculation Box */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4">
+                <div className="flex justify-between items-center mb-3">
+                    <span className="text-xs font-black text-emerald-800 uppercase tracking-wider">Dividend Formula 分红计算方式</span>
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded">总营收 × 5%</span>
+                </div>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                    <div className="bg-white rounded-lg p-3 border border-emerald-100">
+                        <p className="text-[9px] text-gray-500 font-bold uppercase">Total Revenue 总营收</p>
+                        <p className="text-base font-black font-mono text-[#1A1A1A] mt-1">{formatMoney(analytics.revenueDetails.totalRevenue)}</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 border border-emerald-100">
+                        <p className="text-[9px] text-gray-500 font-bold uppercase">× 5% Rate 分红比例</p>
+                        <p className="text-base font-black font-mono text-blue-700 mt-1">5.0%</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 border border-emerald-100">
+                        <p className="text-[9px] text-gray-500 font-bold uppercase">Total Dividend 总分红</p>
+                        <p className="text-base font-black font-mono text-emerald-700 mt-1">{formatMoney(analytics.revenueDetails.totalRevenue * 0.05)}</p>
+                    </div>
+                </div>
+            </div>
+ 
+            {/* Shareholder Table */}
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-3">
+                <div className="grid grid-cols-5 text-[10px] font-bold text-gray-500 uppercase tracking-wider pb-2 border-b border-gray-200 mb-2">
+                    <span>Shareholder 股东</span>
+                    <span className="text-center">Equity % 持股</span>
+                    <span className="text-center">Investment 投资额</span>
+                    <span className="text-center">Dividend 分红</span>
+                    <span className="text-right">P&amp;L Share 损益份额</span>
+                </div>
+                {(() => {
+                    const totalDividend = analytics.revenueDetails.totalRevenue * 0.05;
+                    const shList = (treasuryConfig?.shareholders && treasuryConfig.shareholders.length > 0) 
+                        ? treasuryConfig.shareholders 
+                        : [{ id: 'a', name: '股东 A', equityPercent: 33.3, investmentAmount: 0 }, { id: 'b', name: '股东 B', equityPercent: 33.3, investmentAmount: 0 }, { id: 'c', name: '股东 C', equityPercent: 33.3, investmentAmount: 0 }];
+                    const count = shList.length;
+                    const perPerson = totalDividend / count;
+                    const profitPerPerson = analytics.netProfit / count;
+                    
+                    return shList.map((sh: any) => (
+                        <div key={sh.id} className="grid grid-cols-5 text-sm py-1.5 items-center">
+                            <span className="font-bold">{sh.name}</span>
+                            <span className="text-center font-bold text-blue-700">{(sh.equityPercent || (100 / count)).toFixed(1)}%</span>
+                            <span className="text-center text-gray-500 font-mono">{sh.investmentAmount ? formatMoney(sh.investmentAmount) : '待确认'}</span>
+                            <span className="text-center font-black text-emerald-700 font-mono">{formatMoney(perPerson)}</span>
+                            <span className="text-right font-bold text-gray-600 font-mono">{formatMoney(profitPerPerson)}</span>
+                        </div>
+                    ));
+                })()}
+                {/* Total Row */}
+                <div className="grid grid-cols-5 text-sm pt-2 mt-2 border-t border-gray-300 font-black">
+                    <span>合计 TOTAL</span>
+                    <span className="text-center">100%</span>
+                    <span></span>
+                    <span className="text-center text-emerald-700 font-mono">{formatMoney(analytics.revenueDetails.totalRevenue * 0.05)}</span>
+                    <span className="text-right text-gray-600 font-mono">{formatMoney(analytics.netProfit)}</span>
+                </div>
+            </div>
+            <p className="text-[10px] text-gray-400 mb-1">* 分红计算方式：总营收 × 5%，按股东人数均分。</p>
+            <p className="text-[10px] text-gray-400 mb-1">* 分红与净利润为独立计算。净利润 {formatMoney(analytics.netProfit)} 扣除分红 {formatMoney(analytics.revenueDetails.totalRevenue * 0.05)} 后，留存利润为 {formatMoney(analytics.netProfit - analytics.revenueDetails.totalRevenue * 0.05)}。</p>
+            <p className="text-[10px] text-gray-400">* 股东投资额及持股比例以正式股东协议为准。</p>
+ 
+            {/* FOOTER PAGE 2 */}
+            <div className="absolute bottom-8 left-12 right-12 border-t border-gray-200 pt-3 flex justify-between text-[9px] text-gray-400">
+                <span>KIM LIAN KEE (KEPONG) — Shareholder Financial Report</span>
+                <span className="text-red-500 font-bold">CONFIDENTIAL</span>
+                <span>Page 2</span>
+            </div>
+        </div>
+ 
+        {/* ==================== PAGE 3: RECOMMENDATIONS + SIGNATURE ==================== */}
+        <div className="p-12" style={{ minHeight: '1122px', position: 'relative' }}>
+            
+            <h2 className="text-sm font-black uppercase tracking-widest border-b-2 border-gray-300 pb-2 mb-3 text-[#1A1A1A]">7. Management Recommendations <span className="font-normal text-gray-400 text-xs">经营建议与改善计划</span></h2>
+            <p className="text-xs text-gray-500 mb-5">基于 {startDate} 至 {endDate} 期间的财务数据，管理层提出以下观察与改善计划：</p>
+ 
+            {/* Recommendation Items */}
+            <div className="space-y-5 mb-6">
+                {/* 1. COGS */}
+                {analytics.margins.cogs > 40 && (
+                    <div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">紧急</span>
+                            <span className="font-bold text-xs">食材成本偏高 — COGS {analytics.margins.cogs.toFixed(1)}%（目标: ≤40%）</span>
+                        </div>
+                        <div className="pl-4 text-[11px] text-gray-600 leading-relaxed">
+                            <p>当前 COGS 为 {analytics.margins.cogs.toFixed(1)}%，高于餐饮行业标准 28-35%，需重点关注。</p>
+                            <p className="mt-1"><span className="font-bold">改善措施：</span>审查每日食材用量，找出高浪费品项；与供应商重新议价或寻找替代供应商；标准化每道菜的备料量（SOP）。</p>
+                            <p className="mt-1"><span className="font-bold">预期效果：</span>COGS 每降低 1%，月利润增加约 {formatMoney(analytics.revenueDetails.totalRevenue * 0.01)}。</p>
+                        </div>
+                    </div>
+                )}
+ 
+                {/* 2. Labor */}
+                {analytics.margins.labor > 25 && (
+                    <div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[10px] font-bold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded">重要</span>
+                            <span className="font-bold text-xs">人工成本需优化 — Labor {analytics.margins.labor.toFixed(1)}%（目标: ≤25%）</span>
+                        </div>
+                        <div className="pl-4 text-[11px] text-gray-600 leading-relaxed">
+                            <p>人工占营收 {analytics.margins.labor.toFixed(1)}%，高于行业标准 20-25%。</p>
+                            <p className="mt-1"><span className="font-bold">改善措施：</span>分析各时段营业额，优化排班效率；提升员工熟练度和人均产出；评估高峰/低谷时段的人力配置。</p>
+                            <p className="mt-1"><span className="font-bold">预期效果：</span>降至 25% 可每月节省约 {formatMoney(analytics.revenueDetails.totalRevenue * (analytics.margins.labor - 25) / 100)}。</p>
+                        </div>
+                    </div>
+                )}
+ 
+                {/* 3. Delivery */}
+                {analytics.revenueDetails.delivery < analytics.revenueDetails.totalRevenue * 0.05 && (
+                    <div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[10px] font-bold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded">重要</span>
+                            <span className="font-bold text-xs">外卖渠道未充分开发 — 仅占营收 {analytics.revenueDetails.totalRevenue ? (analytics.revenueDetails.delivery / analytics.revenueDetails.totalRevenue * 100).toFixed(1) : '0'}%</span>
+                        </div>
+                        <div className="pl-4 text-[11px] text-gray-600 leading-relaxed">
+                            <p>外卖收入仅 {formatMoney(analytics.revenueDetails.delivery)}，远低于营收的 5%。</p>
+                            <p className="mt-1"><span className="font-bold">改善措施：</span>确保已开通 GrabFood、FoodPanda、ShopeeFood 等主流平台，并优化外卖菜单和运营。</p>
+                            <p className="mt-1"><span className="font-bold">预期效果：</span>参考同行，外卖可贡献月营收的 10-20%，即 {formatMoney(analytics.revenueDetails.totalRevenue * 0.1)} - {formatMoney(analytics.revenueDetails.totalRevenue * 0.2)} 增量。</p>
+                        </div>
+                    </div>
+                )}
+ 
+                {/* 4. Credit Card */}
+                {(analytics.revenueDetails.creditCard === 0 && analytics.revenueDetails.amex === 0) && (
+                    <div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">一般</span>
+                            <span className="font-bold text-xs">信用卡收款通道未启用</span>
+                        </div>
+                        <div className="pl-4 text-[11px] text-gray-600 leading-relaxed">
+                            <p>Credit Card 和 Amex 本期收入为零，可能流失部分刷卡消费客群。建议开通 POS 信用卡功能。</p>
+                        </div>
+                    </div>
+                )}
+ 
+                {/* 5. Cash Flow */}
+                {analytics.netCashFlow < 0 && (
+                    <div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded">关注</span>
+                            <span className="font-bold text-xs">现金流为负 {formatMoney(analytics.netCashFlow)}</span>
+                        </div>
+                        <div className="pl-4 text-[11px] text-gray-600 leading-relaxed">
+                            <p>本期现金流为负，{(analytics.costs.totalCapex > 0 || analytics.costs.totalDeposits > 0) ? `其中 CAPEX 支出 ${formatMoney(analytics.costs.totalCapex)}、押金支出 ${formatMoney(analytics.costs.totalDeposits)}。` : ''} 建议持续监控每月现金流，确保运营资金充足。</p>
+                        </div>
+                    </div>
+                )}
+ 
+                {/* 6. Dividend vs Profit Warning */}
+                {analytics.revenueDetails.totalRevenue * 0.05 > analytics.netProfit && analytics.netProfit > 0 && (
+                    <div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">注意</span>
+                            <span className="font-bold text-xs">分红金额超过净利润</span>
+                        </div>
+                        <div className="pl-4 text-[11px] text-gray-600 leading-relaxed">
+                            <p>本期分红 {formatMoney(analytics.revenueDetails.totalRevenue * 0.05)} 超过净利润 {formatMoney(analytics.netProfit)}，差额 {formatMoney(analytics.revenueDetails.totalRevenue * 0.05 - analytics.netProfit)} 需从现有资金中支出。如持续出现此情况，建议评估分红比例的可持续性。</p>
+                        </div>
+                    </div>
+                )}
+            </div>
+ 
+            {/* SUMMARY BOX */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-10">
+                <p className="font-black text-sm text-emerald-800 mb-2">总结 SUMMARY</p>
+                <p className="text-xs text-emerald-700 leading-relaxed">
+                    本期（{startDate} 至 {endDate}）{analytics.netProfit >= 0 ? '实现盈利' : '出现亏损'} {formatMoney(analytics.netProfit)}，
+                    按总营收 5% 计算分红为 {formatMoney(analytics.revenueDetails.totalRevenue * 0.05)}，
+                    扣除分红后留存利润为 {formatMoney(analytics.netProfit - analytics.revenueDetails.totalRevenue * 0.05)}。
+                    {analytics.margins.cogs > 40 && ` 若 COGS 从 ${analytics.margins.cogs.toFixed(1)}% 降至 40%，月净利润可增加约 ${formatMoney(analytics.revenueDetails.totalRevenue * (analytics.margins.cogs - 40) / 100)}。`}
+                    {analytics.margins.labor > 25 && ` 若 Labor 从 ${analytics.margins.labor.toFixed(1)}% 降至 25%，月净利润可再增加约 ${formatMoney(analytics.revenueDetails.totalRevenue * (analytics.margins.labor - 25) / 100)}。`}
+                    {(analytics.margins.cogs <= 40 && analytics.margins.labor <= 25) && ' 各项成本比例已在合理范围内，建议保持并持续优化。'}
+                </p>
+            </div>
+ 
+            {/* SIGNATURES */}
+            <div className="mt-20 pt-8 border-t-2 border-black flex justify-between px-10">
+                <div className="text-center">
+                    <div className="w-48 h-px bg-black mb-2"></div>
+                    <p className="text-xs font-bold uppercase">Prepared By</p>
+                    <p className="text-[10px] text-gray-500">Finance Dept</p>
+                </div>
+                <div className="text-center">
+                    <div className="w-48 h-px bg-black mb-2"></div>
+                    <p className="text-xs font-bold uppercase">Approved By</p>
+                    <p className="text-[10px] text-gray-500">Director / Owner</p>
+                </div>
+            </div>
+ 
+            {/* DISCLAIMER */}
+            <p className="text-center text-[8px] text-gray-300 mt-8 uppercase tracking-widest">此报告由系统自动生成，仅供内部参考。最终财务数据以审计报告为准。</p>
+ 
+            {/* FOOTER PAGE 3 */}
+            <div className="absolute bottom-8 left-12 right-12 border-t border-gray-200 pt-3 flex justify-between text-[9px] text-gray-400">
+                <span>KIM LIAN KEE (KEPONG) — Shareholder Financial Report</span>
+                <span className="text-red-500 font-bold">CONFIDENTIAL</span>
+                <span>Page 3</span>
+            </div>
+        </div>
+ 
+    </div>
+</div>
 
                         </div>
                     )}
