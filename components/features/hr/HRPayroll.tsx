@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { DollarSign, Save, Calendar, CheckCircle2, Calculator, X, Plus, MinusCircle, Building2, Info, RotateCcw, Printer, FileDown, Loader2, Wallet, Banknote, CreditCard, ToggleLeft, ToggleRight, CalendarDays, CheckSquare, Square, UserX, ChevronLeft, ChevronRight, RefreshCw, LockOpen, Landmark, Ban, History, FileText } from 'lucide-react';
 import { Employee, PayrollRecord, ExpenseItem, RosterStatus } from '../../../types';
 import { DataManager } from '../../../utils/dataManager';
-import { collection, getDocs, doc, deleteDoc } from "firebase/firestore";
+import { collection, getDocs, doc, deleteDoc, query, where } from "firebase/firestore";
 import { db } from '../../../firebaseConfig';
 import { jsPDF } from "jspdf";
 import html2canvas from 'html2canvas';
@@ -148,19 +148,13 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
     });
 
     const [showPayConfirm, setShowPayConfirm] = useState(false);
-    const [paymentDate, setPaymentDate] = useState(''); 
+    const [showDeptBreakdown, setShowDeptBreakdown] = useState(false);
+    const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]); // 👑 默认出款日为今天
 
     const printSlipRef = useRef<HTMLDivElement>(null);
     const printSummaryRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const [year, month] = selectedMonth.split('-').map(Number);
-        const lastDay = new Date(year, month, 0); 
-        const yyyy = lastDay.getFullYear();
-        const mm = String(lastDay.getMonth() + 1).padStart(2, '0');
-        const dd = String(lastDay.getDate()).padStart(2, '0');
-        setPaymentDate(`${yyyy}-${mm}-${dd}`);
-    }, [selectedMonth]);
+    
+    // 🚨 已彻底移除把 paymentDate 强行锁死在月底的 useEffect
 
     const displayEmployees = useMemo(() => {
         return employees.filter(e => {
@@ -276,14 +270,17 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
             const startOfMonth = `${selectedMonth}-01`;
             const endOfMonth = `${selectedMonth}-31`; 
             
-            const snap = await getDocs(collection(db, 'standalone_expenses'));
-            const allExpenses = snap.docs.map(d => d.data() as ExpenseItem);
-            
-            const advances = allExpenses.filter(e => 
-                e.category === 'STAFF_ADVANCE' && 
-                e.time >= startOfMonth && 
-                e.time <= endOfMonth
+            // 👑 护栏修复：绝对禁止全量扫描！只拉取 STAFF_ADVANCE 分类的单据
+            const qAdvances = query(
+                collection(db, 'standalone_expenses'),
+                where('category', '==', 'STAFF_ADVANCE')
             );
+            const snap = await getDocs(qAdvances);
+            
+            // 然后在内存中过滤本月时间 (极大减少读取量，因为预支单本来就少)
+            const advances = snap.docs
+                .map(d => d.data() as ExpenseItem)
+                .filter(e => e.time >= startOfMonth && e.time <= endOfMonth);
             
             setMonthAdvances(advances);
 
@@ -845,16 +842,48 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
         return { gross, netPay, totalCompanyCost, employerCost, deductions: employeeDeductions, totalGovtPay };
     };
 
+    const getDepartment = (emp: Employee): string => {
+        const r = (emp.role || '').toUpperCase();
+        if (r.includes('CHEF') || r.includes('COOK') || r.includes('KITCHEN') || r.includes('头手') || r.includes('厨房')) return '🔥 厨房 (Kitchen)';
+        if (r.includes('BAR') || r.includes('水吧')) return '🧋 水吧 (Bar)';
+        if (r.includes('CLEANER') || r.includes('DISH') || r.includes('洗碗')) return '🧹 清洁 (Cleaner)';
+        return '🍽️ 楼面 (Floor)';
+    };
+
     const grandTotals = useMemo(() => {
-        let net = 0, cost = 0, govt = 0;
-        Object.values(payrollData).forEach((e: DetailedPayrollEntry) => {
+        let net = 0, cost = 0, govt = 0, paid = 0, unpaid = 0, totalAdvance = 0;
+        Object.entries(payrollData).forEach(([id, e]: [string, DetailedPayrollEntry]) => {
             const t = getTotals(e);
             net += t.netPay;
             cost += t.totalCompanyCost;
             govt += t.totalGovtPay;
+            totalAdvance += (e.advanceLoan || 0);
+            if (e.isPaid) paid += t.netPay;
+            else unpaid += t.netPay;
         });
-        return { net, cost, govt };
+        // 👑 预支已经实际出款，算入"已发"，从"待发"扣除
+        paid += totalAdvance;
+        unpaid -= totalAdvance;
+        return { net, cost, govt, paid, unpaid, totalAdvance };
     }, [payrollData]);
+
+    const deptBreakdown = useMemo(() => {
+        const breakdown: Record<string, { net: number; paid: number; unpaid: number; govt: number; count: number; cost: number }> = {};
+        Object.entries(payrollData).forEach(([id, e]) => {
+            const emp = employees.find(x => x.id === id);
+            if (!emp) return;
+            const dept = getDepartment(emp);
+            if (!breakdown[dept]) breakdown[dept] = { net: 0, paid: 0, unpaid: 0, govt: 0, count: 0, cost: 0 };
+            const t = getTotals(e);
+            breakdown[dept].net += t.netPay;
+            breakdown[dept].cost += t.totalCompanyCost;
+            breakdown[dept].govt += t.totalGovtPay;
+            breakdown[dept].count++;
+            if (e.isPaid) breakdown[dept].paid += t.netPay;
+            else breakdown[dept].unpaid += t.netPay;
+        });
+        return breakdown;
+    }, [payrollData, employees]);
 
     const handleSaveSingleDraft = async () => {
         setIsLoading(true);
@@ -1237,7 +1266,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
             </div>
 
             {/* Main List */}
-            <div className="flex-grow overflow-y-auto p-4 md:p-6 pb-32 touch-pan-y">
+            <div className="flex-grow overflow-y-auto p-4 md:p-6 touch-pan-y" style={{ paddingBottom: 'max(140px, calc(140px + env(safe-area-inset-bottom)))' }}>
                 <div className="max-w-5xl mx-auto mb-2 flex items-center gap-2">
                     <button onClick={handleSelectAll} className="bg-white px-3 py-1.5 rounded-lg text-xs font-bold text-gray-500 border border-gray-200 hover:bg-gray-50 flex items-center gap-2 active:scale-95 transition-transform">
                         {selectedEmpIds.size === displayEmployees.length && displayEmployees.length > 0 ? <CheckSquare size={14} className="text-[#1A1A1A]"/> : <Square size={14}/>}
@@ -1285,36 +1314,126 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                 </div>
             </div>
 
-            {/* Footer Save Button */}
-            <div className="bg-white p-4 border-t border-gray-200 safe-area-bottom z-20">
-                <div className="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-                    <div className="flex gap-6 text-xs font-bold text-gray-500 w-full md:w-auto justify-between md:justify-start">
-                        <div><span className="block text-[10px] text-gray-400 uppercase">Total Payout (Net)</span><span className="text-xl font-mono text-[#1A1A1A] font-black">RM {grandTotals.net.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>
-                        <div className="w-px h-8 bg-gray-200"></div>
-                        <div><span className="block text-[10px] text-blue-500 uppercase">To Govt (Statutory)</span><span className="text-xl font-mono text-blue-600 font-black">RM {grandTotals.govt.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>
+            {/* Footer Save Button - iOS Safe Area */}
+            <div className="bg-white border-t border-gray-200 z-20" style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}>
+                
+                {/* 📊 部门明细展开区 (Department Breakdown) */}
+                {showDeptBreakdown && (
+                    <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 animate-in slide-in-from-bottom-2">
+                        <div className="max-w-5xl mx-auto">
+                            <div className="flex justify-between items-center mb-3">
+                                <h4 className="text-xs font-black text-gray-600 uppercase tracking-widest">部门薪资明细 (Department Breakdown)</h4>
+                                <button onClick={() => setShowDeptBreakdown(false)} className="p-1 text-gray-400 hover:text-gray-600"><X size={16}/></button>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                {Object.entries(deptBreakdown).sort(([a],[b]) => a.localeCompare(b)).map(([dept, data]) => (
+                                    <div key={dept} className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div>
+                                                <div className="text-xs font-black text-[#1A1A1A]">{dept}</div>
+                                                <div className="text-[9px] text-gray-400 font-bold">{data.count} 人</div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="text-[9px] text-gray-400 uppercase font-bold">Net Pay</div>
+                                                <div className="text-sm font-mono font-black text-[#1A1A1A]">RM {data.net.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between text-[10px] pt-2 border-t border-gray-100">
+                                            <span className="text-emerald-600 font-bold">已发: RM {data.paid.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                            <span className="text-orange-600 font-bold">待发: RM {data.unpaid.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                        </div>
+                                        <div className="flex justify-between text-[10px] mt-1">
+                                            <span className="text-blue-500 font-bold">政府: RM {data.govt.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                            <span className="text-gray-400 font-bold">总成本: RM {data.cost.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     </div>
-                    
-                    <div className="flex gap-2 w-full md:w-auto">
-                        {isPosted ? (
-                            <>
-                                <button onClick={handleRevertStatus} disabled={isLoading} className="flex-1 md:flex-none bg-red-50 text-red-600 border border-red-100 px-6 py-3 rounded-xl font-bold shadow-sm hover:bg-red-100 active:scale-95 transition-all text-sm flex items-center justify-center gap-2">
-                                    <LockOpen size={16}/> 撤销结账 (Revert)
-                                </button>
-                                {!isStatutoryPaid ? (
-                                    <button onClick={handlePayStatutory} disabled={isLoading} className="flex-1 md:flex-none bg-blue-600 text-white border border-blue-600 px-6 py-3 rounded-xl font-bold shadow-md hover:bg-blue-700 active:scale-95 transition-all text-sm flex items-center justify-center gap-2">
-                                        <Building2 size={16}/> 缴纳政府费用 (Pay Statutory)
-                                    </button>
+                )}
+
+                <div className="px-4 pt-3 pb-1">
+                    <div className="max-w-5xl mx-auto flex flex-col gap-3">
+                        
+                        {/* 💰 第一行：薪资总览 (可点击展开部门明细) */}
+                        <div 
+                            onClick={() => setShowDeptBreakdown(!showDeptBreakdown)}
+                            className="flex items-center justify-between gap-2 cursor-pointer active:scale-[0.99] transition-transform select-none"
+                        >
+                            <div className="flex items-center gap-3 md:gap-6 overflow-x-auto flex-nowrap min-w-0 flex-1">
+                                {/* Total Net */}
+                                <div className="shrink-0">
+                                    <span className="block text-[9px] text-gray-400 uppercase font-bold leading-none mb-0.5">Total Net (实发)</span>
+                                    <span className="text-lg md:text-xl font-mono text-[#1A1A1A] font-black leading-tight">RM {grandTotals.net.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                </div>
+                                <div className="w-px h-8 bg-gray-200 shrink-0 hidden sm:block"></div>
+                                {/* 已发 (Paid) */}
+                                <div className="shrink-0">
+                                    <span className="block text-[9px] text-emerald-600 uppercase font-bold leading-none mb-0.5">已发 (Paid)</span>
+                                    <span className="text-base md:text-lg font-mono text-emerald-700 font-black leading-tight">RM {grandTotals.paid.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                </div>
+                                <div className="w-px h-8 bg-gray-200 shrink-0 hidden sm:block"></div>
+                                {/* 待发 (Remaining) */}
+                                <div className="shrink-0">
+                                    <span className="block text-[9px] text-orange-600 uppercase font-bold leading-none mb-0.5">待发 (Remaining)</span>
+                                    <span className="text-base md:text-lg font-mono text-orange-700 font-black leading-tight">RM {grandTotals.unpaid.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                </div>
+                                <div className="w-px h-8 bg-gray-200 shrink-0 hidden sm:block"></div>
+                                {/* To Govt */}
+                                <div className="shrink-0">
+                                    <span className="block text-[9px] text-blue-500 uppercase font-bold leading-none mb-0.5">To Govt</span>
+                                    <span className="text-base md:text-lg font-mono text-blue-600 font-black leading-tight">RM {grandTotals.govt.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                </div>
+                            </div>
+                            
+                            {/* 展开箭头 */}
+                            <div className={`shrink-0 p-1.5 rounded-lg transition-all ${showDeptBreakdown ? 'bg-gray-200 rotate-180' : 'bg-gray-100'}`}>
+                                <ChevronLeft size={14} className="rotate-90 text-gray-500"/>
+                            </div>
+                        </div>
+                        
+                        {/* 💳 第二行：操作按钮区 */}
+                        <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                            {/* 出款日期 */}
+                            <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-xl border border-gray-200 w-full sm:w-auto">
+                                <CalendarDays size={14} className="text-gray-400 shrink-0 ml-1"/>
+                                <div className="flex flex-col flex-1 sm:flex-none">
+                                    <span className="text-[8px] text-gray-400 font-bold uppercase leading-none">出款日</span>
+                                    <input 
+                                        type="date" 
+                                        value={paymentDate}
+                                        onChange={(e) => setPaymentDate(e.target.value)}
+                                        className="bg-transparent text-xs font-black text-[#1A1A1A] outline-none w-full sm:w-36 p-0" 
+                                        style={{ minHeight: '28px' }}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* 操作按钮 */}
+                            <div className="flex gap-2 flex-1">
+                                {isPosted ? (
+                                    <>
+                                        <button onClick={handleRevertStatus} disabled={isLoading} className="flex-1 bg-red-50 text-red-600 border border-red-100 px-4 py-3 rounded-xl font-bold shadow-sm hover:bg-red-100 active:scale-95 transition-all text-xs sm:text-sm flex items-center justify-center gap-1.5" style={{ minHeight: '48px' }}>
+                                            <LockOpen size={15}/> 撤销结账
+                                        </button>
+                                        {!isStatutoryPaid ? (
+                                            <button onClick={handlePayStatutory} disabled={isLoading} className="flex-1 bg-blue-600 text-white border border-blue-600 px-4 py-3 rounded-xl font-bold shadow-md hover:bg-blue-700 active:scale-95 transition-all text-xs sm:text-sm flex items-center justify-center gap-1.5" style={{ minHeight: '48px' }}>
+                                                <Building2 size={15}/> 缴政府费用
+                                            </button>
+                                        ) : (
+                                            <button disabled className="flex-1 bg-gray-100 text-gray-400 border border-gray-200 px-4 py-3 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-not-allowed" style={{ minHeight: '48px' }}>
+                                                <CheckCircle2 size={15}/> 结算完毕
+                                            </button>
+                                        )}
+                                    </>
                                 ) : (
-                                    <button disabled className="flex-1 md:flex-none bg-gray-100 text-gray-400 border border-gray-200 px-6 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 cursor-not-allowed">
-                                        <CheckCircle2 size={16}/> 结算完毕 (All Paid)
+                                    <button onClick={handleSavePayroll} disabled={isLoading} className="flex-1 bg-[#1A1A1A] text-[#FFD700] px-6 py-3 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 hover:bg-black active:scale-95 transition-all text-sm disabled:opacity-50" style={{ minHeight: '48px' }}>
+                                        {isLoading ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} 一键全部入账 (Pay All)
                                     </button>
                                 )}
-                            </>
-                        ) : (
-                            <button onClick={handleSavePayroll} disabled={isLoading} className="w-full md:w-auto bg-[#1A1A1A] text-[#FFD700] px-8 py-3 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 hover:bg-black active:scale-95 transition-all text-sm md:text-base disabled:opacity-50">
-                                {isLoading ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} 一键全部入账 (Pay All)
-                            </button>
-                        )}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1616,7 +1735,7 @@ export const HRPayroll: React.FC<HRPayrollProps> = ({ employees }) => {
                         </div>
 
                         {/* Footer (Fixed) */}
-                        <div className="p-4 md:p-5 bg-white border-t border-gray-200 shrink-0 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] safe-area-bottom z-10">
+                        <div className="p-4 md:p-5 bg-white border-t border-gray-200 shrink-0 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-10" style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}>
                             <div className="text-right mb-4">
                                 <div className="text-[10px] text-gray-400 uppercase font-bold">NET PAY (实发)</div>
                                 <div className="text-4xl font-mono font-black text-[#1A1A1A] drop-shadow-sm">RM {getTotals(editingEntry).netPay.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>

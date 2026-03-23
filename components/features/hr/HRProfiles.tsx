@@ -335,7 +335,10 @@ const SystemAccessModal = ({ isOpen, onClose, allowedModules, onToggle, assessme
         </div>
     );
 };
-
+const getRoleChinese = (role: string) => {
+    const match = role.match(/[（(]([^)）]+)[)）]/);
+    return match ? match[1] : role;
+};
 const SHIRT_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'];
 const DISCIPLINARY_TYPES = [{id: 'VERBAL', label: '口头警告 (Verbal)', color: 'text-yellow-600 bg-yellow-50'}, {id: 'WRITTEN', label: '书面警告 (Written)', color: 'text-orange-600 bg-orange-50'}, {id: 'FINAL', label: '最后警告 (Final)', color: 'text-red-600 bg-red-50'}];
 const TERMINATION_TYPES = [
@@ -683,7 +686,7 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                                                         
                                                         {/* 第二行：主职 */}
                                                         <div className={`text-[11px] font-bold truncate ${isSelected ? 'text-[#FFD700]' : 'text-gray-500'}`}>
-                                                            {emp.role.split('(')[0].trim()}
+                                                            {getRoleChinese(emp.role)}
                                                         </div>
 
                                                         {/* 副职 badges */}
@@ -698,7 +701,7 @@ export const HRProfiles: React.FC<HRProfilesProps> = ({ employees, onSave, curre
                                                                             : 'bg-gray-100 text-gray-500 border border-gray-200'
                                                                         }`}
                                                                     >
-                                                                        {sr.split('(')[0].trim()}
+                                                                        {getRoleChinese(sr)}
                                                                     </span>
                                                                 ))}
                                                             </div>
