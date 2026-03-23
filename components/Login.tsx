@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserRole, Employee } from '../types';
 import { DataManager } from '../utils/dataManager';
-import { DEFAULT_STAFF } from './constants';
+import { DEFAULT_STAFF } from '../constants/staff';
 import { Lock, User, ShieldCheck, Zap, Delete, Server, Unlock, ArrowLeft, CloudUpload, ShieldAlert } from 'lucide-react';
 
 interface LoginProps {

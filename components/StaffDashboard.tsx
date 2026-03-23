@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ClipboardList, Shield, Crown, BookOpen, Languages, AlertTriangle } from 'lucide-react';
 import { SOPItem, Employee, RoleGuide } from '../types';
-import { DEFAULT_ROLE_GUIDES, ROLE_SOP_DETAILS, DEFAULT_ROLES, MODULE_SYSTEM_TASKS } from './constants';
+import { ROLE_SOP_DETAILS, MODULE_SYSTEM_TASKS } from './constants';
+import { DEFAULT_ROLE_GUIDES, DEFAULT_ROLES } from '../constants/staff';
 import { ManagementView, FOHView, BOHView, PendingView, HandbookView } from './StaffViews';
 import { DataManager } from '../utils/dataManager';
 import { mapRoleToCode, getChineseRoleName } from './utils';

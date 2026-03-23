@@ -2,10 +2,10 @@
 import { Wallet, CalendarOff, BookOpen, ClipboardCheck, Utensils, Coffee, Package, Users, FileText, Truck, Armchair, Eye, CheckSquare, CreditCard, Banknote, Landmark, ShieldCheck, Clock, AlertTriangle, ChefHat, ShoppingCart, Flame, Award } from 'lucide-react';
 import { AppModule } from '../types';
 
-export * from './constants/suppliers';
-export * from './constants/menu';
-export * from './constants/staff';
-export * from './constants/inventory';
+export * from '../constants/suppliers';
+export * from '../constants/menu';
+export * from '../constants/staff';
+export * from '../constants/inventory';
 
 export const MODULE_DEFINITIONS: Record<AppModule, { label: string; desc: string; icon: any; tab: string; guide: string }> = {
   'PROCUREMENT': { 

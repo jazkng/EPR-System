@@ -44,28 +44,67 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ onBack, allo
   const [mgmtStats, setMgmtStats] = useState({ lowStock: 0, todayLogs: 0, absences: 0, pendingTasks: 0 });
   const [statsLoading, setStatsLoading] = useState(isManagementStaff);
 
-  // Load Management Stats
+  // 👑 新增：企业级5分钟缓存机制 (防止店长频繁返回主页导致全量重新拉取)
   useEffect(() => {
       if (!isManagementStaff) return;
+      
+      let isMounted = true;
       const loadStats = async () => {
+          // 1. 检查 5 分钟内的本地缓存
+          const CACHE_KEY = 'manager_dashboard_stats_cache';
+          const CACHE_TIME = 5 * 60 * 1000; // 5分钟
+          const cachedData = sessionStorage.getItem(CACHE_KEY);
+          
+          if (cachedData) {
+              const { stats, timestamp } = JSON.parse(cachedData);
+              if (Date.now() - timestamp < CACHE_TIME) {
+                  if (isMounted) {
+                      setMgmtStats(stats);
+                      setStatsLoading(false);
+                  }
+                  return; // 👑 缓存有效，直接拦截，节省 Firebase 读取！
+              }
+          }
+
+          // 2. 缓存过期或首次加载，去云端拿数据
           setStatsLoading(true);
           try {
               const [kStock, bStock, gStock, logs, rosterData, tasks] = await Promise.all([
                   DataManager.getStock('KITCHEN'), DataManager.getStock('BAR'), DataManager.getStock('GENERAL'),
                   DataManager.getLogs(), DataManager.getRosterData(), DataManager.getInventoryTasks()
               ]);
+              
+              if (!isMounted) return;
+
               const allStock = [...kStock, ...bStock, ...gStock];
-              const lowItems = allStock.filter(i => i.currentQty <= i.minLevel).length;
-              const now = new Date(); if (now.getHours() < 4) now.setDate(now.getDate() - 1);
+              // 防御性编程：以防 minLevel 是 undefined
+              const lowItems = allStock.filter(i => i.currentQty <= (i.minLevel || 0)).length;
+              
+              const now = new Date(); 
+              if (now.getHours() < 4) now.setDate(now.getDate() - 1);
               const dateStr = now.toISOString().split('T')[0];
+              
               const todayLogs = logs.filter(l => l.date === dateStr).length;
               const todayRoster = rosterData.roster?.[dateStr] || {};
               const absences = Object.values(todayRoster).filter(s => s === 'MC' || s === 'ABSENT').length;
               const pending = tasks.filter(t => t.status === 'PENDING').length;
-              setMgmtStats({ lowStock: lowItems, todayLogs: todayLogs, absences: absences, pendingTasks: pending });
-          } catch (e) { console.error("Stats load failed", e); } finally { setStatsLoading(false); }
+              
+              const newStats = { lowStock: lowItems, todayLogs: todayLogs, absences: absences, pendingTasks: pending };
+              
+              setMgmtStats(newStats);
+              
+              // 3. 把最新鲜的数据存入本地缓存
+              sessionStorage.setItem(CACHE_KEY, JSON.stringify({ stats: newStats, timestamp: Date.now() }));
+
+          } catch (e) { 
+              console.error("Stats load failed", e); 
+          } finally { 
+              if (isMounted) setStatsLoading(false); 
+          }
       };
+      
       loadStats();
+      return () => { isMounted = false; };
   }, [isManagementStaff]);
 
   // Load Store Config

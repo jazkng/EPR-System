@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
     Users, Crown, Banknote, Coffee, 
     Truck, Armchair, CheckSquare, PenTool, BookOpen, CalendarOff, 
     ClipboardCheck, Layout, Box, Eye, FileBarChart, Clock, CreditCard, Wallet, ShieldCheck,
-    AlertTriangle, ShoppingCart, Megaphone, Target, PartyPopper, Vote, TrendingUp, Award, Languages
+    AlertTriangle, ShoppingCart, Megaphone, Target, PartyPopper, Vote, TrendingUp, Award, Languages, Palette
 } from 'lucide-react';
 import { Employee } from '../types';
 import { HRSystem } from './features/HRSystem';
@@ -19,7 +19,7 @@ import { EventsPlanningModule } from './features/EventsPlanningModule';
 import { PriceMonitorModule } from './features/PriceMonitorModule'; 
 import { EmployeeAssessmentModule } from './features/EmployeeAssessmentModule';
 import { TranslationManager } from './features/TranslationManager'; 
-import { DataManager } from '../utils/dataManager'; 
+import { DataManager } from '../utils/dataManager';
 
 interface BossDashboardProps {
     onNavigate: (tab: string) => void;
@@ -30,13 +30,79 @@ interface BossDashboardProps {
 export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, currentEmployee, onOpenConfig }) => {
     const [activeModal, setActiveModal] = useState<'NONE' | 'HR' | 'MENU' | 'BILLS' | 'ORG' | 'REPORTS' | 'ATTENDANCE' | 'AP' | 'TREASURY' | 'WARRANTY' | 'PLANNING' | 'PRICE_MONITOR' | 'ASSESSMENT' | 'TRANSLATION'>('NONE');
     
+    // 🎨 模块颜色客制化
+    const CARD_COLORS_KEY = 'boss_dashboard_card_colors';
+    const COLOR_PRESETS = [
+        { dot: 'bg-white border border-gray-300', bgClass: 'bg-white' },
+        { dot: 'bg-red-100', bgClass: 'bg-red-50' },
+        { dot: 'bg-orange-100', bgClass: 'bg-orange-50' },
+        { dot: 'bg-amber-100', bgClass: 'bg-amber-50' },
+        { dot: 'bg-lime-100', bgClass: 'bg-lime-50' },
+        { dot: 'bg-emerald-100', bgClass: 'bg-emerald-50' },
+        { dot: 'bg-teal-100', bgClass: 'bg-teal-50' },
+        { dot: 'bg-blue-100', bgClass: 'bg-blue-50' },
+        { dot: 'bg-indigo-100', bgClass: 'bg-indigo-50' },
+        { dot: 'bg-purple-100', bgClass: 'bg-purple-50' },
+        { dot: 'bg-pink-100', bgClass: 'bg-pink-50' },
+        { dot: 'bg-cyan-100', bgClass: 'bg-cyan-50' },
+    ];
+
+    const [cardColors, setCardColors] = useState<Record<string, string>>(() => {
+        try { return JSON.parse(localStorage.getItem(CARD_COLORS_KEY) || '{}'); } catch { return {}; }
+    });
+    const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null);
+    const pickerRef = useRef<HTMLDivElement>(null);
+
+    const handleSetCardColor = (cardId: string, bgClass: string) => {
+        const updated = { ...cardColors, [cardId]: bgClass };
+        setCardColors(updated);
+        localStorage.setItem(CARD_COLORS_KEY, JSON.stringify(updated));
+        setColorPickerOpen(null);
+    };
+
+    const handleResetCardColor = (cardId: string) => {
+        const updated = { ...cardColors };
+        delete updated[cardId];
+        setCardColors(updated);
+        localStorage.setItem(CARD_COLORS_KEY, JSON.stringify(updated));
+        setColorPickerOpen(null);
+    };
+
+    // 点击外部关闭调色板
+    useEffect(() => {
+        if (!colorPickerOpen) return;
+        const handler = (e: MouseEvent) => {
+            if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setColorPickerOpen(null);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [colorPickerOpen]);
+
     const [alerts, setAlerts] = useState({ bills: 0, stock: 0, logs: 0, absent: 0 });
     const [loadingAlerts, setLoadingAlerts] = useState(true);
 
-    // 🛡️ 保留底层的安全并发逻辑 (防止白屏和计费爆炸)
+    // 🛡️ 保留底层的安全并发逻辑 + 👑 新增：企业级5分钟缓存机制
     useEffect(() => {
         let isMounted = true;
+        
         const runHealthCheck = async () => {
+            // 1. 检查是否有 5 分钟内的本地缓存记录
+            const CACHE_KEY = 'boss_dashboard_alerts_cache';
+            const CACHE_TIME = 5 * 60 * 1000; // 5分钟
+            const cachedData = sessionStorage.getItem(CACHE_KEY);
+            
+            if (cachedData) {
+                const { alerts: cachedAlerts, timestamp } = JSON.parse(cachedData);
+                if (Date.now() - timestamp < CACHE_TIME) {
+                    if (isMounted) {
+                        setAlerts(cachedAlerts);
+                        setLoadingAlerts(false);
+                    }
+                    return; // 👑 缓存有效，直接拦截，节省 500+ 次 Firebase 读取！
+                }
+            }
+
+            // 2. 缓存过期或首次加载，去云端拿数据
             setLoadingAlerts(true);
             const today = new Date();
             const dateStr = today.toISOString().split('T')[0];
@@ -66,7 +132,8 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
 
                 if (results[1].status === 'fulfilled') {
                     const allStock = results[1].value.flat();
-                    newAlerts.stock = allStock.filter(i => i.currentQty <= i.minLevel).length;
+                    // 防御性编程：以防 minLevel 是 undefined
+                    newAlerts.stock = allStock.filter(i => i.currentQty <= (i.minLevel || 0)).length;
                 }
 
                 if (results[2].status === 'fulfilled') {
@@ -79,12 +146,16 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
                 }
 
                 setAlerts(newAlerts);
+                // 3. 把最新鲜的 Alert 数据存入本地缓存，保存当前时间戳
+                sessionStorage.setItem(CACHE_KEY, JSON.stringify({ alerts: newAlerts, timestamp: Date.now() }));
+
             } catch (e) {
                 console.error("Dashboard Health Check Failed", e);
             } finally {
                 if (isMounted) setLoadingAlerts(false);
             }
         };
+
         runHealthCheck();
         return () => { isMounted = false; };
     }, []);
@@ -92,22 +163,67 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
     const totalAlerts = Object.values(alerts).reduce((a, b) => a + b, 0);
 
     // 🎨 还原你原本好看的彩色 UI 组件
-    const DashboardCard = ({ title, sub, icon: Icon, colorClass, onClick, iconColor, alertCount, alertColor = "bg-red-500" }: any) => (
-        <button onClick={onClick} className="bg-white p-3 md:p-5 rounded-2xl md:rounded-3xl shadow-sm border border-gray-100 hover:shadow-md hover:border-gray-200 transition-all text-left group h-full flex flex-col justify-between relative overflow-visible active:scale-[0.98]">
-            {alertCount > 0 && (
-                <div className={`absolute -top-2 -right-2 ${alertColor} text-white text-[10px] font-black min-w-[1.25rem] h-5 px-1.5 rounded-full flex items-center justify-center shadow-md animate-pulse z-10 border-2 border-white`}>
-                    {alertCount}
+    const DashboardCard = ({ id, title, sub, icon: Icon, colorClass, onClick, iconColor, alertCount, alertColor = "bg-red-500" }: any) => {
+        const cardBg = (id && cardColors[id]) ? cardColors[id] : 'bg-white';
+        const isPickerOpen = colorPickerOpen === id;
+
+        return (
+            <button onClick={onClick} className={`${cardBg} p-3 md:p-5 rounded-2xl md:rounded-3xl shadow-sm border border-gray-100 hover:shadow-md hover:border-gray-200 transition-all text-left group h-full flex flex-col justify-between relative overflow-visible active:scale-[0.98]`}>
+                {/* 🔴 Alert Badge */}
+                {alertCount > 0 && (
+                    <div className={`absolute ${id ? 'top-6 md:top-7' : '-top-2'} -right-2 ${alertColor} text-white text-[10px] font-black min-w-[1.25rem] h-5 px-1.5 rounded-full flex items-center justify-center shadow-md animate-pulse z-10 border-2 border-white`}>
+                        {alertCount}
+                    </div>
+                )}
+
+                {/* 🎨 调色板按钮 */}
+                {id && (
+                    <div className="absolute top-1.5 right-1.5 md:top-2 md:right-2 z-20"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div
+                            className={`w-6 h-6 md:w-7 md:h-7 rounded-lg flex items-center justify-center cursor-pointer transition-all ${isPickerOpen ? 'bg-gray-200 scale-110' : 'bg-transparent opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:bg-gray-100'}`}
+                            onClick={(e) => { e.stopPropagation(); setColorPickerOpen(isPickerOpen ? null : id); }}
+                        >
+                            <Palette size={13} className="text-gray-400" />
+                        </div>
+
+                        {/* 🎨 颜色选择器弹窗 */}
+                        {isPickerOpen && (
+                            <div ref={pickerRef} className="absolute top-8 right-0 bg-white rounded-2xl shadow-xl border border-gray-200 p-3 z-50 w-[160px] animate-in fade-in zoom-in-95 duration-150"
+                                onClick={e => e.stopPropagation()}
+                            >
+                                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-2">选择配色</p>
+                                <div className="grid grid-cols-6 gap-1.5 mb-2">
+                                    {COLOR_PRESETS.map((preset, i) => (
+                                        <div key={i}
+                                            className={`w-5 h-5 rounded-full cursor-pointer ${preset.dot} hover:scale-125 transition-transform ring-2 ring-transparent hover:ring-gray-300 ${cardBg === preset.bgClass ? 'ring-gray-800 scale-110' : ''}`}
+                                            onClick={() => handleSetCardColor(id, preset.bgClass)}
+                                        />
+                                    ))}
+                                </div>
+                                {cardBg !== 'bg-white' && (
+                                    <button className="w-full text-[10px] text-gray-400 hover:text-red-500 font-bold mt-1 transition-colors"
+                                        onClick={() => handleResetCardColor(id)}
+                                    >
+                                        恢复默认
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center mb-2 md:mb-4 ${colorClass}`}>
+                    <Icon size={20} className={`md:w-6 md:h-6 ${iconColor}`} />
                 </div>
-            )}
-            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center mb-2 md:mb-4 ${colorClass}`}>
-                <Icon size={20} className={`md:w-6 md:h-6 ${iconColor}`} />
-            </div>
-            <div>
-                <h4 className="font-bold text-[#1A1A1A] text-xs md:text-sm mb-0.5 md:mb-1 group-hover:text-black transition-colors leading-tight">{title}</h4>
-                <p className="text-[9px] md:text-[10px] text-gray-400 font-bold uppercase tracking-wider leading-tight line-clamp-1">{sub}</p>
-            </div>
-        </button>
-    );
+                <div>
+                    <h4 className="font-bold text-[#1A1A1A] text-xs md:text-sm mb-0.5 md:mb-1 group-hover:text-black transition-colors leading-tight">{title}</h4>
+                    <p className="text-[9px] md:text-[10px] text-gray-400 font-bold uppercase tracking-wider leading-tight line-clamp-1">{sub}</p>
+                </div>
+            </button>
+        );
+    };
 
     return (
         <div className="p-3 md:p-8 max-w-7xl mx-auto pb-32 space-y-4 md:space-y-8 bg-[#FAFAFA] min-h-screen">
@@ -148,11 +264,11 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
                 <div>
                     <h4 className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">财务与资金 (Finance & Capital)</h4>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-                        <DashboardCard title="资金管理" sub="CASH & BANK" icon={Wallet} colorClass="bg-emerald-50" iconColor="text-emerald-600" onClick={() => setActiveModal('TREASURY')} />
-                        <DashboardCard title="财务报表" sub="P&L REPORT" icon={FileBarChart} colorClass="bg-green-50" iconColor="text-green-600" onClick={() => setActiveModal('REPORTS')} />
-                        <DashboardCard title="固定支出" sub="SUBSCRIPTIONS" icon={Banknote} colorClass="bg-orange-50" iconColor="text-orange-600" onClick={() => setActiveModal('BILLS')} alertCount={alerts.bills} />
-                        <DashboardCard title="应付账款" sub="ACCOUNTS PAYABLE" icon={CreditCard} colorClass="bg-rose-50" iconColor="text-rose-600" onClick={() => setActiveModal('AP')} />
-                        <DashboardCard title="成本监控" sub="PRICE MONITOR" icon={TrendingUp} colorClass="bg-red-50" iconColor="text-red-600" onClick={() => setActiveModal('PRICE_MONITOR')} />
+                        <DashboardCard id="treasury" title="资金管理" sub="CASH & BANK" icon={Wallet} colorClass="bg-emerald-50" iconColor="text-emerald-600" onClick={() => setActiveModal('TREASURY')} />
+                        <DashboardCard id="reports" title="财务报表" sub="P&L REPORT" icon={FileBarChart} colorClass="bg-green-50" iconColor="text-green-600" onClick={() => setActiveModal('REPORTS')} />
+                        <DashboardCard id="bills" title="固定支出" sub="SUBSCRIPTIONS" icon={Banknote} colorClass="bg-orange-50" iconColor="text-orange-600" onClick={() => setActiveModal('BILLS')} alertCount={alerts.bills} />
+                        <DashboardCard id="ap" title="应付账款" sub="ACCOUNTS PAYABLE" icon={CreditCard} colorClass="bg-rose-50" iconColor="text-rose-600" onClick={() => setActiveModal('AP')} />
+                        <DashboardCard id="price" title="成本监控" sub="PRICE MONITOR" icon={TrendingUp} colorClass="bg-red-50" iconColor="text-red-600" onClick={() => setActiveModal('PRICE_MONITOR')} />
                     </div>
                 </div>
 
@@ -160,11 +276,11 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
                 <div>
                     <h4 className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">人事与考勤 (HR & Workforce)</h4>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-                        <DashboardCard title="HR 指挥中心" sub="人员档案 / 薪资" icon={Users} colorClass="bg-red-50" iconColor="text-red-600" onClick={() => setActiveModal('HR')} />
-                        <DashboardCard title="考勤总控台" sub="Attendance Control" icon={Clock} colorClass="bg-indigo-50" iconColor="text-indigo-600" onClick={() => setActiveModal('ATTENDANCE')} />
-                        <DashboardCard title="能力评测" sub="SKILL MATRIX" icon={Award} colorClass="bg-purple-50" iconColor="text-purple-600" onClick={() => setActiveModal('ASSESSMENT')} />
-                        <DashboardCard title="排班缺席" sub="ROSTER" icon={CalendarOff} colorClass="bg-rose-50" iconColor="text-rose-500" onClick={() => onNavigate('ROSTER')} alertCount={alerts.absent} alertColor="bg-orange-500" />
-                        <DashboardCard title="组织结构" sub="ORG STRUCTURE" icon={Layout} colorClass="bg-teal-50" iconColor="text-teal-600" onClick={() => setActiveModal('ORG')} />
+                        <DashboardCard id="hr" title="HR 指挥中心" sub="人员档案 / 薪资" icon={Users} colorClass="bg-red-50" iconColor="text-red-600" onClick={() => setActiveModal('HR')} />
+                        <DashboardCard id="attendance" title="考勤总控台" sub="Attendance Control" icon={Clock} colorClass="bg-indigo-50" iconColor="text-indigo-600" onClick={() => setActiveModal('ATTENDANCE')} />
+                        <DashboardCard id="assess" title="能力评测" sub="SKILL MATRIX" icon={Award} colorClass="bg-purple-50" iconColor="text-purple-600" onClick={() => setActiveModal('ASSESSMENT')} />
+                        <DashboardCard id="roster" title="排班缺席" sub="ROSTER" icon={CalendarOff} colorClass="bg-rose-50" iconColor="text-rose-500" onClick={() => onNavigate('ROSTER')} alertCount={alerts.absent} alertColor="bg-orange-500" />
+                        <DashboardCard id="org" title="组织结构" sub="ORG STRUCTURE" icon={Layout} colorClass="bg-teal-50" iconColor="text-teal-600" onClick={() => setActiveModal('ORG')} />
                     </div>
                 </div>
 
@@ -172,12 +288,12 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
                 <div>
                     <h4 className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">供应链与产品 (Supply & Product)</h4>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
-                        <DashboardCard title="智能订货" sub="SMART ORDER" icon={ShoppingCart} colorClass="bg-lime-50" iconColor="text-lime-600" onClick={() => onNavigate('PROCUREMENT')} />
-                        <DashboardCard title="供应商" sub="PURCHASING" icon={Truck} colorClass="bg-blue-50" iconColor="text-blue-600" onClick={() => onNavigate('SUPPLIER_CONTACTS')} />
-                        <DashboardCard title="库存总览" sub="STOCK VALUE" icon={Eye} colorClass="bg-purple-50" iconColor="text-purple-600" onClick={() => onNavigate('INVENTORY_VIEW')} alertCount={alerts.stock} />
-                        <DashboardCard title="翻译管理" sub="TRANSLATION" icon={Languages} colorClass="bg-orange-50" iconColor="text-orange-600" onClick={() => setActiveModal('TRANSLATION')} />
-                        <DashboardCard title="智能菜谱" sub="SMART RECIPE" icon={Coffee} colorClass="bg-amber-50" iconColor="text-amber-600" onClick={() => setActiveModal('MENU')} />
-                        <DashboardCard title="保修记录" sub="WARRANTY" icon={ShieldCheck} colorClass="bg-cyan-50" iconColor="text-cyan-600" onClick={() => setActiveModal('WARRANTY')} />
+                        <DashboardCard id="order" title="智能订货" sub="SMART ORDER" icon={ShoppingCart} colorClass="bg-lime-50" iconColor="text-lime-600" onClick={() => onNavigate('PROCUREMENT')} />
+                        <DashboardCard id="supplier" title="供应商" sub="PURCHASING" icon={Truck} colorClass="bg-blue-50" iconColor="text-blue-600" onClick={() => onNavigate('SUPPLIER_CONTACTS')} />
+                        <DashboardCard id="stock" title="库存总览" sub="STOCK VALUE" icon={Eye} colorClass="bg-purple-50" iconColor="text-purple-600" onClick={() => onNavigate('INVENTORY_VIEW')} alertCount={alerts.stock} />
+                        <DashboardCard id="translation" title="翻译管理" sub="TRANSLATION" icon={Languages} colorClass="bg-orange-50" iconColor="text-orange-600" onClick={() => setActiveModal('TRANSLATION')} />
+                        <DashboardCard id="menu" title="智能菜谱" sub="SMART RECIPE" icon={Coffee} colorClass="bg-amber-50" iconColor="text-amber-600" onClick={() => setActiveModal('MENU')} />
+                        <DashboardCard id="warranty" title="保修记录" sub="WARRANTY" icon={ShieldCheck} colorClass="bg-cyan-50" iconColor="text-cyan-600" onClick={() => setActiveModal('WARRANTY')} />
                     </div>
                 </div>
 
@@ -185,10 +301,10 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
                 <div>
                     <h4 className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">活动与计划 (Strategy & Planning)</h4>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-                        <DashboardCard title="决策投票" sub="BOARDROOM VOTE" icon={Vote} colorClass="bg-black text-white" iconColor="text-[#FFD700]" onClick={() => setActiveModal('PLANNING')} />
-                        <DashboardCard title="目标规划" sub="OKRs & KPI" icon={Target} colorClass="bg-indigo-50" iconColor="text-indigo-600" onClick={() => setActiveModal('PLANNING')} />
-                        <DashboardCard title="营销推广" sub="CAMPAIGNS (ROI)" icon={Megaphone} colorClass="bg-pink-50" iconColor="text-pink-600" onClick={() => setActiveModal('PLANNING')} />
-                        <DashboardCard title="节日活动" sub="EVENTS CALENDAR" icon={PartyPopper} colorClass="bg-rose-50" iconColor="text-rose-600" onClick={() => setActiveModal('PLANNING')} />
+                        <DashboardCard id="vote" title="决策投票" sub="BOARDROOM VOTE" icon={Vote} colorClass="bg-black text-white" iconColor="text-[#FFD700]" onClick={() => setActiveModal('PLANNING')} />
+                        <DashboardCard id="okr" title="目标规划" sub="OKRs & KPI" icon={Target} colorClass="bg-indigo-50" iconColor="text-indigo-600" onClick={() => setActiveModal('PLANNING')} />
+                        <DashboardCard id="campaign" title="营销推广" sub="CAMPAIGNS (ROI)" icon={Megaphone} colorClass="bg-pink-50" iconColor="text-pink-600" onClick={() => setActiveModal('PLANNING')} />
+                        <DashboardCard id="events" title="节日活动" sub="EVENTS CALENDAR" icon={PartyPopper} colorClass="bg-rose-50" iconColor="text-rose-600" onClick={() => setActiveModal('PLANNING')} />
                     </div>
                 </div>
             </div>
@@ -199,11 +315,11 @@ export const BossDashboard: React.FC<BossDashboardProps> = ({ onNavigate, curren
                     <Box size={18} /> 日常运营 (Store Operations)
                 </h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-                    <DashboardCard title="排队叫号" sub="QUEUE TV" icon={Armchair} colorClass="bg-white border-2 border-gray-100" iconColor="text-gray-600" onClick={() => onNavigate('QUEUE')} />
-                    <DashboardCard title="库存盘点" sub="CHECK" icon={CheckSquare} colorClass="bg-blue-50" iconColor="text-blue-500" onClick={() => onNavigate('INVENTORY_CHECK')} />
-                    <DashboardCard title="运营日志 (写)" sub="ADD LOG" icon={PenTool} colorClass="bg-orange-50" iconColor="text-orange-500" onClick={() => onNavigate('LOGBOOK')} />
-                    <DashboardCard title="运营日志 (查)" sub="VIEW LOGS" icon={BookOpen} colorClass="bg-emerald-50" iconColor="text-emerald-500" onClick={() => onNavigate('LOGBOOK_VIEW')} alertCount={alerts.logs} alertColor="bg-blue-500" />
-                    <DashboardCard title="SOP 稽查" sub="INSPECT" icon={ClipboardCheck} colorClass="bg-violet-50" iconColor="text-violet-500" onClick={() => onNavigate('SOP_INSPECT')} />
+                    <DashboardCard id="queue" title="排队叫号" sub="QUEUE TV" icon={Armchair} colorClass="bg-white border-2 border-gray-100" iconColor="text-gray-600" onClick={() => onNavigate('QUEUE')} />
+                    <DashboardCard id="invcheck" title="库存盘点" sub="CHECK" icon={CheckSquare} colorClass="bg-blue-50" iconColor="text-blue-500" onClick={() => onNavigate('INVENTORY_CHECK')} />
+                    <DashboardCard id="logwrite" title="运营日志 (写)" sub="ADD LOG" icon={PenTool} colorClass="bg-orange-50" iconColor="text-orange-500" onClick={() => onNavigate('LOGBOOK')} />
+                    <DashboardCard id="logview" title="运营日志 (查)" sub="VIEW LOGS" icon={BookOpen} colorClass="bg-emerald-50" iconColor="text-emerald-500" onClick={() => onNavigate('LOGBOOK_VIEW')} alertCount={alerts.logs} alertColor="bg-blue-500" />
+                    <DashboardCard id="sop" title="SOP 稽查" sub="INSPECT" icon={ClipboardCheck} colorClass="bg-violet-50" iconColor="text-violet-500" onClick={() => onNavigate('SOP_INSPECT')} />
                 </div>
             </div>
 
