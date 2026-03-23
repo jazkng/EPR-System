@@ -129,7 +129,7 @@ const RollCallModal: React.FC<{
                 </div>
                 
                 <div className="flex-grow overflow-y-auto p-4 space-y-4 bg-[#F5F7FA]">
-                    {staffList.map(staff => {
+                    {staffList.filter(s => !s.isAttendanceExempt).map(staff => {
                         const record = todayRecords.find(r => r.employeeId === staff.id);
                         const isPresent = !!record;
                         const planStatus = dailyRoster[staff.id] || 'WORK';
@@ -214,16 +214,38 @@ const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; st
 
     useEffect(() => { if (isOpen) loadReport(); }, [isOpen, month]);
 
+    // 👑 护栏修复：直接向 Firestore 请求特定月份的所有考勤记录，保证不被底层的 limit 截断。
     const loadReport = async () => {
         setLoading(true);
-        const data = await DataManager.getAttendanceByMonth(month);
-        setRecords(data);
-        setLoading(false);
+        try {
+            const startStr = `${month}-01`;
+            // 计算当月最后一天
+            const year = parseInt(month.slice(0, 4));
+            const mon = parseInt(month.slice(5, 7));
+            const lastDay = new Date(year, mon, 0).getDate();
+            const endStr = `${month}-${String(lastDay).padStart(2, '0')}`;
+            
+            // 精确捞取这一个月内的数据，绝对安全且省流量
+            const q = query(
+                collection(db, 'attendance'), 
+                where('date', '>=', startStr), 
+                where('date', '<=', endStr)
+            );
+            const snap = await getDocs(q);
+            const data = snap.docs.map(d => d.data() as AttendanceRecord);
+            
+            setRecords(data);
+        } catch (error) {
+            console.error("Failed to load compliance report", error);
+            alert("读取报表失败");
+        } finally {
+            setLoading(false);
+        }
     };
 
     const reportData = useMemo(() => {
-        const daysInMonth = new Date(parseInt(month.slice(0,4)), parseInt(month.slice(5,7)), 0).getDate();
-        return staffList.map(emp => {
+            const daysInMonth = new Date(parseInt(month.slice(0,4)), parseInt(month.slice(5,7)), 0).getDate();
+            return staffList.filter(s => !s.isAttendanceExempt).map(emp => {
             const empRecords = records.filter(r => r.employeeId === emp.id);
             const totalMinutes = empRecords.reduce((sum, r) => sum + (r.durationMinutes || 0), 0);
             const daysWorked = empRecords.length;
@@ -519,6 +541,8 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
         setShowBatchMenu(false); 
 
         const eligibleStaff = staffList.filter(staff => {
+            if (staff.isAttendanceExempt) return false; // 排除免打卡员工
+
             const hasRecord = todayRecords.some(r => r.employeeId === staff.id);
             if (hasRecord) return false;
 
@@ -587,6 +611,22 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
         setTodayRecords(prev => prev.map(r => r.id === updated.id ? updated : r));
     };
 
+    // 切换员工免打卡状态
+    const toggleExemptStatus = async (staff: Employee) => {
+        if (!confirm(`确定要将 ${staff.name} 设为 ${staff.isAttendanceExempt ? '需要打卡' : '免打卡 (无需考勤)'} 吗？`)) return;
+        setIsLoading(true);
+        try {
+            const updatedStaff = { ...staff, isAttendanceExempt: !staff.isAttendanceExempt };
+            await DataManager.saveEmployee(updatedStaff);
+            setStaffList(prev => prev.map(s => s.id === staff.id ? updatedStaff : s));
+        } catch (e) {
+            console.error(e);
+            alert('状态更新失败');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const filteredStaff = staffList.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.id.includes(searchTerm));
     
     // --- UPDATED FOUR-TIER ROLE CLASSIFICATION ---
@@ -641,8 +681,11 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                         {staff.avatar ? <img src={staff.avatar} className="w-full h-full object-cover"/> : staff.name.charAt(0)}
                     </div>
                     <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <h3 className="font-black text-lg text-[#1A1A1A] leading-none">{staff.name}</h3>
+                            <button onClick={() => toggleExemptStatus(staff)} className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition-colors shadow-sm active:scale-95 ${staff.isAttendanceExempt ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>
+                                {staff.isAttendanceExempt ? '免打卡人员' : '设为免打卡'}
+                            </button>
                             {isLate && <span className="bg-red-100 text-red-600 text-[9px] font-black px-1.5 py-0.5 rounded-md animate-pulse">LATE</span>}
                             {rosterBadge && !isCompleted && (
                                 <span className={`text-[9px] px-2 py-0.5 rounded border flex items-center gap-1 font-bold ${rosterBadge.color}`}>
@@ -656,7 +699,13 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 </div>
 
                 <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
-                    {isCompleted ? (
+                    {staff.isAttendanceExempt ? (
+                        <div className="flex-1 flex justify-center">
+                            <span className="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 border border-blue-100 w-full justify-center">
+                                <CheckCircle2 size={16}/> 无需打卡 (Exempt)
+                            </span>
+                        </div>
+                    ) : isCompleted ? (
                         <>
                             <div className="flex flex-col">
                                 {isActiveShift ? (

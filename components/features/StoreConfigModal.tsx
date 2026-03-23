@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Crown, Layout, Cloud, Lock, Save, X, Download, AlertTriangle, FileJson, Info, History, Database, RotateCcw, CheckCircle2, Loader2, Calendar, Upload } from 'lucide-react';
 import { StoreConfig, Employee, SystemBackup } from '../../types';
 import { DataManager } from '../../utils/dataManager';
-import { APP_VERSION, VERSION_HISTORY } from '../constants/versionHistory';
+import { APP_VERSION, VERSION_HISTORY } from '../../constants/versionHistory';
 
 interface StoreConfigModalProps {
     isOpen: boolean;

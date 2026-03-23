@@ -10,10 +10,10 @@ import {
 } from 'lucide-react';
 import { Supplier, CatalogItem, PurchaseOrder, StockItem, PurchaseOrderItem, UomOption, ExpenseItem, SettlementRecord } from '../../types';
 import { DataManager } from '../../utils/dataManager';
-import { SUPPLIER_TAG_OPTIONS } from '../constants';
+import { SUPPLIER_TAG_OPTIONS } from '../../constants/suppliers';
 import { jsPDF } from "jspdf";
 import html2canvas from 'html2canvas';
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from '../../firebaseConfig';
 import { ModuleGuideButton } from '../ui/ModuleGuide';
 
@@ -67,6 +67,7 @@ const INVENTORY_CATEGORIES = [
 
 const ACCOUNTING_CATEGORIES_OPTIONS = {
     'COGS (销货成本)': [
+        { id: 'INGREDIENT_HQ', label: '食材-总店 (HQ Ingredients)' },
         { id: 'INGREDIENT_MEAT', label: '食材-肉类 (Meat)' },
         { id: 'INGREDIENT_SEAFOOD', label: '食材-海鲜 (Seafood)' },
         { id: 'INGREDIENT_VEG', label: '食材-蔬果 (Veg)' },
@@ -74,21 +75,25 @@ const ACCOUNTING_CATEGORIES_OPTIONS = {
         { id: 'INGREDIENT_SAUCE', label: '食材-酱料 (Sauce)' },
         { id: 'BEVERAGE', label: '水吧原料 (Beverage)' },
         { id: 'PACKAGING', label: '包装材料 (Packaging)' },
-        { id: 'GAS_COGS', label: '烹饪煤气 (Gas)' },
+        { id: 'GAS_COGS', label: '烹饪煤气 (Cooking Gas)' },
         { id: 'SUPPLIER', label: '一般进货 (General)' }
     ],
     'OPEX (营运开支)': [
-        { id: 'SUPPLIES', label: '杂项耗材 (Supplies)' },
-        { id: 'MAINTENANCE', label: '维修保养 (Maintenance)' },
-        { id: 'LOGISTICS', label: '物流运输 (Logistics)' },
-        { id: 'MARKETING', label: '营销广告 (Marketing)' },
-        { id: 'PROFESSIONAL', label: '专业服务 (Professional)' },
+        { id: 'RENT', label: '租金 (Rent)' },
         { id: 'UTILITIES', label: '水电费 (Utilities)' },
-        { id: 'RENT', label: '租金 (Rent)' }
+        { id: 'SALARY', label: '薪资 (Salary)' },
+        { id: 'STAFF_MEAL', label: '员工餐 (Staff Meal)' },
+        { id: 'MAINTENANCE', label: '维修保养 (Maintenance)' },
+        { id: 'MARKETING', label: '营销广告 (Marketing)' },
+        { id: 'PROFESSIONAL', label: '专业服务/律师 (Professional/Legal)' },
+        { id: 'SUPPLIES', label: '杂项耗材 (Supplies - Cleaning/Office)' },
+        { id: 'LICENSE', label: '执照/订阅 (License/Sub)' },
+        { id: 'LOGISTICS', label: '物流运输 (Logistics)' }
     ],
     'CAPEX (资产)': [
         { id: 'EQUIPMENT', label: '设备采购 (Equipment)' },
-        { id: 'RENOVATION', label: '装修工程 (Renovation)' }
+        { id: 'RENOVATION', label: '装修工程 (Renovation)' },
+        { id: 'DEPOSIT', label: '押金 (Deposit)' }
     ]
 };
 
@@ -150,6 +155,11 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
     useEffect(() => {
         loadData();
     }, []);
+    useEffect(() => {
+        if (selectedSupplier && activeDetailTab === 'BILLS') {
+            loadExpenses(selectedSupplier.name);
+        }
+    }, [selectedSupplier, activeDetailTab]);
 
     const loadData = async () => {
         try {
@@ -164,30 +174,25 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
             const poData = await DataManager.getPurchaseOrders();
             setPurchaseOrders(poData.sort((a,b) => b.id.localeCompare(a.id)));
 
-            loadExpenses();
+            // 移除这里的 loadExpenses()，改为按需加载
         } catch (error) {
             console.error("Failed to load supplier data", error);
         }
     };
 
-    const loadExpenses = async () => {
+    const loadExpenses = async (supplierName?: string) => {
+        if (!supplierName) return;
         try {
-            const settlements = await DataManager.getSettlements();
-            let allExp: ExpenseItem[] = [];
-            
-            settlements.forEach(s => {
-                if (s.expenses) allExp.push(...s.expenses.map(e => ({...e, settlementId: s.id})));
-            });
-
-            const snap = await getDocs(collection(db, 'standalone_expenses'));
-            snap.forEach(doc => {
-                allExp.push(doc.data() as ExpenseItem);
-            });
-
-            const unique = Array.from(new Map(allExp.map(item => [item.id, item])).values());
-            unique.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
-            
-            setExpenses(unique);
+            // 👑 只查该供应商的账单，不全表扫描
+            const q = query(
+                collection(db, 'standalone_expenses'),
+                where('company', '==', supplierName),
+                limit(200)
+            );
+            const snap = await getDocs(q);
+            const items: ExpenseItem[] = [];
+            snap.forEach(doc => items.push(doc.data() as ExpenseItem));
+            setExpenses(items);
         } catch (err) {
             console.error("Failed to load expenses", err);
         }
@@ -326,7 +331,7 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
         else finalBill.paymentStatus = 'UNPAID';
         
         await DataManager.saveStandaloneExpense(finalBill);
-        await loadExpenses();
+        await loadExpenses(selectedSupplier?.name);
         setIsBillFormOpen(false);
         alert("✅ 账单已录入");
     };
@@ -727,7 +732,7 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                         </div>
 
                         {/* 自适应瀑布流网格 */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                             {filteredSuppliers.map(sup => (
                                 <div 
                                     key={sup.id} 
@@ -737,24 +742,25 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                                     <div className="absolute -top-4 -right-4 w-24 h-24 bg-gradient-to-br from-gray-50 to-gray-100 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500 pointer-events-none"></div>
                                     <div className="absolute top-2 right-2 p-2 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none"><Truck size={48}/></div>
                                     
-                                    <button 
-                                        onClick={(e) => handleToggleFavorite(e, sup)}
-                                        className="absolute top-3 right-3 z-10 p-1.5 rounded-full bg-white/80 backdrop-blur-sm border border-gray-100 hover:bg-gray-50 transition-all hover:scale-110 active:scale-95"
-                                    >
-                                        <Star size={16} className={sup.isFavorite ? "fill-[#FFD700] text-[#FFD700]" : "text-gray-200 drop-shadow-sm"} />
-                                    </button>
-
-                                    <div className="flex items-center gap-3 mb-3 relative z-10">
-                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-b from-[#1A1A1A] to-gray-800 text-[#FFD700] flex items-center justify-center font-black text-[10px] shadow-md group-hover:shadow-[#FFD700]/20 transition-all shrink-0">
-                                            {sup.id}
+                                    <div className="flex items-start justify-between gap-2 mb-3 relative z-10">
+                                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                                            <div className="w-10 h-10 rounded-xl bg-gradient-to-b from-[#1A1A1A] to-gray-800 text-[#FFD700] flex items-center justify-center font-black text-[10px] shadow-md group-hover:shadow-[#FFD700]/20 transition-all shrink-0">
+                                                {sup.id}
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <h4 className="font-black text-sm text-[#1A1A1A] leading-snug line-clamp-2 group-hover:text-[#8B0000] transition-colors" title={sup.name}>{sup.name}</h4>
+                                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest mt-1 ${sup.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-600/20'}`}>
+                                                    <span className={`w-1 h-1 rounded-full ${sup.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                                                    {sup.status}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <div className="flex-1 min-w-0 pr-8">
-                                            <h4 className="font-black text-base text-[#1A1A1A] truncate group-hover:text-[#8B0000] transition-colors">{sup.name}</h4>
-                                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest mt-1 ${sup.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-600/20'}`}>
-                                                <span className={`w-1 h-1 rounded-full ${sup.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                                                {sup.status}
-                                            </span>
-                                        </div>
+                                        <button 
+                                            onClick={(e) => handleToggleFavorite(e, sup)}
+                                            className="p-1.5 rounded-full bg-white/80 backdrop-blur-sm border border-gray-100 hover:bg-gray-50 transition-all hover:scale-110 active:scale-95 shrink-0 mt-0.5"
+                                        >
+                                            <Star size={14} className={sup.isFavorite ? "fill-[#FFD700] text-[#FFD700]" : "text-gray-200 drop-shadow-sm"} />
+                                        </button>
                                     </div>
                                     
                                     {sup.restDayNote && (
@@ -766,8 +772,13 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                                     
                                     <div className="space-y-2 mt-auto relative z-10">
                                         <p className="text-[11px] text-gray-500 font-medium flex items-center gap-1.5 truncate">
-                                            <User size={12} className="text-gray-400 shrink-0"/> {sup.contactPerson || 'General Contact'}
+                                            <User size={12} className="text-gray-400 shrink-0"/> {sup.contactPerson || sup.name.slice(0, 12)}
                                         </p>
+                                        {sup.contact && (
+                                            <button onClick={(e) => { e.stopPropagation(); window.open(`https://wa.me/${sup.contact.replace(/\D/g,'')}`, '_blank'); }} className="text-[10px] text-green-600 font-bold flex items-center gap-1 hover:text-green-700 transition-colors">
+                                                <Phone size={10}/> {sup.contact.slice(-8)}
+                                            </button>
+                                        )}
                                         <div className="flex gap-1.5 flex-wrap">
                                             {sup.category && <span className="text-[9px] font-bold bg-[#1A1A1A]/5 text-gray-700 px-2 py-0.5 rounded-md border border-gray-200/50 truncate max-w-full">{sup.category}</span>}
                                             {sup.tags?.slice(0,2).map(t => <span key={t} className="text-[9px] font-bold bg-gray-50 text-gray-500 px-2 py-0.5 rounded-md border border-gray-100 truncate">#{t}</span>)}
@@ -892,7 +903,7 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                                             <p className="text-gray-400 font-bold text-sm">目录为空，暂无供应商品</p>
                                         </div>
                                     ) : (
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                                             {selectedSupplier.catalog.map(item => (
                                                 <div key={item.id} className="bg-white border border-gray-200 rounded-2xl p-4 hover:border-[#FFD700] hover:shadow-md transition-all flex flex-col group relative">
                                                     <div className="flex justify-between items-start mb-2">
@@ -921,7 +932,17 @@ export const SupplierModule: React.FC<SupplierModuleProps> = ({ onClose, isModal
                             
                             {activeDetailTab === 'BILLS' && (
                                 <div className="flex flex-col h-full">
-                                    <div className="bg-gray-50 px-6 py-3 border-b border-gray-100 flex gap-4 text-[11px] font-bold text-gray-500 uppercase tracking-widest sticky top-0">
+                                    {/* 快速操作栏 */}
+                                    <div className="bg-white px-6 py-3 border-b border-gray-100 flex items-center justify-between gap-3 sticky top-0 z-10">
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={handleOpenBillForm} className="px-3 py-1.5 bg-[#1A1A1A] text-[#FFD700] rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-sm active:scale-95"><Plus size={12}/> 录入账单</button>
+                                        </div>
+                                        <div className="text-[10px] font-bold text-gray-400">
+                                            共 {supplierExpenses.length} 笔 · 
+                                            <span className="text-red-500 ml-1">欠款 RM {billStats.outstanding.toFixed(2)}</span>
+                                        </div>
+                                    </div>
+                                    <div className="bg-gray-50 px-6 py-2 border-b border-gray-100 flex gap-4 text-[11px] font-bold text-gray-500 uppercase tracking-widest">
                                         <div className="flex-[2]">Date & ID</div>
                                         <div className="flex-1 text-center">Status</div>
                                         <div className="flex-1 text-right">Amount</div>

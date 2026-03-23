@@ -5,7 +5,7 @@ import {
     ArrowRight, Receipt, Wallet, Banknote, CreditCard, 
     Coins, X, Calendar, ChevronRight, Truck, CheckCircle2, 
     RotateCcw, AlertCircle, Loader2, User, FileText, UserMinus,
-    FileDown, Printer, Edit3, ShieldCheck, Zap
+    FileDown, Printer, Edit3, ShieldCheck, Zap, MinusCircle
 } from 'lucide-react';
 import { jsPDF } from "jspdf";
 import html2canvas from 'html2canvas';
@@ -18,15 +18,6 @@ interface SettlementModuleProps {
     onClose?: () => void;
     isStandalone?: boolean;
 }
-
-const DENOMINATIONS = [
-    { label: 'RM 100', value: 100, color: 'border-purple-200 bg-purple-50 text-purple-700' },
-    { label: 'RM 50', value: 50, color: 'border-cyan-200 bg-cyan-50 text-cyan-700' },
-    { label: 'RM 20', value: 20, color: 'border-orange-200 bg-orange-50 text-orange-700' },
-    { label: 'RM 10', value: 10, color: 'border-red-200 bg-red-50 text-red-700' },
-    { label: 'RM 5', value: 5, color: 'border-green-200 bg-green-50 text-green-700' },
-    { label: 'RM 1', value: 1, color: 'border-blue-200 bg-blue-50 text-blue-700' },
-];
 
 const getBusinessDateStr = (cutoff: number) => {
     const now = new Date();
@@ -48,20 +39,18 @@ const getCalendarTodayStr = () => {
     return `${year}-${month}-${day}`;
 };
 
-// 🟢 Helper: 判断某渠道是否已核销 (兼容旧 boolean 和新 number 格式)
 const isChannelReconciled = (reconStatus: any, key: string): boolean => {
     const val = reconStatus?.[key];
     return val === true || (typeof val === 'number');
 };
 
-// 🟢 Helper: 获取核销后的实收金额 (新格式返回数字，旧格式返回 null)
 const getReconActual = (reconStatus: any, key: string): number | null => {
     const val = reconStatus?.[key];
     if (typeof val === 'number') return val;
     return null;
 };
 
-// 🟢 改版：单个对账条目组件 — 支持显示核销后实收金额
+// 🟢 改版：单个对账条目组件 (UI 移动端防走位优化 + iOS 字体防缩放自适应)
 const ReconItem = ({ 
     label, 
     gross, 
@@ -76,62 +65,216 @@ const ReconItem = ({
     onReconcile: () => void 
 }) => {
     if (gross <= 0) return null;
-    // 🟢 兼容旧数据：actualAmount 为 null 时（旧 boolean true），视为完美对账 = gross
     const displayActual = actualAmount !== null ? actualAmount : (isReconciled ? gross : null);
     const fee = displayActual !== null ? Number((gross - displayActual).toFixed(2)) : null;
+    
     return (
-        <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 shadow-sm mt-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-3 rounded-xl border border-gray-100 shadow-sm mt-2 gap-3 sm:gap-2">
             <div className="flex-1 min-w-0">
-                <p className="text-xs font-black text-gray-800">{label}</p>
-                <p className="text-[10px] text-gray-500">Gross: RM {gross.toFixed(2)}</p>
+                <div className="flex justify-between sm:block items-center mb-1 sm:mb-0">
+                    <p className="text-xs font-black text-gray-800 truncate pr-2">{label}</p>
+                    <p className="text-[10px] text-gray-500 font-mono whitespace-nowrap">Gross: RM {gross.toFixed(2)}</p>
+                </div>
                 {isReconciled && displayActual !== null && (
-                    <div className="flex items-center gap-3 mt-1">
-                        <p className="text-[10px] font-bold text-green-600">实收: RM {displayActual.toFixed(2)}</p>
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                        <span className="text-[10px] font-bold text-green-700 bg-green-50 px-1.5 py-0.5 rounded border border-green-100 whitespace-nowrap">
+                            实收: RM {displayActual.toFixed(2)}
+                        </span>
                         {fee !== null && fee > 0 && (
-                            <p className="text-[10px] font-bold text-orange-500">手续费: RM {fee.toFixed(2)}</p>
+                            <span className="text-[10px] font-bold text-orange-700 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-100 whitespace-nowrap flex items-center gap-1">
+                                手续费: RM {fee.toFixed(2)} 
+                                <span className="font-black opacity-80">
+                                    ({(fee / gross * 100).toFixed(1)}%)
+                                </span>
+                            </span>
                         )}
                         {fee === 0 && actualAmount === null && (
-                            <p className="text-[10px] font-bold text-gray-400">(旧记录)</p>
+                            <span className="text-[10px] font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded whitespace-nowrap">(旧记录)</span>
                         )}
                     </div>
                 )}
             </div>
-            {isReconciled ? (
-                <span className="flex items-center gap-1 text-[10px] font-black text-green-600 bg-green-50 px-2 py-1 rounded-lg border border-green-200 shrink-0 ml-2">
-                    <CheckCircle2 size={12}/> 已过账
-                </span>
-            ) : (
-                <button 
-                    onClick={onReconcile}
-                    className="flex items-center gap-1 text-[10px] font-black text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg shadow-sm active:scale-95 transition-all shrink-0 ml-2"
-                >
-                    <ShieldCheck size={12}/> 核销对账
-                </button>
-            )}
+            
+            <div className="flex justify-end shrink-0 w-full sm:w-auto">
+                {isReconciled ? (
+                    <span className="flex items-center justify-center w-full sm:w-auto gap-1 text-[10px] font-black text-green-700 bg-green-100 px-3 py-1.5 rounded-lg border border-green-200">
+                        <CheckCircle2 size={14}/> 已过账
+                    </span>
+                ) : (
+                    <button 
+                        onClick={onReconcile}
+                        className="flex items-center justify-center w-full sm:w-auto gap-1 text-[11px] font-black text-[#FFD700] bg-[#1A1A1A] hover:bg-black px-4 py-2 rounded-lg shadow-md active:scale-95 transition-all"
+                    >
+                        <ShieldCheck size={14}/> 核销对账
+                    </button>
+                )}
+            </div>
         </div>
     );
 };
 
-const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: SettlementRecord | null, onClose: () => void, onDelete: (id: string) => void, onRefresh: () => void }) => {
+// --- CASH OUT MODAL COMPONENT (ENHANCED) ---
+const ExpenseModal = ({ 
+    isOpen, 
+    onClose, 
+    onSave, 
+    employees,
+    suppliers 
+}: { 
+    isOpen: boolean, 
+    onClose: () => void, 
+    onSave: (exp: ExpenseItem) => void, 
+    employees: Employee[],
+    suppliers: Supplier[]
+}) => {
+    const [type, setType] = useState<'SUPPLIER' | 'STAFF_ADVANCE' | 'GENERAL'>('SUPPLIER');
+    const [amount, setAmount] = useState<string>('');
+    const [targetId, setTargetId] = useState<string>(''); 
+    const [billRef, setBillRef] = useState<string>(''); 
+    
+    useEffect(() => {
+        setTargetId('');
+        setBillRef('');
+    }, [type]);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = () => {
+        if (!amount || parseFloat(amount) <= 0) return alert("请输入金额 (Please enter amount)");
+
+        let companyName = '';
+        let noteText = '';
+        let category = 'GENERAL';
+
+        if (type === 'SUPPLIER') {
+            if (!targetId) return alert("请选择供应商 (Select Supplier)");
+            const sup = suppliers.find(s => s.id === targetId);
+            companyName = sup ? sup.name : 'Unknown Supplier';
+            noteText = billRef ? `Bill Ref: ${billRef}` : 'COD Payment';
+            category = sup?.category || 'SUPPLIER'; 
+        } else if (type === 'STAFF_ADVANCE') {
+            if (!targetId) return alert("请选择员工 (Select Staff)");
+            const emp = employees.find(e => e.id === targetId);
+            companyName = emp ? emp.name : 'Unknown Staff';
+            noteText = billRef ? `Note: ${billRef}` : 'Cash Advance';
+            category = 'STAFF_ADVANCE';
+        } else {
+            if (!billRef) return alert("请输入用途/备注 (Enter Description)");
+            companyName = billRef; 
+            noteText = 'Petty Cash Bill';
+            category = 'GENERAL';
+        }
+
+        const expense: ExpenseItem = {
+            id: `exp_${Date.now()}`,
+            category: category,
+            expenseType: 'CASH_OUT',
+            company: companyName,
+            amount: parseFloat(amount),
+            paymentStatus: 'PAID',
+            paymentMethod: 'CASH', 
+            time: new Date().toISOString(),
+            note: noteText,
+            paidBy: 'SHOP_CASH',
+            isAdvancePayment: false 
+        };
+        onSave(expense);
+        setAmount('');
+        setTargetId('');
+        setBillRef('');
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white w-full max-w-md rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-black text-xl text-[#1A1A1A] flex items-center gap-2">
+                        <MinusCircle className="text-red-600" size={24}/>
+                        记一笔支出 (Cash Out)
+                    </h3>
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
+                </div>
+
+                <div className="space-y-6 overflow-y-auto pb-4">
+                    <div className="grid grid-cols-3 gap-3">
+                        <button onClick={() => setType('SUPPLIER')} className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all gap-2 ${type === 'SUPPLIER' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-md' : 'bg-white border-gray-100 text-gray-400 hover:bg-gray-50'}`}>
+                            <Truck size={24} strokeWidth={type === 'SUPPLIER' ? 2.5 : 2}/>
+                            <span className="text-[10px] font-black uppercase text-center leading-tight">货款<br/>(Supplier)</span>
+                        </button>
+                        <button onClick={() => setType('STAFF_ADVANCE')} className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all gap-2 ${type === 'STAFF_ADVANCE' ? 'bg-orange-50 border-orange-500 text-orange-700 shadow-md' : 'bg-white border-gray-100 text-gray-400 hover:bg-gray-50'}`}>
+                            <UserMinus size={24} strokeWidth={type === 'STAFF_ADVANCE' ? 2.5 : 2}/>
+                            <span className="text-[10px] font-black uppercase text-center leading-tight">预支<br/>(Advance)</span>
+                        </button>
+                        <button onClick={() => setType('GENERAL')} className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all gap-2 ${type === 'GENERAL' ? 'bg-gray-100 border-gray-600 text-gray-800 shadow-md' : 'bg-white border-gray-100 text-gray-400 hover:bg-gray-50'}`}>
+                            <Receipt size={24} strokeWidth={type === 'GENERAL' ? 2.5 : 2}/>
+                            <span className="text-[10px] font-black uppercase text-center leading-tight">杂费<br/>(Petty)</span>
+                        </button>
+                    </div>
+
+                    <div className="space-y-4">
+                        {type === 'SUPPLIER' && (
+                            <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 animate-in slide-in-from-top-2">
+                                <label className="text-[10px] font-black text-blue-800 uppercase mb-2 block flex items-center gap-1"><Truck size={12}/> 选择供应商 (Select Supplier)</label>
+                                <select value={targetId} onChange={e => setTargetId(e.target.value)} className="w-full p-3 bg-white border border-blue-200 rounded-xl text-sm font-bold text-[#1A1A1A] outline-none focus:ring-2 focus:ring-blue-400">
+                                    <option value="">-- 请选择 (Select) --</option>
+                                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                </select>
+                            </div>
+                        )}
+                        {type === 'STAFF_ADVANCE' && (
+                            <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 animate-in slide-in-from-top-2">
+                                <label className="text-[10px] font-black text-orange-800 uppercase mb-2 block flex items-center gap-1"><User size={12}/> 选择员工 (Select Staff)</label>
+                                <select value={targetId} onChange={e => setTargetId(e.target.value)} className="w-full p-3 bg-white border border-orange-200 rounded-xl text-sm font-bold text-[#1A1A1A] outline-none focus:ring-2 focus:ring-orange-400">
+                                    <option value="">-- 请选择 (Select) --</option>
+                                    {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                                </select>
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="text-[10px] font-bold text-gray-400 uppercase mb-1.5 block flex items-center gap-1">
+                                <FileText size={12}/> 
+                                {type === 'GENERAL' ? '用途 / 购买物品 (Description)' : '单据号码 / 备注 (Bill Ref / Note)'}
+                            </label>
+                            <input type="text" value={billRef} onChange={e => setBillRef(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:bg-white focus:border-[#1A1A1A] transition-all" placeholder={type === 'GENERAL' ? 'e.g. Ice / Pen / Plastic Bag' : 'Optional (e.g. Inv #123)'} />
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-bold text-gray-400 uppercase mb-1.5 block flex items-center gap-1"><Coins size={12}/> 支付金额 (Cash Amount)</label>
+                            <div className="relative">
+                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-black text-lg">RM</span>
+                                <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-xl font-mono text-3xl font-black text-[#1A1A1A] outline-none focus:ring-2 focus:ring-[#FFD700] border-2 border-transparent focus:bg-white transition-all" placeholder="0.00" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button onClick={handleSubmit} className="w-full py-4 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-lg shadow-lg hover:bg-black mt-auto active:scale-95 transition-transform flex items-center justify-center gap-2">
+                    <CheckCircle2 size={20}/> 确认支出 (Confirm Payout)
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// 🌟 HistoryDetailModal - 移动端自适应黑金重构版 (含 iOS Safe Area 适配) 🌟
+const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh, onUndoEdit }: { record: SettlementRecord | null, onClose: () => void, onDelete: (id: string) => void, onRefresh: () => void, onUndoEdit: (record: SettlementRecord) => void }) => {
     const printRef = useRef<HTMLDivElement>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     
-    // 🟢 本地记录状态：核销后不关闭弹窗，直接刷新本地数据
     const [localRecord, setLocalRecord] = useState<SettlementRecord | null>(record);
     
-    // 当 prop 变化时同步
     useEffect(() => {
         setLocalRecord(record);
     }, [record]);
 
-    // 🟢 对账弹窗状态
     const [reconTarget, setReconTarget] = useState<{key: string, label: string, gross: number} | null>(null);
     const [reconActual, setReconActual] = useState<string>('');
     const [isProcessingRecon, setIsProcessingRecon] = useState(false);
 
     if (!localRecord) return null;
     const deliveryBreakdown = localRecord.sales.deliveryBreakdown || {} as any;
-    // 兼容旧记录的 Net 以及新记录的 Gross，防止 PDF 区块被意外隐藏
     const totalDelivery = (Number(deliveryBreakdown.grabGross) || Number(deliveryBreakdown.grab) || 0) + 
                         (Number(deliveryBreakdown.pandaGross) || Number(deliveryBreakdown.panda) || 0) + 
                         (Number(deliveryBreakdown.shopeeGross) || Number(deliveryBreakdown.shopee) || 0) + 
@@ -140,7 +283,6 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
     const totalCard = localRecord.sales.card || 0;
     const totalBank = (localRecord.sales.tng || 0) + totalDebit + totalCard + (localRecord.sales.amex || 0);
     
-    // 🟢 兼容旧数据：如果没有 reconStatus，当作全未核销
     const reconStatus = (localRecord as any).reconStatus || {};
 
     const handleDownloadPDF = async () => {
@@ -164,7 +306,6 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
         }, 300);
     };
 
-    // 🟢 核心对账处理逻辑 (改版：不关闭弹窗 + 存储实收金额)
     const executeReconciliation = async (perfectMatch: boolean = false) => {
         if (!reconTarget) return;
         const actualNum = perfectMatch ? reconTarget.gross : (parseFloat(reconActual) || 0);
@@ -177,41 +318,46 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
         setIsProcessingRecon(true);
 
         try {
-            // 1. 如果有差额，自动生成一笔 "BANK_FEE" 的 Expense
             if (diff > 0) {
+                // 🔑 核心修复：按渠道类型自动归类
+                const PLATFORM_KEYS: Record<string, string> = {
+                    grab: 'PLATFORM_FEE_GRAB',
+                    panda: 'PLATFORM_FEE_PANDA',
+                    shopee: 'PLATFORM_FEE_SHOPEE',
+                };
+                const feeCategory = PLATFORM_KEYS[reconTarget.key] || 'BANK_FEE';
+                const feeLabel = PLATFORM_KEYS[reconTarget.key] ? '平台抽佣' : '银行手续费';
+
                 const expense: ExpenseItem = {
                     id: `recon_fee_${localRecord.id}_${reconTarget.key}_${Date.now()}`,
-                    category: 'BANK_FEE', // 记录为银行手续费/平台抽佣
+                    category: feeCategory, 
                     expenseType: 'GENERAL',
                     company: reconTarget.label,
                     amount: diff,
                     totalBillAmount: diff,
                     outstandingAmount: 0,
                     paymentStatus: 'PAID',
-                    paymentMethod: 'BANK_TRANSFER', // 从银行数字资产扣
-                    time: `${localRecord.date}T12:00:00.000Z`, // 维持账期为这天
-                    createdAt: new Date().toISOString(), // 真实的审计时间
-                    note: `[自动核销抽佣] 营业额: ${reconTarget.gross} | 实收: ${actualNum} | ${reconTarget.label}`,
+                    paymentMethod: 'BANK_TRANSFER', 
+                    time: `${localRecord.date}T12:00:00.000Z`, 
+                    createdAt: new Date().toISOString(), 
+                    note: `[自动核销${feeLabel}] 营业额: ${reconTarget.gross} | 实收: ${actualNum} | ${reconTarget.label}`,
                     paidBy: 'COMPANY'
                 };
                 await DataManager.saveStandaloneExpense(expense);
             }
 
-            // 2. 🟢 更新 reconStatus：存储实际到账金额 (数字) 而非 boolean
             const updatedReconStatus = { ...reconStatus, [reconTarget.key]: actualNum };
             const updatedRecord = { ...localRecord, reconStatus: updatedReconStatus };
             
             await DataManager.updateSettlementReconStatus(localRecord.id, updatedReconStatus);
             
-            // 🟢 改版核心：更新本地状态而非关闭弹窗
             setLocalRecord(updatedRecord as SettlementRecord);
             
             const matchText = perfectMatch ? '(完美对账)' : '';
             alert(`✅ ${reconTarget.label} 核销成功！${matchText}\n实收 RM ${actualNum.toFixed(2)}${diff > 0 ? `\n自动计入手续费 RM ${diff.toFixed(2)}` : ''}`);
             setReconTarget(null);
             setReconActual('');
-            onRefresh(); // 刷新父组件历史列表（后台静默刷新）
-            // 🟢 不再调用 onClose()，用户留在详情页继续操作
+            onRefresh(); 
         } catch (e) {
             console.error(e);
             alert("核销失败，请重试");
@@ -221,12 +367,14 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
     };
 
     return (
-        <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white w-full max-w-lg rounded-[2rem] shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col custom-scrollbar relative">
+        <div 
+            className="fixed inset-0 bg-black/80 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+        >
+            <div className="bg-white w-full max-w-lg rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto flex flex-col custom-scrollbar relative">
                 
-                {/* Recon Modal Overlay (对账输入框弹窗) */}
                 {reconTarget && (
-                    <div className="absolute inset-0 bg-white/90 backdrop-blur-md z-50 rounded-[2rem] p-6 flex flex-col items-center justify-center animate-in zoom-in-95">
+                    <div className="absolute inset-0 bg-white/90 backdrop-blur-md z-50 rounded-t-[2rem] sm:rounded-[2rem] p-6 flex flex-col items-center justify-center animate-in zoom-in-95">
                         <div className="bg-white p-6 rounded-3xl shadow-2xl border border-gray-200 w-full max-w-sm">
                             <div className="flex justify-between items-center mb-4">
                                 <h4 className="font-black text-lg text-blue-900 flex items-center gap-2"><ShieldCheck size={20}/> 数字核销</h4>
@@ -235,18 +383,17 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
                             <p className="text-xs text-gray-500 font-bold mb-4">当前核销: <span className="text-[#1A1A1A]">{reconTarget.label}</span></p>
                             
                             <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4">
-                                <div className="flex justify-between text-xs font-bold text-gray-400 mb-1"><span>System Gross (系统总额)</span><span>RM {reconTarget.gross.toFixed(2)}</span></div>
+                                <div className="flex justify-between text-xs font-bold text-gray-400 mb-1"><span>System Gross (系统总额)</span><span className="whitespace-nowrap">RM {reconTarget.gross.toFixed(2)}</span></div>
                             </div>
 
-                            {/* 🟢 新增：完美对账按钮 — 金额完全匹配时一键核销 */}
                             <button 
                                 onClick={() => executeReconciliation(true)}
                                 disabled={isProcessingRecon}
                                 className="w-full py-3 mb-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-black shadow-md hover:from-green-600 hover:to-emerald-700 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                             >
                                 {isProcessingRecon ? <Loader2 size={16} className="animate-spin"/> : <Zap size={16}/>}
-                                完美对账 (Perfect Match)
-                                <span className="text-[10px] font-bold opacity-80 ml-1">= RM {reconTarget.gross.toFixed(2)}</span>
+                                完美对账
+                                <span className="text-[10px] font-bold opacity-80 ml-1 whitespace-nowrap">= RM {reconTarget.gross.toFixed(2)}</span>
                             </button>
 
                             <div className="relative flex items-center justify-center mb-4">
@@ -264,16 +411,22 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
                                     placeholder="0.00"
                                 />
                                 {reconActual && parseFloat(reconActual) < reconTarget.gross && (
-                                    <p className="text-[10px] text-orange-600 font-bold mt-2">
-                                        ⚠️ 差额 RM {(reconTarget.gross - parseFloat(reconActual)).toFixed(2)} 将自动转为平台抽佣支出。
-                                    </p>
+                                    <div className="mt-2 p-2 bg-orange-50 border border-orange-100 rounded-lg">
+                                        <p className="text-[10px] text-orange-600 font-bold leading-relaxed">
+                                            ⚠️ 差额 <span className="whitespace-nowrap">RM {(reconTarget.gross - parseFloat(reconActual)).toFixed(2)}</span>
+                                            <span className="bg-orange-200 text-orange-900 px-1.5 py-0.5 rounded font-black mx-1 inline-block shadow-sm">
+                                                抽佣率: {((reconTarget.gross - parseFloat(reconActual)) / reconTarget.gross * 100).toFixed(1)}%
+                                            </span>
+                                            <br/>{['grab','panda','shopee'].includes(reconTarget.key) ? '将自动归入「平台抽佣」(PLATFORM_FEE)' : '将自动归入「银行手续费」(BANK_FEE)'}
+                                        </p>
+                                    </div>
                                 )}
                             </div>
 
                             <button 
                                 onClick={() => executeReconciliation(false)}
                                 disabled={!reconActual || isProcessingRecon}
-                                className="w-full py-3 bg-blue-600 text-white rounded-xl font-black shadow-md hover:bg-blue-700 disabled:opacity-50 flex justify-center items-center gap-2"
+                                className="w-full py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black shadow-md hover:bg-black disabled:opacity-50 flex justify-center items-center gap-2"
                             >
                                 {isProcessingRecon ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16}/>}
                                 确认实收并记账
@@ -282,11 +435,10 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
                     </div>
                 )}
 
-                {/* Header */}
-                <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-[#1A1A1A] rounded-t-[2rem] sticky top-0 z-10">
+                <div className="p-4 sm:p-5 border-b border-gray-100 flex justify-between items-center bg-[#1A1A1A] rounded-t-[2rem] sm:rounded-t-[2rem] sticky top-0 z-10">
                     <div>
-                        <h3 className="font-black text-xl text-[#FFD700]">结算单详情 (Receipt Details)</h3>
-                        <p className="text-xs text-gray-400 font-mono mt-1 font-bold tracking-widest">{localRecord.date} • {new Date(localRecord.timestamp).toLocaleTimeString()}</p>
+                        <h3 className="font-black text-lg sm:text-xl text-[#FFD700]">结算单详情 (Receipt Details)</h3>
+                        <p className="text-[10px] sm:text-xs text-gray-400 font-mono mt-1 font-bold tracking-widest">{localRecord.date} • {new Date(localRecord.timestamp).toLocaleTimeString()}</p>
                     </div>
                     <div className="flex gap-2">
                         <button 
@@ -295,39 +447,39 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
                             className="p-2 bg-[#FFD700] text-black rounded-full hover:bg-white hover:text-black transition-colors shadow-lg disabled:opacity-50"
                             title="导出为 PDF"
                         >
-                            {isGenerating ? <Loader2 size={20} className="animate-spin"/> : <FileDown size={20}/>}
+                            {isGenerating ? <Loader2 size={18} className="animate-spin"/> : <FileDown size={18}/>}
                         </button>
-                        <button onClick={onClose} className="p-2 bg-white/10 text-white rounded-full hover:bg-white/20 hover:text-[#FFD700] transition-colors"><X size={20}/></button>
+                        <button onClick={onClose} className="p-2 bg-white/10 text-white rounded-full hover:bg-white/20 hover:text-[#FFD700] transition-colors"><X size={18}/></button>
                     </div>
                 </div>
                 
-                {/* Content */}
-                <div className="p-6 space-y-6 bg-[#F8F9FA] flex-grow">
-                    <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+                {/* 🛡️ pb-[calc(1rem+env(safe-area-inset-bottom))] 彻底解决 iOS 小白条遮挡底部按钮的问题 */}
+                <div className="p-4 sm:p-6 space-y-5 sm:space-y-6 bg-[#F8F9FA] flex-grow pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pb-6">
+                    <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4">
                         
-                        <div className="flex justify-between items-end pb-4 border-b border-gray-100 gap-2">
-                            <span className="text-xs font-black text-gray-400 uppercase tracking-widest leading-tight flex-1">
-                                Total Sales<br/>(总营业额)
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-end pb-4 border-b border-gray-100 gap-2">
+                            <span className="text-xs font-black text-gray-400 uppercase tracking-widest leading-tight">
+                                Total Sales<span className="hidden sm:inline"><br/></span><span className="sm:hidden"> </span>(总营业额)
                             </span>
-                            <div className="flex items-baseline gap-1 text-[#1A1A1A] shrink-0">
+                            <div className="flex items-baseline gap-1 text-[#1A1A1A] shrink-0 self-end sm:self-auto">
                                 <span className="text-sm font-bold">RM</span>
-                                <span className="text-3xl font-black font-mono tracking-tighter">{localRecord.sales.total.toFixed(2)}</span>
+                                <span className="text-2xl sm:text-3xl font-black font-mono tracking-tighter whitespace-nowrap">{localRecord.sales.total.toFixed(2)}</span>
                             </div>
                         </div>
                         
                         {localRecord.sales.refundTotal && localRecord.sales.refundTotal > 0 ? (
                             <div className="flex justify-between items-center text-xs bg-red-50 p-3 rounded-xl border border-red-100 mb-2 gap-2">
                                 <span className="flex items-center gap-2 text-red-600 font-bold shrink-0"><RotateCcw size={14}/> Refunds</span>
-                                <span className="font-mono font-bold text-red-700 whitespace-nowrap">- RM {localRecord.sales.refundTotal.toFixed(2)}</span>
+                                <span className="font-mono font-bold text-red-700 whitespace-nowrap shrink-0">- RM {localRecord.sales.refundTotal.toFixed(2)}</span>
                             </div>
                         ) : null}
 
                         <div className="flex justify-between items-center text-sm p-2 gap-2">
                             <span className="flex items-center gap-2 text-gray-600 font-bold shrink-0"><Banknote size={16} className="text-green-600"/> Cash (现金)</span>
-                            <span className="font-mono font-bold text-[#1A1A1A] text-lg whitespace-nowrap">RM {localRecord.sales.cash.toFixed(2)}</span>
+                            <span className="font-mono font-bold text-[#1A1A1A] text-base sm:text-lg whitespace-nowrap shrink-0">RM {localRecord.sales.cash.toFixed(2)}</span>
                         </div>
                         
-                        <div className="bg-blue-50/50 p-4 rounded-xl space-y-2 border border-blue-100">
+                        <div className="bg-blue-50/50 p-3 sm:p-4 rounded-xl space-y-2 border border-blue-100 overflow-hidden">
                             <p className="text-[10px] font-black text-blue-800 uppercase flex items-center gap-1.5"><CreditCard size={12}/> Digital & POS Payments</p>
                             
                             <ReconItem label="TNG eWallet" gross={localRecord.sales.tng || 0} isReconciled={isChannelReconciled(reconStatus, 'tng')} actualAmount={getReconActual(reconStatus, 'tng')} onReconcile={() => setReconTarget({key: 'tng', label: 'TNG eWallet', gross: localRecord.sales.tng || 0})} />
@@ -337,10 +489,10 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
                         </div>
 
                         {totalDelivery > 0 && (
-                            <div className="bg-orange-50/50 p-4 rounded-xl space-y-2 border border-orange-100">
-                                <div className="flex justify-between items-center border-b border-orange-100 pb-2">
+                            <div className="bg-orange-50/50 p-3 sm:p-4 rounded-xl space-y-2 border border-orange-100 overflow-hidden">
+                                <div className="flex flex-wrap justify-between items-center border-b border-orange-100 pb-2 gap-1">
                                     <p className="text-[10px] font-black text-orange-800 uppercase flex items-center gap-1.5"><Truck size={12}/> Delivery Platforms</p>
-                                    <span className="font-mono text-xs font-black text-orange-800">Total: RM {totalDelivery.toFixed(2)}</span>
+                                    <span className="font-mono text-[10px] sm:text-xs font-black text-orange-800 whitespace-nowrap bg-orange-100/50 px-2 py-0.5 rounded">Total: RM {totalDelivery.toFixed(2)}</span>
                                 </div>
                                 
                                 <ReconItem label="GrabFood" gross={(deliveryBreakdown as any).grabGross || deliveryBreakdown.grab || 0} isReconciled={isChannelReconciled(reconStatus, 'grab')} actualAmount={getReconActual(reconStatus, 'grab')} onReconcile={() => setReconTarget({key: 'grab', label: 'GrabFood', gross: (deliveryBreakdown as any).grabGross || deliveryBreakdown.grab || 0})} />
@@ -350,20 +502,26 @@ const HistoryDetailModal = ({ record, onClose, onDelete, onRefresh }: { record: 
                         )}
                     </div>
                     
-                    <div className={`flex justify-between items-center p-4 rounded-xl border-2 ${localRecord.variance >= 0 ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+                    <div className={`flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 rounded-xl border-2 gap-2 ${localRecord.variance >= 0 ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
                         <div>
                             <span className="font-black uppercase tracking-widest text-xs block mb-1">Cash Variance</span>
-                            {localRecord.varianceReason && <span className="text-[9px] text-gray-500 font-bold">{localRecord.varianceReason}</span>}
+                            {localRecord.varianceReason && <span className="text-[10px] text-gray-600 font-bold block sm:inline">{localRecord.varianceReason}</span>}
                         </div>
-                        <span className="font-mono font-black text-2xl">{localRecord.variance > 0 ? '+' : ''}{localRecord.variance.toFixed(2)}</span>
+                        <span className="font-mono font-black text-2xl self-end sm:self-auto whitespace-nowrap">{localRecord.variance > 0 ? '+' : ''}{localRecord.variance.toFixed(2)}</span>
                     </div>
                     
-                    <button onClick={() => onDelete(localRecord.id)} className="w-full py-4 bg-white border-2 border-red-100 text-red-600 rounded-2xl font-black text-sm hover:bg-red-50 transition-all flex items-center justify-center gap-2 shadow-sm">
-                        <Trash2 size={18}/> 删除此记录 (Delete)
-                    </button>
+                    {/* 🌟 NEW BUTTONS FOR UNDO & DELETE 🌟 */}
+                    <div className="flex flex-col sm:flex-row gap-3">
+                        <button onClick={() => onUndoEdit(localRecord)} className="flex-[2] py-3.5 sm:py-4 bg-[#1A1A1A] border-2 border-[#1A1A1A] text-[#FFD700] rounded-2xl font-black text-sm hover:bg-black shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
+                            <RotateCcw size={18}/> 撤销并重新编辑 (Undo & Edit)
+                        </button>
+                        <button onClick={() => onDelete(localRecord.id)} className="flex-[1] py-3.5 sm:py-4 bg-white border-2 border-red-100 text-red-600 rounded-2xl font-black text-sm hover:bg-red-50 transition-all flex items-center justify-center gap-2 shadow-sm">
+                            <Trash2 size={18}/> 仅删除
+                        </button>
+                    </div>
+
                 </div>
 
-                {/* 🟢 隐藏的 PDF 生成模板 (排版空间优化版) */}
                 <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
                     <div ref={printRef} className="w-[148mm] min-h-[210mm] bg-white p-5 font-sans text-black border box-border flex flex-col">
                         
@@ -456,14 +614,19 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     
-    const [openingCounts, setOpeningCounts] = useState<Record<number, number>>({ 100:0, 50:0, 20:0, 10:0, 5:0, 1:0 });
-    const [openingCoins, setOpeningCoins] = useState<number>(0);
+    // 简化版开班点算 - 直接输入总数
+    const [openingTotal, setOpeningTotal] = useState<number>(0);
     const [businessDate, setBusinessDate] = useState<string>(getBusinessDateStr(storeConfig.businessDayCutoff || 4));
     
     const [salesData, setSalesData] = useState({
         storeHubTotal: 0, refundTotal: 0, cash: 0, tng: 0, duitnow: 0, card: 0, amex: 0, grab: 0, panda: 0, shopee: 0, lalamove: 0, grabGross: 0, pandaGross: 0, shopeeGross: 0
     });
     
+    const [shiftExpenses, setShiftExpenses] = useState<ExpenseItem[]>([]);
+    const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+    const [staffList, setStaffList] = useState<Employee[]>([]);
+    const [supplierList, setSupplierList] = useState<Supplier[]>([]);
+
     const [closingCashInput, setClosingCashInput] = useState<number>(0);
     const [varianceReason, setVarianceReason] = useState<string>('');
     
@@ -479,11 +642,20 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
         setIsLoading(true);
         try {
             const shift = await DataManager.getActiveShift();
+            const emps = await DataManager.getEmployees();
+            const sups = await DataManager.getSuppliers(); 
+            
+            setStaffList(emps.filter(e => !e.isArchived));
+            setSupplierList(sups.filter(s => s.status === 'ACTIVE'));
 
             if (shift) {
                 setBusinessDate(shift.businessDate || getBusinessDateStr(storeConfig.businessDayCutoff || 4));
-                setOpeningCounts(shift.openingCounts || { 100:0, 50:0, 20:0, 10:0, 5:0, 1:0 });
-                setOpeningCoins(shift.openingCoins || 0);
+                
+                // 处理历史遗留数据，兼容旧版 denominations
+                const savedCounts = shift.openingCounts || {};
+                const savedCoins = shift.openingCoins || 0;
+                const calcTotal = Object.entries(savedCounts).reduce((acc, [val, count]) => acc + (parseInt(val) * (Number(count) || 0)), 0) + Number(savedCoins);
+                setOpeningTotal(shift.openingTotal ?? calcTotal);
                 
                 const savedSales = shift.salesData || {};
                 setSalesData({
@@ -494,6 +666,7 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                     grabGross: savedSales.grabGross || 0, pandaGross: savedSales.pandaGross || 0, shopeeGross: savedSales.shopeeGross || 0
                 });
                 
+                setShiftExpenses(shift.expenseList || []);
                 setClosingCashInput(shift.closingCashInput || 0);
                 setVarianceReason(shift.varianceReason || '');
                 setIsShiftOpen(true);
@@ -506,7 +679,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
     const loadHistory = async () => {
         setIsLoading(true);
         const records = await DataManager.getSettlements(filterMonth);
-        // 确保历史记录按日期倒序排列
         records.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setHistoryRecords(records);
         setIsLoading(false);
@@ -516,45 +688,43 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
         if (isShiftOpen && !isLoading && !isSubmitting && activeTab === 'SHIFT') {
             const shiftData = {
                 businessDate: businessDate || getBusinessDateStr(4),
-                openingCounts, openingCoins, salesData, 
-                expenseList: [],
+                openingTotal, salesData, 
+                expenseList: shiftExpenses,
                 closingCashInput, varianceReason: varianceReason || '', updatedAt: new Date().toISOString()
             };
             DataManager.saveActiveShift(shiftData);
         }
-    }, [isShiftOpen, businessDate, openingCounts, openingCoins, salesData, closingCashInput, varianceReason, isLoading, activeTab, isSubmitting]);
-
-    const openingTotal = useMemo(() => {
-        const notesTotal = Object.entries(openingCounts).reduce((acc, [val, count]) => acc + (parseInt(val) * (Number(count) || 0)), 0);
-        return Number(notesTotal) + Number(openingCoins);
-    }, [openingCounts, openingCoins]);
+    }, [isShiftOpen, businessDate, openingTotal, salesData, closingCashInput, varianceReason, isLoading, activeTab, isSubmitting, shiftExpenses]);
 
     const totals = useMemo(() => {
         const s = salesData;
         const posSales = (Number(s.cash)||0) + (Number(s.tng)||0) + (Number(s.duitnow)||0) + (Number(s.card)||0) + (Number(s.amex)||0);
         
-        // 🔴 对账改造：外卖算总收入时，采用 GROSS（如果没有填 gross 就用 net 作为 fallback）
         const grabVal = Number(s.grabGross) || Number(s.grab) || 0;
         const pandaVal = Number(s.pandaGross) || Number(s.panda) || 0;
         const shopeeVal = Number(s.shopeeGross) || Number(s.shopee) || 0;
         const deliverySales = grabVal + pandaVal + shopeeVal + (Number(s.lalamove)||0);
         
         const totalRevenue = posSales + deliverySales;
-        const expectedCash = Number(openingTotal) + Number(s.cash||0); 
+        const totalCashOut = shiftExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+        const expectedCash = Number(openingTotal) + Number(s.cash||0) - totalCashOut; 
         const variance = Number(closingCashInput) - expectedCash;
         const storeHubTotal = Number(s.storeHubTotal) || 0;
         const salesVariance = posSales - storeHubTotal;
-        return { posSales, deliverySales, totalRevenue, expectedCash, variance, storeHubTotal, salesVariance };
-    }, [openingTotal, salesData, closingCashInput]);
+        return { posSales, deliverySales, totalRevenue, totalCashOut, expectedCash, variance, storeHubTotal, salesVariance };
+    }, [openingTotal, salesData, closingCashInput, shiftExpenses]);
 
     const handleStartShift = () => {
         if (openingTotal <= 0 && !confirm("点算总额为 RM 0，确定开班吗？")) return;
         setIsShiftOpen(true);
     };
 
-    const handleDenomChange = (denom: number, count: string) => {
-        const c = parseInt(count) || 0;
-        setOpeningCounts(prev => ({ ...prev, [denom]: c }));
+    const handleAddExpense = (newExp: ExpenseItem) => {
+        setShiftExpenses([...shiftExpenses, newExp]);
+    };
+
+    const handleRemoveExpense = (id: string) => {
+        setShiftExpenses(shiftExpenses.filter(e => e.id !== id));
     };
 
     const handleDeleteClick = (id: string) => setShowDeleteConfirm(true);
@@ -572,12 +742,62 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
         } catch(e) { console.error(e); alert("Delete Failed"); } finally { setIsLoading(false); }
     };
 
+    // 🌟 THE UNDO & EDIT LOGIC 🌟
+    const handleUndoAndEdit = async (record: SettlementRecord) => {
+        if (!confirm(`⚠️ 确定要撤销并重新编辑 ${record.date} 的结算吗？\n\n系统将删除该历史记录，并把所有数据反填恢复到当班表单中供您修改。`)) return;
+        
+        setIsLoading(true);
+        try {
+            await DataManager.deleteSettlement(record.id);
+            
+            setBusinessDate(record.date);
+            setOpeningTotal(record.openingCash); 
+            
+            // 🛡️ 防御性映射：应对旧版数据没有保存 xxxGross 的情况，如果缺失则回退到基础字段
+            const bd = record.sales.deliveryBreakdown as any || {};
+            setSalesData({
+                storeHubTotal: record.sales.storeHubTotal || 0,
+                refundTotal: record.sales.refundTotal || 0,
+                cash: record.sales.cash || 0,
+                tng: record.sales.tng || 0,
+                duitnow: record.sales.duitnow || 0,
+                card: record.sales.card || 0,
+                amex: record.sales.amex || 0,
+                grab: bd.grabGross || bd.grab || 0,
+                panda: bd.pandaGross || bd.panda || 0,
+                shopee: bd.shopeeGross || bd.shopee || 0,
+                lalamove: bd.lalamove || 0,
+                grabGross: bd.grabGross || bd.grab || 0,
+                pandaGross: bd.pandaGross || bd.panda || 0,
+                shopeeGross: bd.shopeeGross || bd.shopee || 0
+            });
+            
+            setShiftExpenses(record.expenses || []);
+            setClosingCashInput(record.closingCash || 0);
+            setVarianceReason(record.varianceReason || '');
+            
+            setIsShiftOpen(true);
+            setActiveTab('SHIFT');
+            setSelectedRecord(null);
+            
+            const updatedHistory = await DataManager.getSettlements(filterMonth);
+            setHistoryRecords(updatedHistory);
+            
+            alert("✅ 撤销成功！数据已完全恢复，请直接修改您需要调整的金额。");
+        } catch(e) {
+            console.error(e);
+            alert("撤销失败，请检查网络 (Undo Failed)");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const handleSubmitSettlement = async () => {
         setIsSubmitting(true);
         
         const isDuplicate = await DataManager.checkSettlementExists(businessDate);
         if (isDuplicate) {
-             alert(`📅 日期 ${businessDate} 已经结算过了！\n\n系统检测到重复记录。若需重新提交，请先在"历史"页面删除该日期的旧记录。`);
+             alert(`📅 日期 ${businessDate} 已经结算过了！\n\n系统检测到重复记录。若需重新提交，请先在"历史"页面撤销该日期的旧记录。`);
              setIsSubmitting(false);
              return;
         }
@@ -587,7 +807,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
             return;
         }
         
-        // 🔴 对账改造：新建 settlement 时，增加 reconStatus 字段追踪各渠道核销状态
         const record: SettlementRecord = {
             id: `settle_${businessDate}_${Date.now()}`,
             date: businessDate,
@@ -604,14 +823,14 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                 card: salesData.card || 0,
                 amex: salesData.amex || 0,
                 deliveryBreakdown: {
-                        grab: salesData.grabGross || salesData.grab || 0,       // 🟢 Bug5修复：Gross同步写入Net，向后兼容
-                        panda: salesData.pandaGross || salesData.panda || 0,     // 🟢 Bug5修复
-                        shopee: salesData.shopeeGross || salesData.shopee || 0,  // 🟢 Bug5修复
+                        grab: salesData.grabGross || salesData.grab || 0,       
+                        panda: salesData.pandaGross || salesData.panda || 0,     
+                        shopee: salesData.shopeeGross || salesData.shopee || 0,  
                         lalamove: salesData.lalamove || 0,
                         grabGross: salesData.grabGross || 0, pandaGross: salesData.pandaGross || 0, shopeeGross: salesData.shopeeGross || 0
                     }
             },
-            expenses: [], 
+            expenses: shiftExpenses, 
             variance: totals.variance,
             varianceReason: varianceReason,
             submittedBy: 'Manager',
@@ -626,10 +845,10 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
 
             const nextDateStr = getBusinessDateStr(storeConfig.businessDayCutoff || 4);
             setBusinessDate(nextDateStr);
-            setOpeningCounts({ 100:0, 50:0, 20:0, 10:0, 5:0, 1:0 });
-            setOpeningCoins(0);
+            setOpeningTotal(0);
             setSalesData({ storeHubTotal: 0, refundTotal: 0, cash: 0, tng: 0, duitnow: 0, card: 0, amex: 0, grab: 0, panda: 0, shopee: 0, lalamove: 0, grabGross: 0, pandaGross: 0, shopeeGross: 0 });
             setClosingCashInput(0);
+            setShiftExpenses([]);
             setVarianceReason('');
             setIsShiftOpen(false);
             
@@ -662,6 +881,19 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                 <div className="space-y-3 p-4 bg-white/5 rounded-2xl border border-white/10">
                     <div className="flex justify-between text-sm"><span className="text-gray-400">Opening Float</span><span className="font-mono text-[#FFD700]">RM {openingTotal.toFixed(2)}</span></div>
                     <div className="flex justify-between text-sm"><span className="text-gray-400">Cash Sales</span><span className="font-mono text-green-400">+ RM {(salesData?.cash || 0).toFixed(2)}</span></div>
+                    {totals.totalCashOut > 0 && (
+                        <div className="pt-2 mt-2 border-t border-white/10 animate-in fade-in">
+                            <div className="flex justify-between text-sm mb-1"><span className="text-red-400 font-bold">Cash Payouts (支出)</span><span className="font-mono text-red-400">- RM {totals.totalCashOut.toFixed(2)}</span></div>
+                            <div className="pl-2 space-y-1">
+                                {shiftExpenses.map((exp, i) => (
+                                    <div key={i} className="flex justify-between text-[10px] text-gray-500">
+                                        <span className="truncate max-w-[150px]">{exp.company}</span>
+                                        <span>{exp.amount.toFixed(2)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     <div className="h-px bg-white/10 my-2"></div>
                     <div className="flex justify-between items-center"><span className="text-xs font-black text-[#FFD700] uppercase">Expected Cash</span><span className="text-xl font-mono font-black text-white">RM {totals.expectedCash.toFixed(2)}</span></div>
                 </div>
@@ -700,7 +932,7 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
         <div className={isStandalone ? "fixed inset-0 bg-black/90 z-[90] flex items-center justify-center p-0 md:p-4 backdrop-blur-sm animate-in zoom-in duration-200" : "w-full h-full flex flex-col relative animate-in fade-in"}>
             <div className={isStandalone ? "bg-[#F5F7FA] w-full h-[100dvh] md:max-w-7xl md:h-[95vh] md:rounded-[2rem] flex flex-col overflow-hidden shadow-2xl font-sans relative" : "flex-grow flex flex-col overflow-hidden font-sans relative"}>
                 
-                {/* Header (iOS Safe Area Padding 终极防护) */}
+                {/* Header */}
                 <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top,16px),16px)] flex flex-col md:flex-row justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700] gap-4 md:gap-0 relative z-50 shadow-md">
                     <div className="flex items-center gap-4 w-full md:w-auto">
                         <div className="bg-[#FFD700] text-black p-2 md:p-2.5 rounded-xl shadow-lg shrink-0"><Calculator size={24}/></div>
@@ -734,13 +966,18 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                             </div>
                                         </div>
                                         <div className="bg-gray-50 p-6 rounded-2xl mb-8 border border-gray-100 text-left">
-                                            <label className="text-[10px] font-black text-gray-400 uppercase mb-4 block tracking-widest">开班现金点算 (Opening Float)</label>
-                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-                                                {DENOMINATIONS.map(denom => (<div key={denom.value} className={`flex items-center gap-2 p-2 rounded-xl border ${denom.color}`}><span className="text-[10px] font-black w-10 shrink-0">{denom.label}</span><input type="number" className="w-full bg-white/50 p-1 rounded text-center text-sm font-bold outline-none" placeholder="0" value={openingCounts[denom.value] || ''} onChange={e => handleDenomChange(denom.value, e.target.value)} /></div>))}
+                                            <label className="text-[10px] font-black text-gray-400 uppercase mb-4 block tracking-widest">开班现金金额 (Opening Float)</label>
+                                            <div className="relative">
+                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-black text-2xl">RM</span>
+                                                <input 
+                                                    type="number" 
+                                                    value={openingTotal || ''} 
+                                                    onChange={e => setOpeningTotal(parseFloat(e.target.value) || 0)} 
+                                                    className="w-full pl-14 pr-4 py-4 bg-white border-2 border-gray-200 rounded-xl font-mono text-3xl font-black text-[#1A1A1A] outline-none focus:border-[#FFD700] transition-all shadow-sm" 
+                                                    placeholder="0.00" 
+                                                />
                                             </div>
-                                            <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-gray-200"><Coins size={18} className="text-gray-400"/><input type="number" className="flex-grow outline-none text-sm font-bold" placeholder="硬币总额 (Coins)" value={openingCoins || ''} onChange={e => setOpeningCoins(parseFloat(e.target.value) || 0)} /></div>
                                         </div>
-                                        <div className="flex justify-between items-center bg-[#1A1A1A] text-white p-4 rounded-xl mb-6"><span className="text-xs font-bold uppercase text-gray-400">Total Opening</span><span className="text-xl font-mono font-black text-[#FFD700]">RM {openingTotal.toFixed(2)}</span></div>
                                         <button onClick={handleStartShift} className="w-full bg-[#FFD700] text-black py-4 rounded-xl font-black text-lg shadow-lg hover:bg-yellow-400 active:scale-95 transition-all flex items-center justify-center gap-2"><Play size={20} fill="currentColor"/> 确认开班 (Start)</button>
                                     </div>
                                 </div>
@@ -801,7 +1038,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                             <div className="pt-3 mt-3 border-t border-gray-100 flex justify-between items-center text-xs font-bold"><span>POS Total</span><span className="font-mono text-blue-600 text-base">RM {totals.posSales.toFixed(2)}</span></div>
                                         </div>
                                         
-                                        {/* 🔴 改版后的外卖录入区 */}
                                         <div className="space-y-3 bg-orange-50/50 p-5 rounded-3xl border border-orange-100 shadow-sm">
                                             <div className="flex justify-between items-center border-b border-orange-200 pb-3 mb-3">
                                                 <h4 className="text-xs font-bold text-orange-800 uppercase">Delivery Platforms</h4>
@@ -852,6 +1088,42 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                         </div>
                                     </div>
 
+                                    <div className="bg-red-50 p-5 rounded-3xl border border-red-100">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h4 className="text-sm font-black text-red-700 uppercase flex items-center gap-2"><MinusCircle size={16}/> 现金支出 (Cash Payouts)</h4>
+                                            <button onClick={() => setIsExpenseModalOpen(true)} className="bg-red-600 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-red-700 shadow-md transition-all active:scale-95">
+                                                <Plus size={14}/> 记一笔支出 (Add)
+                                            </button>
+                                        </div>
+                                        
+                                        {shiftExpenses.length === 0 ? (
+                                            <div className="text-center py-6 border-2 border-dashed border-red-200 rounded-2xl text-xs text-red-300 font-bold">暂无现金支出 (No Cash Out)</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {shiftExpenses.map(exp => (
+                                                    <div key={exp.id} className="bg-white p-3 rounded-xl border border-red-100 flex justify-between items-center shadow-sm">
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-black uppercase ${exp.category === 'SUPPLIER' ? 'bg-blue-50 text-blue-700' : exp.category === 'STAFF_ADVANCE' ? 'bg-orange-50 text-orange-700' : 'bg-gray-100 text-gray-700'}`}>
+                                                                    {exp.category === 'SUPPLIER' ? '货款' : exp.category === 'STAFF_ADVANCE' ? '预支' : '杂费'}
+                                                                </span>
+                                                                <span className="font-bold text-sm text-[#1A1A1A]">{exp.company}</span>
+                                                            </div>
+                                                            <div className="text-[10px] text-gray-400 ml-1">{exp.note}</div>
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="font-mono font-black text-red-600">- RM {exp.amount.toFixed(2)}</span>
+                                                            <button onClick={() => handleRemoveExpense(exp.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14}/></button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                <div className="pt-2 mt-2 border-t border-red-200 flex justify-end text-xs font-black text-red-800">
+                                                    Total Out: RM {totals.totalCashOut.toFixed(2)}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
                                     <div className={`p-5 rounded-2xl border flex justify-between items-center shadow-sm ${Math.abs(totals.salesVariance) < 1 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                                         <div>
                                             <p className={`text-xs font-black uppercase ${Math.abs(totals.salesVariance) < 1 ? 'text-green-700' : 'text-red-700'}`}>{Math.abs(totals.salesVariance) < 1 ? 'POS Match (Perfect)' : 'POS Variance Detected'}</p>
@@ -868,28 +1140,33 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                         )
                     ) : (
                         <div className="h-full flex flex-col bg-[#F5F7FA]">
-                            <div className="p-4 md:p-6 bg-white border-b border-gray-200 shadow-sm shrink-0">
-                                <div className="max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className="bg-[#1A1A1A] p-2 rounded-xl text-[#FFD700] shadow-md"><Calendar size={20}/></div>
-                                        <div><h4 className="font-black text-[#1A1A1A]">历史结算查询</h4><p className="text-[10px] text-gray-400 font-bold uppercase">Archive & Reconciliation History</p></div>
+                            <div className="p-3 sm:p-6 bg-white border-b border-gray-200 shadow-sm shrink-0">
+                                <div className="max-w-4xl mx-auto flex justify-between items-center gap-2">
+                                    <div className="flex items-center gap-2 sm:gap-3">
+                                        <div className="bg-[#1A1A1A] p-1.5 sm:p-2 rounded-xl text-[#FFD700] shadow-md"><Calendar className="w-5 h-5 sm:w-5 sm:h-5"/></div>
+                                        <div>
+                                            <h4 className="font-black text-[#1A1A1A] text-base sm:text-lg">历史账单</h4>
+                                            {/* 手机端隐藏这段英文废话 */}
+                                            <p className="hidden sm:block text-[10px] text-gray-400 font-bold uppercase mt-0.5">Archive & Reconciliation History</p>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-200 w-full md:w-auto">
-                                        <span className="text-xs font-black text-gray-400 px-2">月份 (Month):</span>
-                                        <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="bg-white border-2 border-gray-100 focus:border-[#FFD700] rounded-xl px-4 py-2 font-black text-[#1A1A1A] outline-none transition-all flex-grow md:flex-none" />
+                                    <div className="flex items-center gap-2 bg-gray-50 p-1.5 sm:p-2 rounded-xl border border-gray-200">
+                                        <span className="hidden sm:inline text-xs font-black text-gray-400 px-2">月份:</span>
+                                        <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="bg-transparent font-black text-[#1A1A1A] text-sm sm:text-base outline-none w-[110px] sm:w-auto" />
                                     </div>
                                 </div>
                             </div>
 
                             <div className="flex-grow overflow-y-auto p-4 md:p-6 pb-32">
-                                <div className="max-w-4xl mx-auto space-y-4">
+                                {/* 🌟 优化1：PC端启用大宽屏 grid-cols-2 (一行两天)，手机端保持 grid-cols-1 🌟 */}
+                                <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                                     {isLoading ? (
-                                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                                        <div className="flex flex-col items-center justify-center py-20 text-gray-400 lg:col-span-2">
                                             <Loader2 size={48} className="animate-spin mb-4 text-[#FFD700]"/>
                                             <p className="font-bold">正在拉取 {filterMonth} 的账单...</p>
                                         </div>
                                     ) : historyRecords.length === 0 ? (
-                                        <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-gray-200">
+                                        <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-gray-200 lg:col-span-2">
                                             <History size={64} className="mx-auto mb-4 opacity-10 text-[#1A1A1A]"/>
                                             <p className="font-black text-[#1A1A1A]">{filterMonth} 暂无历史数据</p>
                                         </div>
@@ -901,7 +1178,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                             const amex = record.sales.amex || 0;
                                             const cash = record.sales.cash || 0;
                                             
-                                            // 判断当前记录是否还有未核销的项目
                                             const rs = (record as any).reconStatus || {};
                                             const deliveryBreakdown = record.sales.deliveryBreakdown || {} as any;
                                             
@@ -911,7 +1187,6 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                             const lalamoveVal = deliveryBreakdown.lalamove || 0;
                                             const totalDeliveryVal = grabGross + pandaGross + shopeeGross + lalamoveVal;
                                             
-                                            // Card = Credit + Debit + Amex
                                             const totalCardVal = debit + credit + amex;
 
                                             let hasPending = false;
@@ -924,88 +1199,65 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                             if (shopeeGross > 0 && !isChannelReconciled(rs, 'shopee')) hasPending = true;
 
                                             return (
-                                                <div key={record.id} onClick={() => setSelectedRecord(record)} className={`bg-white p-5 rounded-[2rem] border-2 hover:border-[#FFD700] hover:shadow-xl transition-all cursor-pointer group relative overflow-hidden ${hasPending ? 'border-orange-200 shadow-sm' : 'border-gray-100'}`}>
+                                                <div key={record.id} onClick={() => setSelectedRecord(record)} className={`bg-white p-4 sm:p-5 rounded-[1.5rem] border ${hasPending ? 'border-orange-300 shadow-md' : 'border-gray-100 hover:border-[#FFD700] hover:shadow-xl'} active:scale-[0.98] transition-all cursor-pointer group relative flex flex-col`}>
                                                     
-                                                    {/* 🟢 待核销角标指示器 */}
+                                                    {/* 待对账红点提示（改得更精致，像系统通知标签） */}
                                                     {hasPending && (
-                                                        <div className="absolute top-0 right-0 bg-orange-500 text-white text-[9px] font-black px-3 py-1 rounded-bl-xl shadow-sm z-10 animate-pulse">
-                                                            ⏳ 待对账核销 (Pending Recon)
+                                                        <div className="absolute top-0 right-5 bg-orange-500 text-white text-[9px] font-black px-2.5 py-1 rounded-b-lg shadow-sm z-10 animate-pulse">
+                                                            ⏳ 待对账
                                                         </div>
                                                     )}
 
-                                                    {/* 🟢 改版：顶部行 — 日期 + 总营业额 + Variance + 箭头 */}
-                                                    <div className="flex items-center justify-between gap-4 mb-3">
-                                                        <div className="flex items-center gap-4">
-                                                            <div className="w-14 h-14 bg-[#1A1A1A] rounded-2xl flex flex-col items-center justify-center text-[#FFD700] group-hover:scale-110 transition-transform shadow-lg shrink-0">
-                                                                <span className="text-[10px] font-black leading-none opacity-60 uppercase">{new Date(record.date).toLocaleString('default', { month: 'short' })}</span>
+                                                    {/* 顶部核心：日期 + 总额 + 差异 */}
+                                                    <div className="flex items-center justify-between mb-3 mt-1">
+                                                        <div className="flex items-center gap-3.5">
+                                                            <div className="w-12 h-12 bg-[#1A1A1A] rounded-2xl flex flex-col items-center justify-center text-[#FFD700] shadow-md shrink-0">
+                                                                <span className="text-[9px] font-black leading-none opacity-80 uppercase tracking-wider">{new Date(record.date).toLocaleString('default', { month: 'short' })}</span>
                                                                 <span className="text-xl font-black leading-none mt-1">{record.date.split('-')[2]}</span>
                                                             </div>
                                                             <div>
-                                                                <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total Sales</div>
-                                                                <div className="text-xl font-black text-[#1A1A1A] whitespace-nowrap">RM {record.sales.total.toFixed(2)}</div>
+                                                                <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Total Sales</div>
+                                                                <div className="text-xl sm:text-2xl font-black text-[#1A1A1A] tracking-tight">RM {record.sales.total.toFixed(2)}</div>
                                                             </div>
                                                         </div>
-                                                        <div className="flex items-center gap-4 shrink-0">
-                                                            <div className="text-right">
-                                                                <div className="text-[9px] font-black text-gray-400 uppercase">Variance</div>
-                                                                <div className={`font-mono font-black ${record.variance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                                                    {record.variance > 0 ? '+' : ''}{record.variance.toFixed(2)}
-                                                                </div>
-                                                            </div>
-                                                            <div className="p-3 bg-gray-50 rounded-2xl group-hover:bg-[#1A1A1A] group-hover:text-[#FFD700] transition-all shadow-sm shrink-0">
-                                                                <ChevronRight size={20}/>
+                                                        <div className="text-right">
+                                                            <div className="text-[9px] font-black text-gray-400 uppercase mb-1">Variance</div>
+                                                            <div className={`font-mono font-black text-sm sm:text-base px-2 py-0.5 rounded-lg ${record.variance >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                                                                {record.variance > 0 ? '+' : ''}{record.variance.toFixed(2)}
                                                             </div>
                                                         </div>
                                                     </div>
 
-                                                    {/* 🟢 改版：底部明细行 — Cash | TNG | Card | Delivery (含子项) */}
-                                                    <div className="grid grid-cols-4 gap-2 px-1 py-3 bg-gray-50 rounded-2xl border border-gray-100">
-                                                        {/* Cash */}
-                                                        <div className="flex flex-col items-center">
-                                                            <span className="text-[9px] font-black text-gray-400 uppercase">Cash</span>
-                                                            <span className="font-mono text-xs font-bold text-green-700">RM {cash.toFixed(2)}</span>
+                                                    {/* 优雅的渐变分割线 */}
+                                                    <div className="h-px w-full bg-gradient-to-r from-transparent via-gray-200 to-transparent my-2"></div>
+
+                                                    {/* 中部明细：去除格子边框，改为左右双列财务账单对齐法 */}
+                                                    <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 px-1 mt-2">
+                                                        <div className="flex justify-between items-center text-[11px] sm:text-xs">
+                                                            <span className="text-gray-500 font-bold">Cash</span>
+                                                            <span className="font-mono font-black text-[#1A1A1A]">{cash.toFixed(2)}</span>
                                                         </div>
-                                                        {/* TNG */}
-                                                        <div className="flex flex-col items-center">
-                                                            <span className="text-[9px] font-black text-gray-400 uppercase">TNG</span>
-                                                            <span className="font-mono text-xs font-bold text-cyan-600">RM {tng.toFixed(2)}</span>
+                                                        <div className="flex justify-between items-center text-[11px] sm:text-xs">
+                                                            <span className="text-gray-500 font-bold">TNG</span>
+                                                            <span className="font-mono font-black text-[#1A1A1A]">{tng.toFixed(2)}</span>
                                                         </div>
-                                                        {/* Card (Debit + Credit + Amex) */}
-                                                        <div className="flex flex-col items-center">
-                                                            <span className="text-[9px] font-black text-gray-400 uppercase">Card</span>
-                                                            <span className="font-mono text-xs font-bold text-indigo-600">RM {totalCardVal.toFixed(2)}</span>
+                                                        <div className="flex justify-between items-center text-[11px] sm:text-xs">
+                                                            <span className="text-gray-500 font-bold">Card</span>
+                                                            <span className="font-mono font-black text-[#1A1A1A]">{totalCardVal.toFixed(2)}</span>
                                                         </div>
-                                                        {/* Delivery Total */}
-                                                        <div className="flex flex-col items-center">
-                                                            <span className="text-[9px] font-black text-gray-400 uppercase">Delivery</span>
-                                                            <span className="font-mono text-xs font-bold text-orange-600">RM {totalDeliveryVal.toFixed(2)}</span>
+                                                        <div className="flex justify-between items-center text-[11px] sm:text-xs">
+                                                            <span className="text-gray-500 font-bold">Delivery</span>
+                                                            <span className="font-mono font-black text-orange-600">{totalDeliveryVal.toFixed(2)}</span>
                                                         </div>
                                                     </div>
 
-                                                    {/* 🟢 Delivery 子项明细 (仅在有外卖时显示) — 各平台独立配色 */}
+                                                    {/* 底部微胶囊：只有存在外卖数据时才显示，去掉冗杂的粗边框和冗余的 Truck Icon */}
                                                     {totalDeliveryVal > 0 && (
-                                                        <div className="flex items-center justify-center gap-3 mt-2 px-4 py-2 bg-gray-50 rounded-xl border border-gray-100">
-                                                            <Truck size={12} className="text-gray-400 shrink-0"/>
-                                                            {grabGross > 0 && (
-                                                                <span className="text-[10px] font-bold text-gray-500">
-                                                                    Grab <span className="font-mono font-black text-green-600">{grabGross.toFixed(2)}</span>
-                                                                </span>
-                                                            )}
-                                                            {pandaGross > 0 && (
-                                                                <span className="text-[10px] font-bold text-gray-500">
-                                                                    Panda <span className="font-mono font-black text-pink-600">{pandaGross.toFixed(2)}</span>
-                                                                </span>
-                                                            )}
-                                                            {shopeeGross > 0 && (
-                                                                <span className="text-[10px] font-bold text-gray-500">
-                                                                    Shopee <span className="font-mono font-black text-orange-600">{shopeeGross.toFixed(2)}</span>
-                                                                </span>
-                                                            )}
-                                                            {lalamoveVal > 0 && (
-                                                                <span className="text-[10px] font-bold text-gray-500">
-                                                                    Lala <span className="font-mono font-black text-blue-600">{lalamoveVal.toFixed(2)}</span>
-                                                                </span>
-                                                            )}
+                                                        <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-dashed border-gray-100 px-1">
+                                                            {grabGross > 0 && <span className="text-[9px] font-bold text-green-700 bg-green-50 px-1.5 py-0.5 rounded-md">Grab {grabGross.toFixed(0)}</span>}
+                                                            {pandaGross > 0 && <span className="text-[9px] font-bold text-pink-700 bg-pink-50 px-1.5 py-0.5 rounded-md">Panda {pandaGross.toFixed(0)}</span>}
+                                                            {shopeeGross > 0 && <span className="text-[9px] font-bold text-orange-700 bg-orange-50 px-1.5 py-0.5 rounded-md">Shopee {shopeeGross.toFixed(0)}</span>}
+                                                            {lalamoveVal > 0 && <span className="text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-md">Lala {lalamoveVal.toFixed(0)}</span>}
                                                         </div>
                                                     )}
                                                 </div>
@@ -1014,12 +1266,41 @@ export const SettlementModule: React.FC<SettlementModuleProps> = ({ storeConfig,
                                     )}
                                 </div>
                             </div>
-                            <HistoryDetailModal record={selectedRecord} onClose={() => setSelectedRecord(null)} onDelete={handleDeleteClick} onRefresh={loadHistory} />
+                            <HistoryDetailModal record={selectedRecord} onClose={() => setSelectedRecord(null)} onDelete={handleDeleteClick} onRefresh={loadHistory} onUndoEdit={handleUndoAndEdit} />
                         </div>
                     )}
                 </div>
-                {showDeleteConfirm && (<div className="fixed inset-0 bg-black/60 z-[250] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center border-t-8 border-red-600 animate-in zoom-in-95"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><Trash2 size={32} className="text-red-600"/></div><h3 className="font-black text-2xl text-[#1A1A1A] mb-2">严重警告</h3><p className="text-sm text-gray-500 font-bold mb-2">确定要删除 <span className="text-red-600">{selectedRecord?.date}</span> 的结算记录吗？</p><p className="text-xs text-red-500 bg-red-50 p-2 rounded-lg mb-6 border border-red-100"><AlertTriangle size={12} className="inline mr-1"/>此操作将永久清空当天的营业数据，且无法恢复。</p><div className="grid grid-cols-2 gap-4"><button onClick={() => setShowDeleteConfirm(false)} className="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-sm hover:bg-gray-200 transition-colors">取消 (Cancel)</button><button onClick={executeDeleteRecord} className="py-3 bg-red-600 text-white font-bold rounded-xl text-sm hover:bg-red-700 shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2"><Trash2 size={16}/> 确认删除</button></div></div></div>)}
+
+                {showDeleteConfirm && (
+                    <div className="fixed inset-0 bg-black/60 z-[250] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                        <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center border-t-8 border-red-600 animate-in zoom-in-95">
+                            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+                                <Trash2 size={32} className="text-red-600"/>
+                            </div>
+                            <h3 className="font-black text-2xl text-[#1A1A1A] mb-2">严重警告</h3>
+                            <p className="text-sm text-gray-500 font-bold mb-2">确定要仅删除 <span className="text-red-600">{selectedRecord?.date}</span> 的结算记录吗？</p>
+                            <p className="text-xs text-red-500 bg-red-50 p-2 rounded-lg mb-6 border border-red-100">
+                                <AlertTriangle size={12} className="inline mr-1"/>
+                                如果你想修改数据，请使用“撤销并重新编辑”按钮。此操作将永久清空记录。
+                            </p>
+                            <div className="grid grid-cols-2 gap-4">
+                                <button onClick={() => setShowDeleteConfirm(false)} className="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-sm hover:bg-gray-200 transition-colors">取消</button>
+                                <button onClick={executeDeleteRecord} className="py-3 bg-red-600 text-white font-bold rounded-xl text-sm hover:bg-red-700 shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
+                                    <Trash2 size={16}/> 确认删除
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
+            
+            <ExpenseModal 
+                isOpen={isExpenseModalOpen} 
+                onClose={() => setIsExpenseModalOpen(false)} 
+                onSave={handleAddExpense}
+                employees={staffList}
+                suppliers={supplierList}
+            />
         </div>
     );
 };

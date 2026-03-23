@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Utensils, Plus, Search, Edit3, Trash2, X, Save, Image as ImageIcon, Box, Truck, RefreshCw, Grid, Camera, Loader2, Copy, Layers, AlertTriangle, Wrench, ArrowLeft, ArrowRight, Move, ChevronLeft, BookOpen, Check } from 'lucide-react';
 import { MenuItem, MenuCategory, MenuVariant, StockItem, MenuIngredient } from '../../types';
 import { DataManager } from '../../utils/dataManager';
-import { MENU_CATEGORIES, INITIAL_MENU_ITEMS } from '../constants/menu';
+import { MENU_CATEGORIES, INITIAL_MENU_ITEMS } from '../../constants/menu';
 import { ModuleGuideButton } from '../ui/ModuleGuide';
 import { uploadToCloudinary } from '../utils';
 
@@ -12,20 +11,11 @@ interface MenuManagementProps {
     isModal?: boolean;
 }
 
-// Define Kitchen Categories for Stock Selector
 const STOCK_CATEGORIES: Record<string, string> = {
-    'FRESH': '生鲜 (Fresh)',
-    'MEAT': '肉类 (Meat)',
-    'SEAFOOD': '海鲜 (Seafood)',
-    'VEG': '蔬果 (Veg)',
-    'NOODLE': '面类 (Noodles)',
-    'DRY': '干货 (Dry)',
-    'SAUCE': '酱料 (Sauce)',
-    'HQ': '总店 (HQ)',
-    'TEA': '茶叶 (Tea)',
-    'FRUIT': '水果 (Fruit)',
-    'RTD': '罐装 (Drinks)',
-    'OTHER': '其他 (Other)'
+    'FRESH': '生鲜 (Fresh)', 'MEAT': '肉类 (Meat)', 'SEAFOOD': '海鲜 (Seafood)',
+    'VEG': '蔬果 (Veg)', 'NOODLE': '面类 (Noodles)', 'DRY': '干货 (Dry)',
+    'SAUCE': '酱料 (Sauce)', 'HQ': '总店 (HQ)', 'TEA': '茶叶 (Tea)',
+    'FRUIT': '水果 (Fruit)', 'RTD': '罐装 (Drinks)', 'OTHER': '其他 (Other)'
 };
 
 export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal = true }) => {
@@ -33,21 +23,18 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
     const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
     const [categories, setCategories] = useState<MenuCategory[]>(MENU_CATEGORIES);
     const [stockItems, setStockItems] = useState<StockItem[]>([]);
-    
-    // Legacy Data Detection
     const [hasLegacyData, setHasLegacyData] = useState(false);
     
     // View State
     const [activeCategory, setActiveCategory] = useState<string>('ALL'); 
     const [searchTerm, setSearchTerm] = useState('');
     const [priceMode, setPriceMode] = useState<'LOCAL' | 'DELIVERY'>('LOCAL');
+    const [deliveryCommission, setDeliveryCommission] = useState<number>(27); 
     const [viewMode, setViewMode] = useState<'LIST' | 'EDIT'>('LIST');
     const [loading, setLoading] = useState(true);
 
-    // Reorder State
     const [isReorderMode, setIsReorderMode] = useState(false);
     const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
-
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
     // Form State
@@ -61,15 +48,10 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     
-    // Stock Selector State for Recipe
     const [showStockSelector, setShowStockSelector] = useState(false);
     const [stockSearch, setStockSearch] = useState('');
-
-    // Copy Recipe State
     const [showCopyModal, setShowCopyModal] = useState(false);
     const [copySearch, setCopySearch] = useState('');
-
-    // Delete State
     const [deleteId, setDeleteId] = useState<string | null>(null);
 
     useEffect(() => {
@@ -115,29 +97,22 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
     const handleDragOver = (e: React.DragEvent, index: number) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
-        
         if (draggedItemIndex === null || draggedItemIndex === index) return;
-
         const newItems = [...menuItems];
         const draggedItem = newItems[draggedItemIndex];
         newItems.splice(draggedItemIndex, 1);
         newItems.splice(index, 0, draggedItem);
-        
         setMenuItems(newItems);
         setDraggedItemIndex(index);
     };
 
-    const handleDragEnd = () => {
-        setDraggedItemIndex(null);
-    };
+    const handleDragEnd = () => setDraggedItemIndex(null);
 
     const handleMoveItem = (index: number, direction: 'UP' | 'DOWN') => {
         if (direction === 'UP' && index === 0) return;
         if (direction === 'DOWN' && index === menuItems.length - 1) return;
-
         const newItems = [...menuItems];
         const targetIndex = direction === 'UP' ? index - 1 : index + 1;
-        
         [newItems[index], newItems[targetIndex]] = [newItems[targetIndex], newItems[index]];
         setMenuItems(newItems);
     };
@@ -151,15 +126,17 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
         alert("✅ 排序已保存 (Order Saved)");
     };
 
-    // --- UTILS ---
+    // --- 📸 直接上传图片 (Direct Image Upload) ---
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        
         setIsUploading(true);
         try {
             const url = await uploadToCloudinary(file);
             setNewImage(url);
         } catch (error) {
+            console.error("Image upload failed:", error);
             alert("图片上传失败，请重试");
         } finally {
             setIsUploading(false);
@@ -169,7 +146,9 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
 
     const calculateDeliveryPrice = (localPrice: number) => {
         if (!localPrice) return 0;
-        const calculatedPrice = localPrice / 0.73;
+        const factor = 1 - (deliveryCommission / 100);
+        const safeFactor = factor > 0 ? factor : 1;
+        const calculatedPrice = localPrice / safeFactor;
         const wholeNumber = Math.floor(calculatedPrice);
         const decimalPart = calculatedPrice - wholeNumber;
         return decimalPart >= 0.45 ? wholeNumber + 0.5 : wholeNumber;
@@ -187,10 +166,9 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
         return ((p - c) / p) * 100;
     };
 
-    // --- ACTIONS ---
     const saveMenu = async (items: MenuItem[]) => {
         setMenuItems(items);
-        await DataManager.saveMenu(items);
+        await DataManager.saveMenu(items); 
     };
 
     const handleSaveItem = async () => {
@@ -232,10 +210,7 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
     };
 
     const resetForm = () => {
-        setNewName('');
-        setNewCategory('A_SERIES');
-        setNewOptions('');
-        setNewImage('');
+        setNewName(''); setNewCategory('A_SERIES'); setNewOptions(''); setNewImage('');
         setNewVariants([
             { label: 'S (小)', price: 0, cost: 0, recipe: [] },
             { label: 'M (中)', price: 0, cost: 0, recipe: [] },
@@ -244,15 +219,8 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
         setEditingId(null);
     };
 
-    const handleAddNew = () => {
-        resetForm();
-        setViewMode('EDIT');
-    };
-
-    const handleDeleteClick = (id: string) => { 
-        if (isReorderMode) return;
-        setDeleteId(id); 
-    };
+    const handleAddNew = () => { resetForm(); setViewMode('EDIT'); };
+    const handleDeleteClick = (id: string) => { if (isReorderMode) return; setDeleteId(id); };
     
     const confirmDelete = async () => {
         if (deleteId) {
@@ -277,37 +245,26 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
         if(!confirm("⚠️ 发现旧数据 (C2, C3...)。确定要修复吗？\n这将删除错误的 ID 并恢复 A13/A14 等正确 ID。")) return;
         setLoading(true);
         try {
-            await DataManager.deleteMenuItem('c2');
-            await DataManager.deleteMenuItem('C2');
-            await DataManager.deleteMenuItem('c3');
-            await DataManager.deleteMenuItem('C3');
-            await DataManager.deleteMenuItem('c4');
-            await DataManager.deleteMenuItem('C4');
+            await DataManager.deleteMenuItem('c2'); await DataManager.deleteMenuItem('C2');
+            await DataManager.deleteMenuItem('c3'); await DataManager.deleteMenuItem('C3');
+            await DataManager.deleteMenuItem('c4'); await DataManager.deleteMenuItem('C4');
             await DataManager.saveMenu(INITIAL_MENU_ITEMS);
             await loadData();
             alert("✅ 数据已修复 (Data Fixed)");
         } catch(e) {
-            console.error(e);
             alert("修复失败");
         } finally {
             setLoading(false);
         }
     };
 
-    // --- RECIPE LOGIC ---
+    // Recipe logic...
     const addIngredientToVariant = (stockItem: StockItem) => {
         const updatedVariants = [...newVariants];
         const currentVariant = updatedVariants[activeVariantTab];
         if (!currentVariant.recipe) currentVariant.recipe = [];
         if (currentVariant.recipe.find(r => r.stockId === stockItem.id)) return;
-
-        currentVariant.recipe.push({
-            stockId: stockItem.id,
-            stockName: stockItem.name,
-            qty: 0,
-            unit: stockItem.unit,
-            costPerUnit: stockItem.cost
-        });
+        currentVariant.recipe.push({ stockId: stockItem.id, stockName: stockItem.name, qty: 0, unit: stockItem.unit, costPerUnit: stockItem.cost });
         currentVariant.cost = currentVariant.recipe.reduce((sum, item) => sum + (item.qty * item.costPerUnit), 0);
         setNewVariants(updatedVariants);
         setShowStockSelector(false);
@@ -350,49 +307,31 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
     const syncRecipeToAll = () => {
         if (!newVariants[activeVariantTab].recipe || newVariants[activeVariantTab].recipe?.length === 0) return alert("当前规格没有配方，无法同步。");
         if (!confirm(`确定将 [${newVariants[activeVariantTab].label}] 的配方同步到其他所有规格吗？\n其他规格现有的配方将被覆盖。`)) return;
-
         const baseRecipe = newVariants[activeVariantTab].recipe || [];
         const updatedVariants = newVariants.map((v, idx) => {
             if (idx === activeVariantTab) return v;
-            
             const clonedRecipe = baseRecipe.map(ing => ({ ...ing }));
             const newCost = clonedRecipe.reduce((sum, item) => sum + (item.qty * item.costPerUnit), 0);
-
-            return {
-                ...v,
-                recipe: clonedRecipe,
-                cost: newCost
-            };
+            return { ...v, recipe: clonedRecipe, cost: newCost };
         });
         setNewVariants(updatedVariants);
         alert("✅ 配方已同步！请检查其他规格的用量。");
     };
 
-    // --- COPY RECIPE LOGIC ---
     const handleCopyRecipe = (sourceItem: MenuItem) => {
         if (!sourceItem.variants || sourceItem.variants.length === 0) return alert("Source item has no variants.");
-        
-        // Try to match the active tab index, otherwise take the first one
         const sourceVariant = sourceItem.variants[activeVariantTab] || sourceItem.variants[0];
-        
         if (!sourceVariant.recipe || sourceVariant.recipe.length === 0) return alert("该菜品暂无配方 (No recipe found in source).");
-        
         const confirmMsg = `确认从 [${sourceItem.name} - ${sourceVariant.label}] 复制配方吗？\n当前规格 [${newVariants[activeVariantTab].label}] 的现有配方将被覆盖。`;
         if (!confirm(confirmMsg)) return;
-
         const updatedVariants = [...newVariants];
-        // Deep copy recipe
         updatedVariants[activeVariantTab].recipe = JSON.parse(JSON.stringify(sourceVariant.recipe));
-        
-        // Recalculate cost
         updatedVariants[activeVariantTab].cost = updatedVariants[activeVariantTab].recipe!.reduce((sum, item) => sum + (item.qty * item.costPerUnit), 0);
-        
         setNewVariants(updatedVariants);
         setShowCopyModal(false);
         setCopySearch('');
     };
 
-    // --- GRID VIEW LOGIC ---
     const visibleGridItems = useMemo(() => {
         return menuItems.map((item, index) => ({ ...item, globalIndex: index })).filter(item => {
             const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -413,53 +352,82 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
             onDragOver={(e) => handleDragOver(e, item.globalIndex)}
             onDragEnd={handleDragEnd}
             className={`
-                bg-white rounded-xl p-2.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border transition-all group flex flex-col relative overflow-hidden h-full select-none
+                bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 group flex flex-col relative overflow-hidden h-full select-none
                 ${isReorderMode 
-                    ? 'cursor-move border-dashed border-[#FFD700] bg-yellow-50/30' 
-                    : 'border-gray-100 hover:border-[#FFD700]/50 hover:shadow-md cursor-default'
+                    ? 'cursor-move ring-2 ring-[#FFD700] ring-offset-2 scale-[0.98]' 
+                    : 'border border-gray-100 hover:border-yellow-400 cursor-default'
                 }
             `}
         >
-            <div className="flex justify-between items-start mb-2 gap-2">
-                <div className="w-10 h-10 md:w-11 md:h-11 bg-gray-50 rounded-lg flex items-center justify-center overflow-hidden shrink-0 border border-gray-100">
-                    {item.image ? <img src={item.image} className="w-full h-full object-cover"/> : <Utensils size={16} className="text-gray-300"/>}
-                </div>
-                <div className="min-w-0 flex-1">
-                    <h4 className="font-bold text-[11px] md:text-xs text-[#1A1A1A] line-clamp-1 leading-tight">{item.name}</h4>
-                    <span className="text-[8px] text-gray-400 bg-gray-50 px-1 py-0.5 rounded uppercase font-bold tracking-wider inline-block mt-1">{item.id}</span>
-                </div>
+            <div className="w-full aspect-square bg-gray-50 relative overflow-hidden shrink-0 border-b border-gray-100">
+                {item.image ? (
+                    <img src={item.image} className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-500"/>
+                ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-300 bg-gradient-to-br from-gray-50 to-gray-100">
+                        <Utensils size={36} className="mb-2 opacity-40"/>
+                        <span className="text-[10px] tracking-widest font-bold opacity-40">NO IMAGE</span>
+                    </div>
+                )}
                 
+                <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-md text-white text-[10px] font-mono font-black px-2 py-1 rounded-lg shadow-sm">
+                    {item.id}
+                </div>
+
+                {priceMode === 'DELIVERY' && !isReorderMode && (
+                    <div className="absolute top-2 right-2 bg-blue-600/90 backdrop-blur-md text-white text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
+                        <Truck size={12}/> 抽成 {deliveryCommission}%
+                    </div>
+                )}
+
                 {!isReorderMode && (
-                    <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute top-1 right-1 bg-white/95 p-0.5 rounded-lg shadow-sm backdrop-blur-sm z-10 border border-gray-100">
-                        <button onClick={() => handleEditItem(item)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit3 size={11}/></button>
-                        <button onClick={() => handleDeleteClick(item.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 size={11}/></button>
+                    <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity translate-y-2 group-hover:translate-y-0 duration-300">
+                        <button onClick={() => handleEditItem(item)} className="p-2 text-[#1A1A1A] bg-white/95 backdrop-blur shadow-lg hover:bg-[#FFD700] rounded-xl transition-colors"><Edit3 size={14}/></button>
+                        <button onClick={() => handleDeleteClick(item.id)} className="p-2 text-red-600 bg-white/95 backdrop-blur shadow-lg hover:bg-red-500 hover:text-white rounded-xl transition-colors"><Trash2 size={14}/></button>
                     </div>
                 )}
             </div>
 
-            {isReorderMode && (
-                <div className="flex items-center justify-between bg-white border border-gray-200 rounded-lg mt-auto p-1 shadow-sm">
-                    <button onClick={() => handleMoveItem(item.globalIndex, 'UP')} className="p-1.5 hover:bg-gray-100 rounded text-gray-500 active:scale-95"><ArrowLeft size={12}/></button>
-                    <Move size={12} className="text-gray-300"/>
-                    <button onClick={() => handleMoveItem(item.globalIndex, 'DOWN')} className="p-1.5 hover:bg-gray-100 rounded text-gray-500 active:scale-95"><ArrowRight size={12}/></button>
-                </div>
-            )}
+            <div className="p-3 md:p-4 flex flex-col flex-grow bg-white relative z-10">
+                <h4 className="font-black text-sm md:text-base text-[#1A1A1A] line-clamp-2 leading-snug mb-3 group-hover:text-yellow-600 transition-colors">
+                    {item.name}
+                </h4>
 
-            {!isReorderMode && (
-                <div className="space-y-1 mt-auto">
-                    {(item.variants || []).slice(0, 3).map((v, idx) => {
-                        const dispPrice = getDisplayPrice(v.price);
-                        return (
-                            <div key={idx} className="flex justify-between items-center text-[9px] text-gray-600 border-b border-dashed border-gray-100 last:border-0 pb-0.5">
-                                <span className="font-medium truncate max-w-[60%]">{v.label}</span>
-                                <div className={`font-mono font-bold tabular-nums text-right ${priceMode === 'DELIVERY' ? 'text-blue-600' : 'text-[#1A1A1A]'}`}>RM{dispPrice.toFixed(0)}</div>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-            
-            {priceMode === 'DELIVERY' && !isReorderMode && <div className="absolute top-0 right-0 bg-blue-50 text-blue-600 text-[6px] font-black px-1.5 py-0.5 rounded-bl-md flex items-center gap-0.5 border-l border-b border-blue-100"><Truck size={6}/> +30%</div>}
+                {isReorderMode && (
+                    <div className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-xl mt-auto p-1.5 shadow-inner">
+                        <button onClick={() => handleMoveItem(item.globalIndex, 'UP')} className="p-2 hover:bg-white rounded-lg text-yellow-700 active:scale-95 shadow-sm"><ArrowLeft size={14}/></button>
+                        <Move size={16} className="text-yellow-500"/>
+                        <button onClick={() => handleMoveItem(item.globalIndex, 'DOWN')} className="p-2 hover:bg-white rounded-lg text-yellow-700 active:scale-95 shadow-sm"><ArrowRight size={14}/></button>
+                    </div>
+                )}
+
+                {!isReorderMode && (
+                    <div className="mt-auto space-y-1.5 bg-gray-50/70 rounded-xl p-2.5 md:p-3 border border-gray-100">
+                        {(item.variants || []).slice(0, 3).map((v, idx) => {
+                            const dispPrice = getDisplayPrice(v.price);
+                            return (
+                                <div key={idx} className="flex justify-between items-end border-b border-dashed border-gray-200 last:border-0 pb-1.5 last:pb-0">
+                                    <span className="font-bold text-xs text-gray-600 truncate pr-2">{v.label}</span>
+                                    <div className={`font-mono font-black tabular-nums whitespace-nowrap leading-none ${priceMode === 'DELIVERY' ? 'text-blue-600' : 'text-[#1A1A1A]'}`}>
+                                        <span className="text-[10px] mr-0.5 opacity-60">RM</span>
+                                        <span className="text-sm">{dispPrice.toFixed(0)}</span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+                {!isReorderMode && item.options && item.options.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                        {item.options.slice(0, 3).map(opt => (
+                            <span key={opt} className="text-[9px] bg-[#1A1A1A] text-[#FFD700] px-1.5 py-0.5 rounded flex items-center">{opt}</span>
+                        ))}
+                        {item.options.length > 3 && (
+                            <span className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-bold">+{item.options.length - 3}</span>
+                        )}
+                    </div>
+                )}
+            </div>
         </div>
     );
 
@@ -497,7 +465,7 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                         <div className="flex flex-col md:flex-row justify-between items-center gap-2">
                             <div className="flex gap-2 w-full md:flex-1 md:w-0 overflow-x-auto scrollbar-hide pb-1 md:pb-0 px-1">
                                 {categories.map(c => (
-                                    <button key={c.id} onClick={() => setActiveCategory(c.id)} disabled={isReorderMode && c.id === 'ALL' && false} className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-bold whitespace-nowrap transition-all duration-200 border shrink-0 ${activeCategory === c.id ? 'bg-gradient-to-r from-[#1A1A1A] to-[#333] text-[#FFD700] shadow-md border-transparent scale-105' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>
+                                    <button key={c.id} onClick={() => setActiveCategory(c.id)} disabled={isReorderMode && c.id === 'ALL'} className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-bold whitespace-nowrap transition-all duration-200 border shrink-0 ${activeCategory === c.id ? 'bg-gradient-to-r from-[#1A1A1A] to-[#333] text-[#FFD700] shadow-md border-transparent scale-105' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>
                                         {c.label}
                                     </button>
                                 ))}
@@ -511,9 +479,20 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
 
                                 {!isReorderMode && (
                                     <>
-                                        <div className="bg-gray-100 p-0.5 rounded-lg flex shrink-0 border border-gray-200">
-                                            <button onClick={() => setPriceMode('LOCAL')} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${priceMode === 'LOCAL' ? 'bg-white shadow-sm text-black ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}>堂食</button>
-                                            <button onClick={() => setPriceMode('DELIVERY')} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${priceMode === 'DELIVERY' ? 'bg-white shadow-sm text-blue-600 ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}><Truck size={10}/> 外卖</button>
+                                        <div className="bg-gray-100 p-0.5 rounded-lg flex shrink-0 border border-gray-200 items-center">
+                                            <button onClick={() => setPriceMode('LOCAL')} className={`px-2 py-1.5 rounded-md text-[10px] font-bold transition-all ${priceMode === 'LOCAL' ? 'bg-white shadow-sm text-black ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}>堂食</button>
+                                            <div className="flex items-center relative">
+                                                <button onClick={() => setPriceMode('DELIVERY')} className={`px-2 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${priceMode === 'DELIVERY' ? 'bg-white shadow-sm text-blue-600 ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}>
+                                                    <Truck size={10}/> 外卖
+                                                </button>
+                                                {priceMode === 'DELIVERY' && (
+                                                    <div className="flex items-center ml-1 pr-1 bg-white border border-gray-200 rounded text-[10px] h-6 shadow-sm overflow-hidden">
+                                                        <span className="text-gray-400 pl-1">抽成</span>
+                                                        <input type="number" value={deliveryCommission} onChange={e => setDeliveryCommission(Number(e.target.value) || 0)} className="w-7 text-center font-bold outline-none text-blue-600 bg-transparent text-[10px]" onClick={e => e.stopPropagation()}/>
+                                                        <span className="text-gray-400 font-mono">%</span>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                         <button onClick={handleAddNew} className="bg-[#FFD700] hover:bg-[#E5C100] text-black px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1 shadow-md active:scale-95 transition-all shrink-0 border border-yellow-400/20">
                                             <Plus size={14}/> <span className="hidden sm:inline">新增</span>
@@ -534,20 +513,16 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                                 </button>
                             </div>
                         )}
-                        
-                        {isReorderMode && (
-                            <div className="bg-yellow-50 text-yellow-800 text-[10px] font-bold px-3 py-2 rounded-lg border border-yellow-200 text-center animate-in slide-in-from-top-1 shadow-sm">
-                                拖拽卡片 (Desktop) 或 点击箭头 (Mobile) 调整顺序。完成后请点击“保存顺序”。
-                            </div>
-                        )}
                     </div>
 
-                    <div className="flex-grow overflow-hidden flex flex-col relative" id="menu-scroll-container">
+                    <div className="flex-grow overflow-hidden flex flex-col relative pb-[max(env(safe-area-inset-bottom,20px),1rem)]" id="menu-scroll-container">
                         {loading ? <div className="text-center py-20 text-gray-400 flex flex-col items-center"><RefreshCw className="animate-spin mb-2"/>Loading Menu...</div> : (
-                            <div className="overflow-y-auto p-3 md:p-4 pb-20 h-full">
+                            <div className="overflow-y-auto p-3 md:p-4 pb-32 h-full">
                                 {visibleGridItems.length === 0 ? <div className="text-center py-20 text-gray-400 font-bold">暂无菜品 (No Items)</div> : (
-                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-                                        {visibleGridItems.map((item, idx) => renderItemCard(item, idx))}
+                                    <div className="max-w-[1600px] mx-auto w-full">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 lg:gap-8">
+                                            {visibleGridItems.map((item, idx) => renderItemCard(item, idx))}
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -556,15 +531,10 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                 </div>
             )}
 
-            {/* View Mode: Edit (Refactored for Single Page Mobile Flow) */}
+            {/* View Mode: Edit */}
             {viewMode === 'EDIT' && (
-                // Use a single flex-col container. On desktop, md:flex-row is applied.
-                // IMPORTANT: The parent 'flex-col' and 'overflow-auto' on mobile creates the single page effect.
-                // On desktop, we lock the parent scroll and let children scroll.
-                <div className="flex-grow flex flex-col md:flex-row bg-[#F5F7FA] overflow-y-auto md:overflow-hidden h-full">
+                <div className="flex-grow flex flex-col md:flex-row bg-[#F5F7FA] overflow-y-auto md:overflow-hidden h-full relative">
                     
-                    {/* Left: Basic Info (Top on Mobile) */}
-                    {/* Remove h-full/overflow on mobile to allow natural stacking */}
                     <div className="w-full md:w-1/3 bg-white border-b md:border-r md:border-b-0 border-gray-200 p-6 flex flex-col shrink-0 z-20 md:h-full md:overflow-y-auto">
                         <div className="flex items-center justify-between mb-6">
                             <button onClick={() => setViewMode('LIST')} className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-black"><ChevronLeft size={16}/> 返回列表</button>
@@ -580,21 +550,23 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                         <div className="space-y-5">
                             <div>
                                 <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Name (菜名)</label>
-                                <input className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold outline-none border-2 border-transparent focus:border-[#FFD700]" value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Hokkien Mee" />
+                                <input className="w-full p-3 bg-gray-50 rounded-xl text-base md:text-sm font-bold outline-none border-2 border-transparent focus:border-[#FFD700]" value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Hokkien Mee" />
                             </div>
                             
                             <div>
                                 <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Category (分类)</label>
-                                <select className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold outline-none" value={newCategory} onChange={e => setNewCategory(e.target.value)}>
+                                <select className="w-full p-3 bg-gray-50 rounded-xl text-base md:text-sm font-bold outline-none" value={newCategory} onChange={e => setNewCategory(e.target.value)}>
                                     {categories.filter(c=>c.id!=='ALL').map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                                 </select>
                             </div>
 
-                            {/* --- IMAGE UPLOAD AREA --- */}
+                            {/* --- 🖼️ 照片上传区 (直接上传) --- */}
                             <div>
-                                <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Image (照片)</label>
+                                <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 flex items-center gap-1">
+                                    Image (照片)
+                                </label>
                                 <div 
-                                    className="relative w-full aspect-video bg-gray-50 rounded-xl overflow-hidden cursor-pointer group border-2 border-dashed border-gray-300 hover:border-[#FFD700] transition-colors"
+                                    className="relative w-full aspect-square bg-gray-50 rounded-xl overflow-hidden cursor-pointer group border-2 border-dashed border-gray-300 hover:border-[#FFD700] transition-colors"
                                     onClick={() => fileInputRef.current?.click()}
                                 >
                                     {newImage ? (
@@ -607,38 +579,30 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                                     ) : (
                                         <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2">
                                             {isUploading ? <Loader2 size={24} className="animate-spin text-[#FFD700]"/> : <ImageIcon size={24}/>}
-                                            <span className="text-xs font-bold">{isUploading ? '上传中...' : '点击上传照片'}</span>
+                                            <span className="text-xs font-bold">{isUploading ? '处理中...' : '点击上传照片'}</span>
                                         </div>
                                     )}
                                 </div>
-                                <input 
-                                    type="file" 
-                                    ref={fileInputRef} 
-                                    className="hidden" 
-                                    accept="image/*" 
-                                    onChange={handleImageUpload} 
-                                />
+                                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                             </div>
 
                             <div>
                                 <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Options (选项)</label>
-                                <input className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold outline-none" value={newOptions} onChange={e => setNewOptions(e.target.value)} placeholder="e.g. 少辣, 加蛋, 走青 (Comma separated)" />
+                                <input className="w-full p-3 bg-gray-50 rounded-xl text-base md:text-sm font-bold outline-none border-2 border-transparent focus:border-[#FFD700]" value={newOptions} onChange={e => setNewOptions(e.target.value)} placeholder="e.g. 少辣, 加蛋, 走青 (Comma separated)" />
                             </div>
                         </div>
                         
-                        {/* Desktop Only Save Button (Hidden on Mobile to use floating bottom bar or just scroll down) */}
-                        <div className="mt-auto pt-6 hidden md:block">
+                        <div className="mt-auto pt-6 hidden md:block pb-[env(safe-area-inset-bottom)]">
                             <button onClick={handleSaveItem} className="w-full py-4 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-lg shadow-lg hover:bg-black flex items-center justify-center gap-2">
                                 <Save size={20}/> 保存菜品 (Save)
                             </button>
                         </div>
                     </div>
 
-                    {/* Right: Variants & Recipe (Bottom on Mobile) */}
-                    <div className="flex-grow p-6 md:h-full md:overflow-y-auto pb-32 md:pb-6">
+                    <div className="flex-grow p-6 md:h-full md:overflow-y-auto pb-40 md:pb-6">
                         <div className="max-w-3xl mx-auto">
                             <div className="flex justify-between items-center mb-6">
-                                <h4 className="font-black text-lg text-[#1A1A1A]">规格与配方 (Variants & Recipe)</h4>
+                                <h4 className="font-black text-lg text-[#1A1A1A]">规格与配方</h4>
                                 <div className="flex items-center gap-2">
                                     <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200 overflow-x-auto max-w-[200px] md:max-w-none scrollbar-hide">
                                         {newVariants.map((v, idx) => (
@@ -659,15 +623,17 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                             </div>
 
                             <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-200">
-                                {/* Variant Info */}
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 pb-6 border-b border-gray-100">
                                     <div>
                                         <label className="text-[9px] font-bold text-gray-400 uppercase mb-1 block">Label (规格名)</label>
-                                        <input className="w-full p-2 bg-gray-50 rounded-lg text-sm font-bold outline-none border focus:border-[#FFD700]" value={newVariants[activeVariantTab]?.label || ''} onChange={e => updateVariantField(activeVariantTab, 'label', e.target.value)} />
+                                        <input className="w-full p-2 bg-gray-50 rounded-lg text-base md:text-sm font-bold outline-none border focus:border-[#FFD700]" value={newVariants[activeVariantTab]?.label || ''} onChange={e => updateVariantField(activeVariantTab, 'label', e.target.value)} />
                                     </div>
                                     <div>
                                         <label className="text-[9px] font-bold text-gray-400 uppercase mb-1 block">Local Price</label>
-                                        <div className="relative"><span className="absolute left-2 top-1.5 text-gray-400 text-xs">RM</span><input type="number" className="w-full p-2 pl-8 bg-gray-50 rounded-lg text-sm font-bold outline-none border focus:border-[#FFD700]" value={newVariants[activeVariantTab]?.price || 0} onChange={e => updateVariantField(activeVariantTab, 'price', parseFloat(e.target.value))} /></div>
+                                        <div className="relative">
+                                            <span className="absolute left-2 top-[9px] text-gray-400 text-xs">RM</span>
+                                            <input type="number" className="w-full p-2 pl-8 bg-gray-50 rounded-lg text-base md:text-sm font-bold outline-none border focus:border-[#FFD700]" value={newVariants[activeVariantTab]?.price || 0} onChange={e => updateVariantField(activeVariantTab, 'price', parseFloat(e.target.value))} />
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="text-[9px] font-bold text-gray-400 uppercase mb-1 block">Delivery Price (Auto)</label>
@@ -681,20 +647,16 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                                     </div>
                                 </div>
 
-                                {/* Recipe Table */}
                                 <div className="space-y-4">
                                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                         <h5 className="font-bold text-sm text-[#1A1A1A] flex items-center gap-2"><Box size={16}/> 配方食材 (Ingredients)</h5>
                                         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                                            <button onClick={syncRecipeToAll} className="text-[10px] bg-indigo-50 text-indigo-600 px-3 py-2 rounded-lg font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1 flex-1 sm:flex-none justify-center" title="Copy current ingredients to all other variants">
+                                            <button onClick={syncRecipeToAll} className="text-[10px] bg-indigo-50 text-indigo-600 px-3 py-2 rounded-lg font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1 flex-1 sm:flex-none justify-center">
                                                 <Layers size={12}/> 同步到所有规格
                                             </button>
-                                            
-                                            {/* NEW: COPY FROM OTHER RECIPE BUTTON */}
                                             <button onClick={() => setShowCopyModal(true)} className="text-[10px] bg-orange-50 text-orange-600 px-3 py-2 rounded-lg font-bold hover:bg-orange-100 transition-colors flex items-center gap-1 flex-1 sm:flex-none justify-center">
                                                 <BookOpen size={12}/> 从其他菜品复制
                                             </button>
-
                                             <button onClick={() => setShowStockSelector(true)} className="text-[10px] bg-blue-50 text-blue-600 px-3 py-2 rounded-lg font-bold hover:bg-blue-100 transition-colors flex items-center gap-1 flex-1 sm:flex-none justify-center">
                                                 <Plus size={12}/> 添加原料
                                             </button>
@@ -715,13 +677,7 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                                                     </div>
                                                     <div className="flex items-center gap-3">
                                                         <div className="flex items-center bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
-                                                            {/* WHITE BACKGROUND INPUT */}
-                                                            <input 
-                                                                type="number" 
-                                                                value={ing.qty} 
-                                                                onChange={e => updateIngredientQty(i, parseFloat(e.target.value))} 
-                                                                className="w-16 p-1.5 text-center font-bold text-sm outline-none bg-white text-black" 
-                                                            />
+                                                            <input type="number" value={ing.qty} onChange={e => updateIngredientQty(i, parseFloat(e.target.value))} className="w-16 p-1.5 text-center font-bold text-base md:text-sm outline-none bg-white text-black" />
                                                             <span className="text-[10px] font-bold text-gray-500 px-2 border-l bg-gray-50 h-full flex items-center">{ing.unit}</span>
                                                         </div>
                                                         <div className="text-right w-16">
@@ -737,19 +693,18 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                             </div>
                         </div>
 
-                        {/* Mobile Save Button (Fixed at Bottom or at end of flow) */}
-                        <div className="md:hidden mt-8">
-                             <button onClick={handleSaveItem} className="w-full py-4 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-lg shadow-lg hover:bg-black flex items-center justify-center gap-2 mb-20">
-                                <Save size={20}/> 保存菜品 (Save)
-                            </button>
-                        </div>
+                    </div>
+
+                    <div className="md:hidden fixed bottom-0 left-0 w-full px-4 pt-3 pb-[max(env(safe-area-inset-bottom,20px),1rem)] bg-white/95 backdrop-blur-md border-t border-gray-200 z-50 shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
+                        <button onClick={handleSaveItem} className="w-full py-3.5 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-lg shadow-lg hover:bg-black flex items-center justify-center gap-2 active:scale-[0.98] transition-all">
+                            <Save size={20}/> 保存菜品 (Save)
+                        </button>
                     </div>
                 </div>
             )}
 
-            {/* Delete Modal */}
             {deleteId && (
-                <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in pb-[env(safe-area-inset-bottom)]">
                     <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl">
                         <Trash2 size={48} className="mx-auto text-red-500 mb-4"/>
                         <h3 className="font-black text-xl mb-2">确认删除?</h3>
@@ -762,39 +717,33 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                 </div>
             )}
 
-            {/* Stock Selector Modal */}
             {showStockSelector && (
-                <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in pb-[env(safe-area-inset-bottom)]">
                     <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh]">
                         <div className="p-4 border-b flex justify-between items-center">
-                            <h3 className="font-black text-lg">选择库存原料 (Add Ingredient)</h3>
+                            <h3 className="font-black text-lg">选择库存原料</h3>
                             <button onClick={() => setShowStockSelector(false)}><X/></button>
                         </div>
                         <div className="p-4 border-b">
                             <div className="relative">
                                 <Search className="absolute left-3 top-2.5 text-gray-400" size={16}/>
-                                <input className="w-full pl-10 p-2 bg-gray-50 rounded-xl text-sm font-bold outline-none" placeholder="Search stock..." value={stockSearch} onChange={e => setStockSearch(e.target.value)} autoFocus />
+                                <input className="w-full pl-10 p-2 bg-gray-50 rounded-xl text-base md:text-sm font-bold outline-none" placeholder="Search stock..." value={stockSearch} onChange={e => setStockSearch(e.target.value)} autoFocus />
                             </div>
                         </div>
-                        <div className="flex-grow overflow-y-auto p-2">
-                            {/* Grouped Stock List */}
+                        <div className="flex-grow overflow-y-auto p-2 pb-6">
                             {(() => {
                                 const grouped: Record<string, StockItem[]> = {};
                                 const kitchenOnly = stockItems.filter(s => {
                                     if (stockSearch) return s.name.toLowerCase().includes(stockSearch.toLowerCase());
                                     return ['FRESH', 'MEAT', 'SEAFOOD', 'VEG', 'NOODLE', 'DRY', 'SAUCE', 'HQ'].includes(s.category) || s.id.startsWith('K');
                                 });
-
                                 kitchenOnly.forEach(s => {
                                     const catLabel = STOCK_CATEGORIES[s.category] || '其他 (Other)';
                                     if (!grouped[catLabel]) grouped[catLabel] = [];
                                     grouped[catLabel].push(s);
                                 });
-
                                 const sortedGroups = Object.keys(grouped).sort();
-
                                 if (sortedGroups.length === 0) return <div className="p-8 text-center text-gray-400 text-xs">No matching kitchen ingredients found.</div>;
-
                                 return sortedGroups.map(group => (
                                     <div key={group} className="mb-4">
                                         <div className="px-3 py-2 bg-gray-50 rounded-lg text-xs font-black text-gray-500 uppercase tracking-wider mb-1 sticky top-0 z-10 flex items-center gap-2">
@@ -817,9 +766,8 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                 </div>
             )}
 
-            {/* Copy Recipe Modal */}
             {showCopyModal && (
-                <div className="fixed inset-0 bg-black/60 z-[210] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                <div className="fixed inset-0 bg-black/60 z-[210] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in pb-[env(safe-area-inset-bottom)]">
                     <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[80vh]">
                         <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-2xl">
                             <div>
@@ -833,7 +781,7 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                             <div className="relative">
                                 <Search className="absolute left-3 top-2.5 text-gray-400" size={16}/>
                                 <input 
-                                    className="w-full pl-10 p-2 bg-white border-2 border-gray-200 rounded-xl text-sm font-bold outline-none focus:border-orange-400 transition-colors" 
+                                    className="w-full pl-10 p-2 bg-white border-2 border-gray-200 rounded-xl text-base md:text-sm font-bold outline-none focus:border-orange-400 transition-colors" 
                                     placeholder="搜索菜品 (Search Menu)..." 
                                     value={copySearch} 
                                     onChange={e => setCopySearch(e.target.value)} 
@@ -842,9 +790,9 @@ export const MenuManagement: React.FC<MenuManagementProps> = ({ onClose, isModal
                             </div>
                         </div>
 
-                        <div className="flex-grow overflow-y-auto p-2 space-y-1">
+                        <div className="flex-grow overflow-y-auto p-2 space-y-1 pb-6">
                             {menuItems
-                                .filter(m => m.id !== editingId) // Exclude self
+                                .filter(m => m.id !== editingId)
                                 .filter(m => m.name.toLowerCase().includes(copySearch.toLowerCase()))
                                 .map(item => (
                                     <button 

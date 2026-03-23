@@ -48,8 +48,26 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({ employee }) 
     };
 
     if (!employee) return null;
-    
-    const isClockedIn = !!todayRecord;
+
+    // 拦截免打卡人员
+    if (employee.isAttendanceExempt) {
+        return (
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 mb-6 relative overflow-hidden flex justify-between items-center">
+                <div>
+                    <h3 className="font-black text-lg text-[#1A1A1A] flex items-center gap-2">
+                        <CheckCircle2 size={20} className="text-blue-500"/> 
+                        考勤状态 (Attendance)
+                    </h3>
+                    <p className="text-xs text-gray-400 font-bold mt-1">您已被设为无需打卡人员</p>
+                </div>
+                <div className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-xl border border-blue-100 font-black text-xs shadow-sm">
+                    免打卡 (Exempt)
+                </div>
+            </div>
+        );
+    }
+    
+    const isClockedIn = !!todayRecord;
     const isCompleted = !!todayRecord?.clockOut;
 
     return (

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CreditCard, Calendar, Clock, DollarSign, Filter, CheckCircle2, AlertTriangle, X, Link as LinkIcon, Loader2, Plus, Save, Edit3, Trash2, Cloud, Clipboard, Search, ArrowLeft, ChevronRight, Hash, Tag, MoreHorizontal, ExternalLink, MessageSquare, List, CalendarDays, FileDown, Printer, User, Layers, Box, Wrench, Briefcase, CalendarRange, Wallet, RefreshCw, Square, CheckSquare, ListChecks, Settings2, ChevronDown, RotateCcw, Scissors, FileText, PenTool } from 'lucide-react';
 import { ExpenseItem, Supplier, SettlementRecord, Employee } from '../../types';
 import { DataManager } from '../../utils/dataManager';
-import { collection, getDocs, doc, deleteDoc, getDoc, setDoc } from "firebase/firestore";
+// 🔧 修复导入：补全删除、拉取、事务和分页控制所需的 API
+import { collection, getDocs, query, where, orderBy, doc, updateDoc, deleteDoc, runTransaction, limit } from "firebase/firestore";
 import { db } from '../../firebaseConfig';
 import { jsPDF } from "jspdf";
 import html2canvas from 'html2canvas';
@@ -17,54 +18,39 @@ const ACCOUNTING_CATEGORIES: Record<string, { label: string, options: {id: strin
     'COGS (销货成本 - 随销量浮动)': {
         label: 'COGS (Cost of Goods Sold)',
         options: [
+            { id: 'INGREDIENT_HQ', label: '食材-总店 (HQ Ingredients)' },
             { id: 'INGREDIENT_MEAT', label: '食材-肉类 (Meat)' },
             { id: 'INGREDIENT_SEAFOOD', label: '食材-海鲜 (Seafood)' },
             { id: 'INGREDIENT_VEG', label: '食材-蔬果 (Veg/Fruit)' },
             { id: 'INGREDIENT_DRY', label: '食材-干货 (Dry Goods)' },
             { id: 'INGREDIENT_SAUCE', label: '食材-酱料 (Sauce)' },
-            { id: 'INGREDIENT_NOODLE', label: '食材-面条 (Noodle/Rice)' },
-            { id: 'INGREDIENT_OIL', label: '食材-油类 (Cooking Oil)' },
-            { id: 'INGREDIENT_EGG', label: '食材-蛋类 (Eggs)' },
-            { id: 'INGREDIENT_FROZEN', label: '食材-冷冻品 (Frozen)' },
             { id: 'BEVERAGE', label: '水吧原料 (Beverage)' },
             { id: 'PACKAGING', label: '包装材料 (Packaging)' },
             { id: 'GAS_COGS', label: '烹饪煤气 (Cooking Gas)' },
-            { id: 'SUPPLIER', label: '一般进货 (General)' },
-            { id: 'SUPPLIER_HQ', label: '总店进货 (HQ Supply)' }
+            { id: 'SUPPLIER', label: '一般进货 (General)' }
         ]
     },
     'OPEX (营运开支 - 固定/半固定)': {
         label: 'OPEX (Operating Expenses)',
         options: [
+            { id: 'RENT', label: '租金 (Rent)' },
+            { id: 'UTILITIES', label: '水电费 (Utilities)' },
             { id: 'SALARY', label: '薪资 (Salary)' },
-            { id: 'STAFF_MEAL', label: '员工餐 (Staff Meal)' },
-            { id: 'STAFF_ACCOMMODATION', label: '员工住宿 (Staff Housing)' },
+            { id: 'STAFF_MEAL', label: '员工餐 (Staff Meal)' }, 
             { id: 'MAINTENANCE', label: '维修保养 (Maintenance)' },
-            { id: 'PEST_CONTROL', label: '虫害防治 (Pest Control)' },
-            { id: 'CLEANING', label: '清洁服务 (Cleaning Service)' },
-            { id: 'WASTE', label: '垃圾处理 (Waste Disposal)' },
             { id: 'MARKETING', label: '营销广告 (Marketing)' },
             { id: 'PROFESSIONAL', label: '专业服务/律师 (Professional/Legal)' },
-            { id: 'ACCOUNTING', label: '会计服务 (Accounting)' },
-            { id: 'BANK_FEE', label: '银行抽佣/手续费 (Bank & Merchant Fees)' }, // 🟢 新增：银行抽佣分类
-            { id: 'INSURANCE', label: '保险 (Insurance)' },
-            { id: 'SUPPLIES', label: '杂项耗材 (Supplies)' },
-            { id: 'LOGISTICS', label: '物流运输 (Logistics)' },
-            { id: 'TRANSPORT', label: '交通/油费 (Transport/Fuel)' },
-            { id: 'PRINTING', label: '印刷品 (Printing)' },
-            { id: 'MISC_OPEX', label: '其他杂费 (Miscellaneous)' }
+            { id: 'SUPPLIES', label: '杂项耗材 (Supplies - Cleaning/Office)' },
+            { id: 'LICENSE', label: '执照/订阅 (License/Sub)' },
+            { id: 'LOGISTICS', label: '物流运输 (Logistics)' }
         ]
     },
     'CAPEX (资本支出 - 资产增加)': {
         label: 'CAPEX (Capital Expenditure)',
         options: [
             { id: 'EQUIPMENT', label: '设备采购 (Equipment)' },
-            { id: 'KITCHEN_EQUIPMENT', label: '厨房设备 (Kitchen Equipment)' },
-            { id: 'FURNITURE', label: '家具/桌椅 (Furniture)' },
             { id: 'RENOVATION', label: '装修工程 (Renovation)' },
-            { id: 'IT_SYSTEM', label: '电脑/系统 (IT/POS System)' },
-            { id: 'DEPOSIT', label: '押金 (Deposit)' },
-            { id: 'SIGNAGE', label: '招牌/装饰 (Signage/Décor)' }
+            { id: 'DEPOSIT', label: '押金 (Deposit)' }
         ]
     }
 };
@@ -97,7 +83,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
     const [loading, setLoading] = useState(true);
     const [viewMode, setViewMode] = useState<'LIST' | 'SUPPLIER_DETAIL'>('LIST');
     const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'UNPAID' | 'PARTIAL' | 'PAID' | 'ALL'>('UNPAID');
+    const [activeTab, setActiveTab] = useState<'UNPAID' | 'PARTIAL' | 'PAID' | 'ALL'>('ALL');
     const [searchTerm, setSearchTerm] = useState('');
     const [dateRange, setDateRange] = useState<{start: string, end: string}>({ start: '', end: '' });
     const [selectedTag, setSelectedTag] = useState<string>('ALL');
@@ -108,11 +94,9 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
     const [newTagInput, setNewTagInput] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-    const [showMobileFilters, setShowMobileFilters] = useState(false);
-    const [displayLimit, setDisplayLimit] = useState(50);
     const [payModalData, setPayModalData] = useState<ExpenseItem | null>(null);
     const [payAmount, setPayAmount] = useState(0);
-    const [payMethod, setPayMethod] = useState('BANK_TRANSFER');
+    const [payMethod, setPayMethod] = useState<string>('');
     const printRef = useRef<HTMLDivElement>(null);
     const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
     const [printData, setPrintData] = useState<ExpenseItem[]>([]);
@@ -123,55 +107,127 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
     const voucherRef = useRef<HTMLDivElement>(null);
     const [printingVoucher, setPrintingVoucher] = useState<ExpenseItem | null>(null);
 
+    const [displayLimit, setDisplayLimit] = useState(30);
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [totalLoaded, setTotalLoaded] = useState(0);
+    // 👑 计费截断警报状态
+    const [isBillingCapped, setIsBillingCapped] = useState(false);
+
     useEffect(() => { loadData(); }, []);
+    useEffect(() => {
+    if (!dateRange.start || !dateRange.end) return;
+    const fetchDateRange = async () => {
+        try {
+            const qRange = query(
+                collection(db, 'standalone_expenses'),
+                where('time', '>=', dateRange.start),
+                where('time', '<=', dateRange.end + 'T23:59:59'),
+                orderBy('time', 'desc')
+            );
+            const snap = await getDocs(qRange);
+            const rangeItems: ExpenseItem[] = [];
+            snap.forEach(doc => rangeItems.push(doc.data() as ExpenseItem));
+            
+            setAllBills(prev => {
+                const merged = new Map(prev.map(b => [b.id, b]));
+                rangeItems.forEach(b => merged.set(b.id, b));
+                const arr = Array.from(merged.values());
+                arr.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+                return arr;
+            });
+        } catch (err) { console.error('Date range fetch error:', err); }
+    };
+    fetchDateRange();
+}, [dateRange.start, dateRange.end]);
 
     const loadData = async () => {
         setLoading(true);
+        setIsBillingCapped(false);
         try {
             const [sups, emps] = await Promise.all([DataManager.getSuppliers(), DataManager.getEmployees()]);
             setSuppliers(sups);
             setEmployees(emps);
             
-            const settlements = await DataManager.getSettlements();
             let expenses: ExpenseItem[] = [];
+            const cutoffDate = new Date();
+            cutoffDate.setMonth(cutoffDate.getMonth() - 3);
+            const cutoffStr = cutoffDate.toISOString().split('T')[0];
+
+            // 👑 防爆库计费护栏：强制限制结算单拉取 100 条 (后端分页职责不该交给前端)
+            const qSettlements = query(collection(db, 'settlements'), where('date', '>=', cutoffStr), limit(100));
             
-            settlements.forEach(s => { 
+            // 1. 捞取所有未结清的账单 (无视时间，必须全拉但未结清量通常可控)
+            const qUnpaid = query(
+                collection(db, 'standalone_expenses'), 
+                where('paymentStatus', 'in', ['UNPAID', 'PARTIAL'])
+            );
+
+            // 2. 捞取最近 3 个月的所有账单 👑 防爆库护栏：强制 limit 300
+            const recentDate = new Date();
+            recentDate.setMonth(recentDate.getMonth() - 3); 
+            const recentStr = recentDate.toISOString().split('T')[0];
+            const qRecent = query(
+                collection(db, 'standalone_expenses'), 
+                where('time', '>=', recentStr),
+                orderBy('time', 'desc'),
+                limit(300)
+            );
+
+            // 并发执行
+            const [stlSnap, unpaidSnap, recentSnap] = await Promise.all([
+                getDocs(qSettlements),
+                getDocs(qUnpaid), 
+                getDocs(qRecent)
+            ]);
+
+            // 触发防爆警告
+            if (recentSnap.size >= 300 || stlSnap.size >= 100) {
+                setIsBillingCapped(true);
+            }
+
+            stlSnap.docs.forEach(d => { 
+                const s = d.data() as SettlementRecord;
                 if (s.expenses) expenses.push(...s.expenses.map(e => ({...e, settlementId: s.id}))); 
             });
+            unpaidSnap.forEach(doc => { expenses.push(doc.data() as ExpenseItem); });
+            recentSnap.forEach(doc => { expenses.push(doc.data() as ExpenseItem); });
             
-            const snap = await getDocs(collection(db, 'standalone_expenses'));
-            snap.forEach(doc => { expenses.push(doc.data() as ExpenseItem); });
-            
+            // 去重和排序
             const unique = Array.from(new Map(expenses.map(item => [item.id, item])).values());
             unique.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
             
             setAllBills(unique);
+            setTotalLoaded(unique.length);
+            setDisplayLimit(30); 
+            
         } catch (err) { console.error(err); } finally { setLoading(false); }
     };
 
     const filteredBills = useMemo(() => {
-        setDisplayLimit(50); 
-        // 🟢 核心过滤：将所有 pay_xxx (子付款记录) 从 UI 中隐藏，防止列表双重污染
-        let list = allBills.filter(b => !b.id.startsWith('pay_'));
-
+        let list = allBills;
         if (activeTab !== 'ALL') list = list.filter(b => b.paymentStatus === activeTab);
         if (searchTerm) {
             const lower = searchTerm.toLowerCase();
+            const isNumericSearch = /^\d+$/.test(searchTerm.trim());
             list = list.filter(b => {
                 const sup = suppliers.find(s => s.name === b.company);
-                const supIdMatch = sup?.id.toLowerCase().includes(lower);
-                return b.company.toLowerCase().includes(lower) || b.note?.toLowerCase().includes(lower) || b.id.toLowerCase().includes(lower) || supIdMatch;
+                if (isNumericSearch) {
+                    return sup?.id === searchTerm.trim() || b.company.toLowerCase().includes(lower);
+                }
+                return b.company.toLowerCase().includes(lower) || (b.note || '').toLowerCase().includes(lower);
             });
         }
         if (dateRange.start) list = list.filter(b => b.time >= dateRange.start);
         if (dateRange.end) list = list.filter(b => b.time <= dateRange.end + 'T23:59:59');
-        if (selectedTag !== 'ALL') list = list.filter(b => b.tags?.includes(selectedTag));
+        if (selectedTag !== 'ALL') list = list.filter(b => (b.tags || []).includes(selectedTag));
         if (viewMode === 'SUPPLIER_DETAIL' && selectedSupplierId) {
             const sup = suppliers.find(s => s.id === selectedSupplierId);
             if (sup) list = list.filter(b => b.company === sup.name);
         }
+        const hasActiveFilter = dateRange.start || dateRange.end || searchTerm || selectedTag !== 'ALL' || activeTab !== 'ALL' || viewMode === 'SUPPLIER_DETAIL';
+        if (!hasActiveFilter) return list.slice(0, displayLimit);
         return list;
-    }, [allBills, activeTab, searchTerm, dateRange, selectedTag, viewMode, selectedSupplierId, suppliers]);
+    }, [allBills, activeTab, searchTerm, dateRange, selectedTag, viewMode, selectedSupplierId, suppliers, displayLimit]);
 
     const unpaidFilteredBills = useMemo(() => filteredBills.filter(b => b.paymentStatus !== 'PAID'), [filteredBills]);
 
@@ -184,7 +240,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
 
     const availableTags = useMemo(() => {
         const tagSet = new Set<string>();
-        allBills.forEach(b => b.tags?.forEach(t => tagSet.add(t)));
+        allBills.forEach(b => (b.tags || []).forEach(t => tagSet.add(t)));
         return Array.from(tagSet).sort();
     }, [allBills]);
 
@@ -195,7 +251,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
         setShowVoucherConfirm(false);
         if (bill) {
             setEditingBill({ ...bill, tags: bill.tags || [], creditNote: bill.creditNote || 0 });
-            if (bill.tags?.includes('SELF_ISSUED')) setIsVoucherMode(true);
+            if ((bill.tags || []).includes('SELF_ISSUED')) setIsVoucherMode(true);
         } else {
             setEditingBill({ id: '', company: '', category: 'SUPPLIES', amount: 0, totalBillAmount: 0, creditNote: 0, paymentStatus: 'UNPAID', time: new Date().toISOString(), tags: [], linkUrl: '', note: '', paymentMethod: 'BANK_TRANSFER', paidBy: 'COMPANY', isAdvancePayment: false });
         }
@@ -235,9 +291,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             const isPaid = editingBill.paymentStatus === 'PAID';
             const cn = Number(editingBill.creditNote) || 0;
             const fullTotal = Number(editingBill.totalBillAmount) || 0;
-            // amount 始终代表实际发生的资金流出 (用于初始录入状态)
             const paidAmt = isPaid ? (fullTotal - cn) : (Number(editingBill.amount) || 0);
-            
             const payDate = isPaid ? (editingBill.time || new Date().toISOString()) : undefined;
 
             let finalTags = editingBill.tags || [];
@@ -262,13 +316,14 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             };
             
             const finalBill = JSON.parse(JSON.stringify(rawBill));
-
             if (finalBill.outstandingAmount! <= 0.1) finalBill.paymentStatus = 'PAID';
             else if (finalBill.outstandingAmount! < (fullTotal - cn)) finalBill.paymentStatus = 'PARTIAL';
             else finalBill.paymentStatus = 'UNPAID';
 
-            await DataManager.saveStandaloneExpense(finalBill);
-            if (finalBill.settlementId) await DataManager.updateExpenseInSettlement(finalBill.settlementId, finalBill);
+            await DataManager.saveStandaloneExpense(finalBill); 
+            if (finalBill.settlementId) {
+                await DataManager.updateExpenseInSettlement(finalBill.settlementId, finalBill); 
+            }
 
             await loadData();
             setIsFormOpen(false);
@@ -279,36 +334,38 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
         if (!editingBill.id) return;
         setIsSaving(true);
         try {
-            // 🟢 核心防御：删除主单据前，必须连同其底下的所有分期付款子记录一并粉碎
-            const linkedPayments = allBills.filter(b => b.id.startsWith(`pay_${editingBill.id}_`));
-            for (const p of linkedPayments) {
-                await deleteDoc(doc(db, 'standalone_expenses', p.id));
-            }
+            // 1. Delete standalone document safely
+            try {
+                await deleteDoc(doc(db, 'standalone_expenses', editingBill.id));
+            } catch (err) { console.warn("Standalone doc delete err:", err); }
 
-            try { await deleteDoc(doc(db, 'standalone_expenses', editingBill.id)); } catch (err) {}
-
+            // 2. 👑 防死账护栏：必须使用 runTransaction 绝对防止覆盖他人结算数据
             if (editingBill.settlementId) {
                 const ref = doc(db, 'settlements', editingBill.settlementId);
-                const snap = await getDoc(ref);
-                if (snap.exists()) {
+                await runTransaction(db, async (transaction) => {
+                    const snap = await transaction.get(ref);
+                    if (!snap.exists()) return; // 结算单已被删则跳过
                     const data = snap.data() as SettlementRecord;
                     const newExpenses = (data.expenses || []).filter(e => e.id !== editingBill.id);
-                    await setDoc(ref, { ...data, expenses: newExpenses });
-                }
+                    transaction.update(ref, { expenses: newExpenses });
+                });
             }
 
             await loadData();
             setIsFormOpen(false);
             setShowDeleteConfirm(false);
-            alert("✅ 账单及其子付款记录已彻底删除 (Deleted)");
-        } catch (e) { console.error("Delete failed", e); alert("Delete failed"); } finally { setIsSaving(false); }
+        } catch (e) { 
+            console.error("Delete failed", e); 
+            alert("Delete failed, check console."); 
+        } finally { 
+            setIsSaving(false); 
+        }
     };
 
     const handlePasteLink = async () => {
         try { const text = await navigator.clipboard.readText(); if (text) setEditingBill(prev => ({ ...prev, linkUrl: text })); } catch (err) { alert("Clipboard permission denied"); }
     };
 
-    // --- QUICK PAY LOGIC ---
     const handleQuickPay = async () => {
         if (!payModalData) return;
         if (!payMethod) return alert("Select Payment Method");
@@ -327,7 +384,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             if (bill.paymentStatus === 'UNPAID' || !bill.paymentStatus) {
                 const updatedBill = {
                     ...bill,
-                    amount: payAmount, // 记录首次支付现金流
+                    amount: payAmount,
                     outstandingAmount: newOutstanding,
                     paymentStatus: newStatus,
                     paymentMethod: payMethod,
@@ -336,9 +393,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                 };
                 await DataManager.saveStandaloneExpense(updatedBill);
                 if (updatedBill.settlementId) await DataManager.updateExpenseInSettlement(updatedBill.settlementId, updatedBill);
-
             } else {
-                // 🟢 部分支付产生的尾款：单独开单，确保资金管理精准扣减
                 const paymentRecord: ExpenseItem = {
                     id: `pay_${bill.id}_${Date.now()}`,
                     category: bill.category,
@@ -366,112 +421,35 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             }
 
             setPayModalData(null);
-            alert(`✅ Payment Recorded via ${payMethod === 'CASH' ? 'Cash' : 'Bank'}`);
+            setPayMethod('');
             loadData();
-        } catch (e) { console.error(e); alert("Payment Error"); } finally { setIsSaving(false); }
+        } catch (e) {
+            console.error(e);
+            alert("Payment Error");
+        } finally {
+            setIsSaving(false);
+        }
     };
 
-    // 🟢 核心防御：撤销付款时，连同幽灵子账单一起清理
     const handleUndoPayment = async (bill: ExpenseItem) => {
         if (!confirm(`确定要撤销此账单的付款吗？状态将变回 "UNPAID"。\n(Undo Payment?)`)) return;
-        setIsSaving(true);
-        try {
-            // 清理尾款单 (pay_xxx)
-            const linkedPayments = allBills.filter(b => b.id.startsWith(`pay_${bill.id}_`));
-            for (const p of linkedPayments) {
-                await deleteDoc(doc(db, 'standalone_expenses', p.id));
-            }
+        const cn = bill.creditNote || 0;
+        const originalTotal = bill.totalBillAmount !== undefined ? bill.totalBillAmount : (bill.amount || 0);
+        const rawUpdated: ExpenseItem = {
+            ...bill,
+            amount: 0,
+            outstandingAmount: originalTotal - cn,
+            totalBillAmount: originalTotal,
+            paymentStatus: 'UNPAID',
+            note: (bill.note || '') + `\n[${new Date().toISOString().split('T')[0]}] Payment Reverted (Undo)`,
+        };
+        const updated = JSON.parse(JSON.stringify(rawUpdated));
+        delete updated.paymentDate;
 
-            const cn = bill.creditNote || 0;
-            const originalTotal = bill.totalBillAmount !== undefined ? bill.totalBillAmount : (bill.amount || 0);
-            
-            // 使用正则清理之前自动加上去的 Paid 备注文本
-            const cleanNote = (bill.note || '')
-                .replace(/\[.*\] Paid.*via.*/g, '')
-                .replace(/\[.*\] Balance Paid.*via.*/g, '')
-                .replace(/\[.*\] Batch.*Paid.*via.*/g, '')
-                .trim();
-
-            const rawUpdated: ExpenseItem = {
-                ...bill,
-                amount: 0, // 钱收回，流出变0
-                outstandingAmount: originalTotal - cn,
-                totalBillAmount: originalTotal,
-                paymentStatus: 'UNPAID',
-                note: cleanNote + `\n[${new Date().toISOString().split('T')[0]}] Payment Reverted (Undo)`,
-            };
-            const updated = JSON.parse(JSON.stringify(rawUpdated));
-            delete updated.paymentDate;
-
-            await DataManager.saveStandaloneExpense(updated);
-            if (updated.settlementId) await DataManager.updateExpenseInSettlement(updated.settlementId, updated);
-            
-            alert("✅ 付款已撤销 (Payment Undone)");
-            loadData();
-        } catch (e) { console.error(e); alert("Undo Failed"); } finally { setIsSaving(false); }
-    };
-
-    const handleBatchPay = async () => {
-        if (!confirm(`Confirm pay ${selectedBillIds.size} bills via ${payMethod}?`)) return;
-        setIsSaving(true);
-        try {
-            const today = new Date().toISOString().split('T')[0];
-            const payTimestamp = new Date().toISOString();
-            
-            for (const id of selectedBillIds) {
-                const bill = allBills.find(b => b.id === id);
-                if (bill) {
-                    const cn = bill.creditNote || 0;
-                    
-                    // 🟢 核心防御：智能区分 Partial 和 Unpaid 的批量支付动作
-                    if (bill.paymentStatus === 'PARTIAL') {
-                        // 创建子支付单以结清尾款
-                        const paymentRecord: ExpenseItem = {
-                            id: `pay_${bill.id}_${Date.now()}`,
-                            category: bill.category,
-                            expenseType: 'GENERAL',
-                            company: bill.company,
-                            amount: bill.outstandingAmount || 0,
-                            totalBillAmount: 0, 
-                            outstandingAmount: 0,
-                            paymentStatus: 'PAID',
-                            paymentMethod: payMethod,
-                            time: payTimestamp,
-                            note: `[Batch Balance Pay] Ref: ${bill.company} (Inv #${bill.id.slice(-4)})`,
-                            paidBy: 'COMPANY'
-                        };
-                        await DataManager.saveStandaloneExpense(paymentRecord);
-
-                        const updatedTracker = {
-                            ...bill,
-                            outstandingAmount: 0,
-                            paymentStatus: 'PAID',
-                            note: (bill.note || '') + `\n[${today}] Batch Balance Paid via ${payMethod}`
-                        };
-                        await DataManager.saveStandaloneExpense(updatedTracker);
-                        if (updatedTracker.settlementId) await DataManager.updateExpenseInSettlement(updatedTracker.settlementId, updatedTracker);
-                    } else {
-                        // 正常的 UNPAID 直接写入 Amount
-                        const rawUpdated: ExpenseItem = {
-                            ...bill,
-                            amount: (bill.totalBillAmount || bill.amount) - cn,
-                            outstandingAmount: 0,
-                            paymentStatus: 'PAID',
-                            paymentMethod: payMethod,
-                            note: (bill.note || '') + `\n[${today}] Batch Paid via ${payMethod}`,
-                            paymentDate: payTimestamp 
-                        };
-                        const updated = JSON.parse(JSON.stringify(rawUpdated));
-                        await DataManager.saveStandaloneExpense(updated);
-                        if (updated.settlementId) await DataManager.updateExpenseInSettlement(updated.settlementId, updated);
-                    }
-                }
-            }
-            alert(`✅ 批量支付成功！共 ${selectedBillIds.size} 笔账单。`);
-            setSelectedBillIds(new Set());
-            setIsBatchPayModalOpen(false);
-            await loadData();
-        } catch (e) { console.error("Batch Pay Error", e); alert("批量支付出错，请检查网络或重试。"); } finally { setIsSaving(false); }
+        await DataManager.saveStandaloneExpense(updated);
+        if (updated.settlementId) await DataManager.updateExpenseInSettlement(updated.settlementId, updated);
+        
+        loadData();
     };
 
     const handleCompanyClick = (companyName: string) => {
@@ -492,6 +470,39 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
     const handleSelectAll = () => {
         if (selectedBillIds.size === unpaidFilteredBills.length && unpaidFilteredBills.length > 0) setSelectedBillIds(new Set());
         else setSelectedBillIds(new Set(unpaidFilteredBills.map(b => b.id)));
+    };
+
+    const handleBatchPay = async () => {
+        if (!payMethod) return alert("Please select a payment method");
+        setIsSaving(true);
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const payTimestamp = new Date().toISOString();
+            
+            for (const id of selectedBillIds) {
+                const bill = allBills.find(b => b.id === id);
+                if (bill) {
+                    const cn = bill.creditNote || 0;
+                    const rawUpdated: ExpenseItem = {
+                        ...bill,
+                        amount: (bill.totalBillAmount || bill.amount) - cn,
+                        outstandingAmount: 0,
+                        paymentStatus: 'PAID',
+                        paymentMethod: payMethod,
+                        note: (bill.note || '') + `\n[${today}] Batch Paid via ${payMethod}`,
+                        paymentDate: payTimestamp 
+                    };
+                    const updated = JSON.parse(JSON.stringify(rawUpdated));
+
+                    await DataManager.saveStandaloneExpense(updated);
+                    if (updated.settlementId) await DataManager.updateExpenseInSettlement(updated.settlementId, updated);
+                }
+            }
+            setSelectedBillIds(new Set());
+            setIsBatchPayModalOpen(false);
+            setPayMethod('');
+            await loadData();
+        } catch (e) { console.error("Batch Pay Error", e); alert("批量支付出错，请重试。"); } finally { setIsSaving(false); }
     };
 
     const batchTotalAmount = useMemo(() => {
@@ -548,230 +559,182 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
             <div className="bg-[#F5F7FA] w-full h-full md:max-w-6xl md:h-[95vh] md:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl relative font-sans">
                 
                 {/* === HEADER === */}
-                <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
-                    <div className="flex items-center gap-2 sm:gap-4">
-                        <div className="bg-[#FFD700] text-black p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl shadow-lg"><CreditCard size={18} className="sm:hidden"/><CreditCard size={24} className="hidden sm:block"/></div>
-                        <div>
-                            <h3 className="font-serif font-black text-base sm:text-xl tracking-wide">应付账款中心</h3>
-                            <p className="text-[8px] sm:text-[10px] text-gray-400 font-mono uppercase tracking-widest">ACCOUNTS PAYABLE</p>
+                <div className="bg-[#1A1A1A] px-3 pt-[env(safe-area-inset-top,0px)] pb-2.5 md:p-4 md:pt-4 flex justify-between items-center text-white shrink-0 border-b-4 border-[#FFD700]">
+                    <div className="flex items-center gap-2 md:gap-4 min-w-0">
+                        <div className="bg-[#FFD700] text-black p-1.5 md:p-2.5 rounded-xl md:rounded-2xl shadow-lg shrink-0"><CreditCard size={18} className="md:hidden"/><CreditCard size={24} className="hidden md:block"/></div>
+                        <div className="min-w-0">
+                            <h3 className="font-serif font-black text-sm md:text-xl tracking-wide truncate">应付账款</h3>
+                            <p className="text-[9px] text-gray-400 font-mono uppercase tracking-widest hidden md:block">ACCOUNTS PAYABLE</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-1.5 sm:gap-2">
+                    <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
                         <ModuleGuideButton module="AP" />
-                        <button onClick={() => handleExportPDF(filteredBills)} disabled={isGeneratingPdf} className="bg-white/10 hover:bg-white/20 text-white p-2 sm:px-3 sm:py-2.5 rounded-lg sm:rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50">
-                            {isGeneratingPdf ? <Loader2 size={14} className="animate-spin"/> : <FileDown size={14}/>} <span className="hidden sm:inline">导出 PDF</span>
+                        <button onClick={() => handleExportPDF(filteredBills)} disabled={isGeneratingPdf} className="bg-white/10 hover:bg-white/20 text-white p-2 md:px-3 md:py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50">
+                            {isGeneratingPdf ? <Loader2 size={16} className="animate-spin"/> : <FileDown size={16}/>} <span className="hidden md:inline">导出 PDF</span>
                         </button>
-                        <button onClick={() => handleOpenForm()} className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-2 sm:px-4 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1.5 shadow-lg transition-all active:scale-95">
-                            <Plus size={14}/> <span className="hidden sm:inline">录入新账单</span><span className="sm:hidden">新增</span>
+                        <button onClick={() => handleOpenForm()} className="bg-blue-600 hover:bg-blue-500 text-white p-2 md:px-4 md:py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all active:scale-95">
+                            <Plus size={18}/> <span className="hidden md:inline">录入新账单</span>
                         </button>
-                        <button onClick={onClose} className="p-1.5 sm:p-2 hover:bg-white/10 rounded-full"><X size={20}/></button>
+                        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full"><X size={18}/></button>
                     </div>
                 </div>
 
+                {/* === BILING PROTECTION BANNER === */}
+                {isBillingCapped && (
+                    <div className="bg-red-50 text-red-600 px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 border-b border-red-200">
+                        <AlertTriangle size={14} className="animate-pulse" />
+                        当前只展示部分最近历史以保护数据库流量。如需检索更早记录，请使用搜索或自定义日期范围。
+                    </div>
+                )}
+
                 {/* === CONTROLS & FILTERS === */}
-                <div className="bg-white border-b border-gray-200 shrink-0 shadow-sm z-10">
+                <div className="bg-white border-b border-gray-200 px-2.5 py-2 md:p-4 space-y-1.5 md:space-y-4 shrink-0 shadow-sm z-10">
                     {viewMode === 'SUPPLIER_DETAIL' && (
-                        <div className="flex items-center gap-4 px-4 pt-3 pb-1">
-                            <button onClick={() => { setViewMode('LIST'); setSelectedSupplierId(null); setSearchTerm(''); setSelectedBillIds(new Set()); }} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"><ArrowLeft size={20}/></button>
+                        <div className="flex items-center gap-3 mb-1">
+                            <button onClick={() => { setViewMode('LIST'); setSelectedSupplierId(null); setSearchTerm(''); setSelectedBillIds(new Set()); }} className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"><ArrowLeft size={18}/></button>
                             <div>
-                                <h2 className="text-lg font-black text-[#1A1A1A]">{suppliers.find(s => s.id === selectedSupplierId)?.name}</h2>
-                                <p className="text-[10px] text-gray-500 font-bold uppercase">Supplier Account (ID: {selectedSupplierId})</p>
+                                <h2 className="text-base md:text-xl font-black text-[#1A1A1A]">{suppliers.find(s => s.id === selectedSupplierId)?.name}</h2>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase">ID: {selectedSupplierId}</p>
                             </div>
                         </div>
                     )}
-                    
-                    {/* Row 1: Search + Filter Toggle (always visible) */}
-                    <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+                    {/* Row 1: Search */}
+                    <div className="flex gap-2">
                         <div className="relative flex-grow">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14}/>
-                            <input type="text" placeholder="🔍 搜索公司 / ID / 备注..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-9 pr-8 py-2.5 bg-gray-50 border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#FFD700] transition-all outline-none"/>
-                            {searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 rounded-full"><X size={14}/></button>}
+                            <input type="text" placeholder="搜索公司 / ID / 备注..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-9 pr-8 py-2 md:py-3 bg-gray-50 border-none rounded-xl text-xs md:text-sm font-bold focus:ring-2 focus:ring-[#FFD700] transition-all outline-none"/>
+                            {searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 rounded-full"><X size={12}/></button>}
                         </div>
-                        <button onClick={() => setShowMobileFilters(!showMobileFilters)} className={`sm:hidden p-2.5 rounded-xl border transition-all shrink-0 ${showMobileFilters ? 'bg-[#1A1A1A] text-[#FFD700] border-[#FFD700]' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
-                            <Filter size={16}/>
+                    </div>
+                    {/* Row 2: Quick dates + custom date button */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+                        {[{ label: '今日', value: 'TODAY' }, { label: '昨日', value: 'YESTERDAY' }, { label: '本月', value: 'THIS_MONTH' }, { label: '上月', value: 'LAST_MONTH' }].map(item => (
+                            <button key={item.value} onClick={() => { applyQuickDate(item.value as any); setShowDatePicker(false); }} className="px-2.5 py-1 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-[10px] font-bold whitespace-nowrap text-gray-500 transition-all shrink-0">{item.label}</button>
+                        ))}
+                        <button onClick={() => setShowDatePicker(!showDatePicker)} className={`px-2.5 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 transition-all ${(dateRange.start || dateRange.end) ? 'bg-blue-600 text-white border border-blue-600' : 'bg-white border border-gray-200 text-gray-500 hover:bg-blue-50'}`}>
+                            <CalendarRange size={10}/> {(dateRange.start && dateRange.end) ? `${dateRange.start.slice(5)} ~ ${dateRange.end.slice(5)}` : '自选日期'}
                         </button>
+                        {(dateRange.start || dateRange.end) && <button onClick={() => { setDateRange({start:'', end:''}); setShowDatePicker(false); }} className="p-1 hover:bg-gray-100 rounded-full text-gray-400 shrink-0"><X size={12}/></button>}
                     </div>
-
-                    {/* Row 2: Quick dates + Date range (collapsible on mobile) */}
-                    <div className={`${showMobileFilters ? 'flex' : 'hidden'} sm:flex flex-col sm:flex-row gap-2 px-4 pb-2`}>
-                        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
-                            {[{ label: '今日', value: 'TODAY' }, { label: '昨日', value: 'YESTERDAY' }, { label: '本周', value: 'THIS_WEEK' }, { label: '本月', value: 'THIS_MONTH' }, { label: '上月', value: 'LAST_MONTH' }].map(item => (
-                                <button key={item.value} onClick={() => applyQuickDate(item.value as any)} className="px-2.5 py-1.5 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 rounded-lg text-[10px] font-bold whitespace-nowrap text-gray-500 transition-all">{item.label}</button>
-                            ))}
+                    {/* Date Picker Dropdown */}
+                    {showDatePicker && (
+                        <div className="flex items-center gap-2 bg-blue-50 p-2 rounded-xl border border-blue-100 animate-in fade-in slide-in-from-top-1">
+                            <input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({...prev, start: e.target.value}))} className="flex-1 bg-white text-xs font-bold p-2 outline-none rounded-lg border border-blue-200 text-center"/>
+                            <span className="text-gray-400 text-xs font-bold">至</span>
+                            <input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({...prev, end: e.target.value}))} className="flex-1 bg-white text-xs font-bold p-2 outline-none rounded-lg border border-blue-200 text-center"/>
+                            <button onClick={() => setShowDatePicker(false)} className="p-1.5 bg-blue-600 text-white rounded-lg shrink-0"><CheckCircle2 size={14}/></button>
                         </div>
-                        <div className="flex items-center bg-white border border-gray-200 rounded-xl p-1 shadow-sm">
-                            <CalendarRange size={12} className="text-gray-400 mx-1.5 shrink-0"/>
-                            <input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({...prev, start: e.target.value}))} className="bg-transparent text-[10px] font-bold p-1 outline-none text-gray-700 w-24 cursor-pointer"/>
-                            <span className="text-gray-300 text-[10px]">→</span>
-                            <input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({...prev, end: e.target.value}))} className="bg-transparent text-[10px] font-bold p-1 outline-none text-gray-700 w-24 cursor-pointer"/>
-                            {(dateRange.start || dateRange.end) && <button onClick={() => setDateRange({start:'', end:''})} className="p-0.5 hover:bg-gray-100 rounded-full text-gray-400"><X size={10}/></button>}
-                        </div>
-                    </div>
-
-                    {/* Row 3: Status tabs + actions */}
-                    <div className="flex items-center justify-between gap-2 px-4 pb-3">
-                        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide flex-grow">
-                            {TABS.map(tab => (
-                                <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`px-3 py-1.5 rounded-lg text-[10px] font-black border-b-2 transition-all whitespace-nowrap ${activeTab === tab.id ? tab.color : 'bg-white text-gray-400 border-transparent hover:bg-gray-50'}`}>
-                                    {tab.label.split(' ')[0]}
-                                    {activeTab === tab.id && <span className="ml-1 text-[9px] opacity-70">{filteredBills.length}</span>}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="flex gap-1.5 shrink-0">
-                            {unpaidFilteredBills.length > 0 && <button onClick={handleSelectAll} className={`p-2 rounded-lg text-[10px] font-bold transition-all ${selectedBillIds.size > 0 && selectedBillIds.size === unpaidFilteredBills.length ? 'bg-[#1A1A1A] text-[#FFD700]' : 'bg-gray-100 text-gray-500'}`} title="全选未付"><ListChecks size={14}/></button>}
-                            <div className="relative">
-                                <select value={selectedTag} onChange={e => setSelectedTag(e.target.value)} className="bg-gray-50 border-none rounded-lg pl-2 pr-6 py-2 text-[10px] font-bold outline-none appearance-none w-20">
-                                    <option value="ALL">🔖 All</option>
-                                    {availableTags.map(t => <option key={t} value={t}>{t}</option>)}
-                                </select>
-                            </div>
-                        </div>
+                    )}
+                    {/* Row 3: Tabs + Select All + Tags in one line */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+                        {TABS.map(tab => (
+                            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`px-3 md:px-6 py-1.5 md:py-2 rounded-lg md:rounded-xl text-[10px] md:text-xs font-black border-b-2 md:border-b-4 transition-all whitespace-nowrap shrink-0 ${activeTab === tab.id ? tab.color : 'bg-white text-gray-400 border-transparent hover:bg-gray-50'}`}>{tab.label.split(' ')[0]}<span className="hidden md:inline"> {tab.label.split(' ').slice(1).join(' ')}</span>{activeTab === tab.id && <span className="bg-white/20 px-1 rounded text-[9px] ml-1">{filteredBills.length}</span>}</button>
+                        ))}
+                        <div className="h-4 w-px bg-gray-200 shrink-0 mx-0.5"></div>
+                        {unpaidFilteredBills.length > 0 && <button onClick={handleSelectAll} className={`px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all whitespace-nowrap shrink-0 ${selectedBillIds.size > 0 && selectedBillIds.size === unpaidFilteredBills.length ? 'bg-[#1A1A1A] text-[#FFD700]' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}><ListChecks size={12}/> {selectedBillIds.size > 0 ? '取消' : '全选'}</button>}
+                        <div className="relative shrink-0 ml-auto"><select value={selectedTag} onChange={e => setSelectedTag(e.target.value)} className="bg-gray-50 border-none rounded-lg pl-2 pr-6 py-1.5 text-[10px] font-bold outline-none focus:ring-2 focus:ring-[#FFD700] appearance-none"><option value="ALL">🔖 All Tags</option>{availableTags.map(t => <option key={t} value={t}>{t}</option>)}</select><div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"><ChevronDown size={10}/></div></div>
                     </div>
                 </div>
 
                 {/* === MAIN CONTENT === */}
-                <div className="flex-grow overflow-y-auto p-3 md:p-6 bg-[#F5F7FA] pb-32">
+                <div className="flex-grow overflow-y-auto p-4 md:p-6 bg-[#F5F7FA] pb-32">
                     {loading ? (
                         <div className="flex items-center justify-center h-40"><Loader2 size={32} className="animate-spin text-gray-400"/></div>
                     ) : filteredBills.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-20 text-gray-300"><Filter size={64} className="mb-4 opacity-20"/><p className="font-black text-sm">没有找到相关账单</p></div>
                     ) : (
                         <>
-                            {/* MOBILE: Compact Row Layout */}
-                            <div className="sm:hidden space-y-1.5">
-                                {filteredBills.slice(0, displayLimit).map(bill => {
-                                    const isPaid = bill.paymentStatus === 'PAID';
-                                    const isOverdue = !isPaid && new Date() > new Date(bill.dueDate || '9999-12-31');
-                                    const sup = suppliers.find(s => s.name === bill.company);
-                                    const isSelected = selectedBillIds.has(bill.id);
-                                    const amt = bill.totalBillAmount || bill.amount || 0;
-                                    const outstanding = bill.outstandingAmount || 0;
-                                    return (
-                                        <div 
-                                            key={bill.id}
-                                            onClick={() => { if (!isPaid) toggleSelection(bill.id); }}
-                                            className={`bg-white rounded-xl p-3 flex items-center gap-3 border-l-4 transition-all active:scale-[0.99] ${isPaid ? 'border-l-green-500' : isOverdue ? 'border-l-red-500' : 'border-l-orange-400'} ${isSelected ? 'ring-2 ring-[#FFD700] ring-offset-1' : ''}`}
-                                        >
-                                            {/* Checkbox */}
-                                            {!isPaid && (
-                                                <div className={`w-5 h-5 rounded shrink-0 border-2 flex items-center justify-center ${isSelected ? 'bg-[#1A1A1A] border-[#1A1A1A] text-[#FFD700]' : 'border-gray-300'}`}>
-                                                    {isSelected && <CheckSquare size={12} strokeWidth={3}/>}
-                                                </div>
-                                            )}
-                                            {/* Company + Category */}
-                                            <div className="flex-grow min-w-0">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="font-bold text-sm text-[#1A1A1A] truncate">{bill.company}</span>
-                                                    {sup && <span className="bg-[#FFD700] text-black text-[8px] font-mono px-1 py-0.5 rounded font-bold shrink-0">{sup.id}</span>}
-                                                </div>
-                                                <div className="flex items-center gap-1.5 mt-0.5">
-                                                    <span className="text-[9px] text-gray-400 font-mono">{bill.time.split('T')[0]}</span>
-                                                    {bill.category && <span className="text-[8px] bg-blue-50 text-blue-600 px-1 py-0.5 rounded font-bold truncate max-w-[80px]">{FLAT_CATEGORIES.find(c => c.id === bill.category)?.label.split('(')[0] || bill.category}</span>}
-                                                </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+                            {filteredBills.map(bill => {
+                                const isPaid = bill.paymentStatus === 'PAID';
+                                const isOverdue = !isPaid && new Date() > new Date(bill.dueDate || '9999-12-31');
+                                const sup = suppliers.find(s => s.name === bill.company);
+                                const isSelected = selectedBillIds.has(bill.id);
+                                return (
+                                    <div key={bill.id} className={`bg-white rounded-2xl p-3 md:p-5 shadow-sm border-l-4 md:border-l-[6px] transition-all hover:shadow-lg group relative ${isPaid ? 'border-l-green-500' : isOverdue ? 'border-l-red-500' : 'border-l-orange-400'} ${isSelected ? 'ring-2 ring-offset-1 ring-[#FFD700]' : ''}`}>
+                                        {/* Top: checkbox + date + link */}
+                                        <div className="flex justify-between items-center mb-2">
+                                            <div className="flex items-center gap-2">
+                                                {!isPaid && <button onClick={(e) => { e.stopPropagation(); toggleSelection(bill.id); }} className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all shrink-0 ${isSelected ? 'bg-[#1A1A1A] border-[#1A1A1A] text-[#FFD700]' : 'border-gray-300 bg-white'}`}>{isSelected && <CheckSquare size={12} strokeWidth={3}/>}</button>}
+                                                <span className="text-[10px] font-bold text-gray-400 flex items-center gap-1"><Calendar size={9}/> {bill.time.split('T')[0]}</span>
                                             </div>
-                                            {/* Amount */}
-                                            <div className="text-right shrink-0">
-                                                <div className="text-xs font-black font-mono text-[#1A1A1A]">RM {amt.toFixed(2)}</div>
-                                                {!isPaid && outstanding > 0 && (
-                                                    <div className="text-[9px] font-bold text-red-500 font-mono">欠 {outstanding.toFixed(2)}</div>
+                                            {bill.linkUrl && <a href={bill.linkUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg border border-blue-200 transition-all active:scale-95 shrink-0"><ExternalLink size={11}/><span className="text-[9px] font-bold">单据</span></a>}
+                                        </div>
+                                        {/* Company + tags */}
+                                        <div className="mb-2 cursor-pointer" onClick={() => { if(!isPaid) toggleSelection(bill.id); else handleCompanyClick(bill.company); }}>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <h4 className="font-black text-sm md:text-lg text-blue-900 leading-tight truncate">{bill.company}</h4>
+                                                {sup && <span className="bg-[#FFD700] text-black text-[9px] font-mono px-1.5 py-0.5 rounded font-black shrink-0">{sup.id}</span>}
+                                            </div>
+                                            {bill.paidBy && bill.paidBy !== 'COMPANY' && <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold inline-flex items-center gap-1 ${bill.isAdvancePayment ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}><User size={9}/> {bill.paidBy} {bill.isAdvancePayment ? '垫付' : ''}</span>}
+                                            <div className="flex flex-wrap gap-1 mt-1 items-center">{bill.category && <span className="text-[8px] md:text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-bold border border-blue-100">{FLAT_CATEGORIES.find(c => c.id === bill.category)?.label.split('(')[0] || bill.category}</span>}{(bill.tags || []).slice(0,2).map(t => <span key={t} className="text-[8px] bg-gray-100 text-gray-500 px-1 py-0.5 rounded font-bold">#{t}</span>)}</div>
+                                        </div>
+                                        {/* Amount row - inline instead of box */}
+                                        <div className="flex items-center justify-between mb-2 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
+                                            <div className="text-[10px] text-gray-400 font-bold">
+                                                <span>Total: RM {Number(bill.totalBillAmount || bill.amount || 0).toFixed(2)}</span>
+                                                {bill.creditNote && bill.creditNote > 0 && (
+                                                    <span className="text-orange-500 ml-2">CN: -{Number(bill.creditNote).toFixed(2)}</span>
                                                 )}
-                                                {isPaid && <div className="text-[9px] font-bold text-green-600">✓ Paid</div>}
                                             </div>
-                                            {/* Action buttons */}
-                                            <div className="flex flex-col gap-1 shrink-0">
-                                                {!isPaid ? (
-                                                    <button onClick={(e) => { e.stopPropagation(); setPayModalData(bill); setPayAmount(outstanding); }} className="bg-[#1A1A1A] text-[#FFD700] px-2 py-1 rounded-md text-[9px] font-black">Pay</button>
-                                                ) : (
-                                                    <button onClick={(e) => { e.stopPropagation(); handleUndoPayment(bill); }} className="bg-yellow-50 text-yellow-600 border border-yellow-200 px-1.5 py-1 rounded-md text-[9px] font-bold"><RotateCcw size={10}/></button>
-                                                )}
-                                                <button onClick={(e) => { e.stopPropagation(); handleOpenForm(bill); }} className="bg-gray-100 text-gray-500 px-2 py-1 rounded-md text-[9px]"><Edit3 size={10}/></button>
+                                            <div className={`text-sm font-black ${isPaid ? 'text-green-600' : 'text-red-600'}`}>
+                                                RM {Number(bill.outstandingAmount || 0).toFixed(2)}
                                             </div>
                                         </div>
-                                    );
-                                })}
-                            </div>
-
-                            {/* DESKTOP/TABLET: Card Layout */}
-                            <div className="hidden sm:grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {filteredBills.slice(0, displayLimit).map(bill => {
-                                    const isPaid = bill.paymentStatus === 'PAID';
-                                    const isOverdue = !isPaid && new Date() > new Date(bill.dueDate || '9999-12-31');
-                                    const sup = suppliers.find(s => s.name === bill.company);
-                                    const isSelected = selectedBillIds.has(bill.id);
-                                    return (
-                                    <div key={bill.id} className={`bg-white rounded-[1.5rem] p-5 shadow-sm border-l-[6px] transition-all hover:shadow-lg group relative ${isPaid ? 'border-l-green-500' : isOverdue ? 'border-l-red-500' : 'border-l-orange-400'} ${isSelected ? 'ring-2 ring-offset-2 ring-[#FFD700]' : ''}`}>
-                                        <div className="flex justify-between items-start mb-3">
-                                            <div className="flex items-center gap-3">
-                                                {!isPaid && <button onClick={(e) => { e.stopPropagation(); toggleSelection(bill.id); }} className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-[#1A1A1A] border-[#1A1A1A] text-[#FFD700]' : 'border-gray-300 bg-white hover:border-gray-400'}`}>{isSelected ? <CheckSquare size={16} strokeWidth={3}/> : <Square size={16} className="text-transparent"/>}</button>}
-                                                <div className="flex flex-col"><div className="text-[10px] font-black text-gray-400 uppercase tracking-wider flex items-center gap-1"><Calendar size={10}/> {bill.time.split('T')[0]}</div><div className="text-[9px] font-mono text-gray-300 mt-0.5">{bill.id}</div></div>
-                                            </div>
-                                            {bill.linkUrl && <a href={bill.linkUrl} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-700 bg-blue-50 p-1.5 rounded-lg transition-colors" title="View Document"><ExternalLink size={14}/></a>}
-                                        </div>
-                                        <div className="mb-4 cursor-pointer" onClick={() => { if(!isPaid) toggleSelection(bill.id); else handleCompanyClick(bill.company); }}>
-                                            <div className="flex items-center gap-2 mb-1"><h4 className="font-black text-lg text-blue-900 leading-tight group-hover:text-blue-700 transition-colors truncate">{bill.company}</h4>{sup && <span className="bg-[#FFD700] text-black text-[10px] font-mono px-2 py-0.5 rounded border border-[#FFD700] font-black shadow-sm">{sup.id}</span>}</div>
-                                            {bill.paidBy && bill.paidBy !== 'COMPANY' && <div className="flex items-center gap-1 mb-1.5"><span className={`text-[10px] px-2 py-0.5 rounded border font-black flex items-center gap-1 ${bill.isAdvancePayment ? 'bg-purple-100 text-purple-700 border-purple-200 animate-pulse' : 'bg-gray-100 text-gray-600 border-gray-200'}`}><User size={10}/> {bill.paidBy} {bill.isAdvancePayment ? '垫付 (Adv)' : '付款'}</span></div>}
-                                            <div className="flex flex-wrap gap-1 mt-1.5 items-center">{bill.category && <span className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-bold border border-blue-100">{FLAT_CATEGORIES.find(c => c.id === bill.category)?.label.split('(')[0] || bill.category}</span>}{bill.tags?.slice(0,3).map(t => <span key={t} className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold">#{t}</span>)}</div>
-                                        </div>
-                                        <div className="bg-gray-50 rounded-xl p-3 space-y-2 mb-3 border border-gray-100">
-                                            <div className="flex justify-between items-center border-b border-gray-200 pb-1">
-                                                <div className="text-[9px] text-gray-400 font-bold uppercase">Bill Total</div>
-                                                <div className="text-sm font-black text-[#1A1A1A]">RM {(bill.totalBillAmount || bill.amount || 0).toFixed(2)}</div>
-                                            </div>
-                                            {bill.creditNote && bill.creditNote > 0 && (
-                                                <div className="flex justify-between items-center text-[10px] text-orange-600 font-bold">
-                                                    <span>Credit Note / 折扣</span>
-                                                    <span>- RM {bill.creditNote.toFixed(2)}</span>
-                                                </div>
-                                            )}
-                                            <div className="flex justify-between items-center">
-                                                <div className="text-[9px] text-gray-400 font-bold uppercase">Balance Due</div>
-                                                <div className={`text-base font-black ${isPaid ? 'text-green-600' : 'text-red-600'}`}>RM {(bill.outstandingAmount || 0).toFixed(2)}</div>
-                                            </div>
-                                        </div>
+                                        {/* Action buttons */}
                                         <div className="flex items-center gap-2">
-                                            {!isPaid ? <button onClick={() => { setPayModalData(bill); setPayAmount(bill.outstandingAmount || 0); }} className="flex-1 bg-[#1A1A1A] text-[#FFD700] py-2 rounded-lg text-xs font-black shadow-md hover:bg-black transition-all active:scale-95">Pay Now</button> : <button onClick={() => handleUndoPayment(bill)} className="flex-1 bg-yellow-50 text-yellow-600 border border-yellow-200 py-2 rounded-lg text-xs font-bold hover:bg-yellow-100 transition-colors flex items-center justify-center gap-1" title="撤销付款 (Undo Payment)"><RotateCcw size={14}/> Undo Pay</button>}
-                                            <button onClick={() => handleOpenForm(bill)} className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg transition-colors"><Edit3 size={14}/></button>
+                                            {!isPaid ? (
+                                                <button onClick={() => { setPayModalData(bill); setPayAmount(bill.outstandingAmount || 0); setPayMethod(''); }} className="flex-1 bg-[#1A1A1A] text-[#FFD700] py-2 rounded-lg text-xs font-black shadow-md hover:bg-black transition-all active:scale-95">Pay Now</button>
+                                            ) : (
+                                                <button onClick={() => handleUndoPayment(bill)} className="flex-1 bg-yellow-50 text-yellow-600 border border-yellow-200 py-1.5 rounded-lg text-[10px] font-bold hover:bg-yellow-100 flex items-center justify-center gap-1"><RotateCcw size={12}/> Undo</button>
+                                            )}
+                                            
+                                            <button 
+                                                onClick={() => handleOpenForm(bill)} 
+                                                className="p-3 bg-gray-200 hover:bg-[#1A1A1A] hover:text-[#FFD700] text-gray-700 rounded-xl transition-all shadow-sm active:scale-95"
+                                                title="编辑账单"
+                                            >
+                                                <Edit3 size={18}/>
+                                            </button>
                                         </div>
                                     </div>
                                 )
-                                })}
+                            })}
+                        </div>
+                        {/* Load More */}
+                        {!dateRange.start && !dateRange.end && !searchTerm && selectedTag === 'ALL' && activeTab === 'ALL' && viewMode !== 'SUPPLIER_DETAIL' && displayLimit < totalLoaded && (
+                            <div className="flex flex-col items-center mt-6 gap-2">
+                                <p className="text-[10px] text-gray-400 font-bold">显示 {Math.min(displayLimit, totalLoaded)} / {totalLoaded} 笔账单</p>
+                                <button onClick={() => setDisplayLimit(prev => prev + 30)} className="px-6 py-3 bg-white border-2 border-gray-200 hover:border-[#FFD700] text-[#1A1A1A] rounded-xl text-xs font-black shadow-sm hover:shadow-md transition-all active:scale-95 flex items-center gap-2">
+                                    <RefreshCw size={14}/> 加载更多 (Load 30 More)
+                                </button>
                             </div>
-
-                            {/* Load More Button */}
-                            {filteredBills.length > displayLimit && (
-                                <div className="flex justify-center mt-4 mb-8">
-                                    <button 
-                                        onClick={() => setDisplayLimit(prev => prev + 50)} 
-                                        className="bg-white border border-gray-200 text-gray-600 px-6 py-3 rounded-xl text-xs font-bold shadow-sm hover:shadow-md transition-all active:scale-95 flex items-center gap-2"
-                                    >
-                                        <ChevronDown size={14}/> 加载更多 ({displayLimit} / {filteredBills.length})
-                                    </button>
-                                </div>
-                            )}
+                        )}
                         </>
                     )}
                 </div>
 
                 {/* === BATCH PAYMENT BAR === */}
                 {selectedBillIds.size > 0 && (
-                    <div className="absolute bottom-14 sm:bottom-20 left-2 right-2 sm:left-4 sm:right-4 md:left-1/2 md:-translate-x-1/2 md:w-[600px] z-30 animate-in slide-in-from-bottom-10 fade-in duration-300">
-                        <div className="bg-[#1A1A1A] text-white px-3 py-2.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-2xl flex items-center gap-2 sm:gap-4 border border-[#FFD700]/30">
-                            {/* Count badge */}
-                            <div className="bg-[#FFD700] text-black w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center font-black text-sm sm:text-base shrink-0">{selectedBillIds.size}</div>
-                            {/* Amount */}
-                            <div className="flex-grow min-w-0">
-                                <p className="text-[8px] sm:text-[10px] text-gray-400 uppercase font-bold tracking-wider">Selected</p>
-                                <p className="text-base sm:text-xl font-mono font-black text-[#FFD700] truncate">RM {batchTotalAmount.toFixed(2)}</p>
+                    <div className="absolute bottom-20 left-2 right-2 md:left-1/2 md:-translate-x-1/2 md:w-[600px] z-30 animate-in slide-in-from-bottom-10 fade-in duration-300">
+                        <div className="bg-[#1A1A1A] text-white p-2.5 md:p-4 rounded-xl md:rounded-2xl shadow-2xl flex flex-col md:flex-row justify-between items-center gap-2.5 md:gap-0 border border-[#FFD700]/30">
+                            <div className="flex items-center w-full justify-between md:w-auto md:justify-start gap-2 md:gap-4">
+                                <div className="flex items-center gap-2 md:gap-4">
+                                    <div className="bg-[#FFD700] text-black w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center font-black animate-bounce shadow-lg text-sm md:text-base">{selectedBillIds.size}</div>
+                                    <div>
+                                        <p className="text-[9px] md:text-[10px] text-gray-400 uppercase font-bold tracking-widest leading-none mb-1">Selected Total</p>
+                                        <p className="text-sm md:text-xl font-mono font-black text-[#FFD700] leading-none">RM {batchTotalAmount.toFixed(2)}</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setSelectedBillIds(new Set())} className="md:hidden p-1.5 text-gray-400 hover:text-white rounded-lg bg-white/10"><X size={16}/></button>
                             </div>
-                            {/* Actions */}
-                            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                                <button onClick={() => setSelectedBillIds(new Set())} className="text-[10px] sm:text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-lg hover:bg-white/10 font-bold">✕</button>
-                                <button onClick={() => handleExportPDF(allBills.filter(b => selectedBillIds.has(b.id)))} disabled={isGeneratingPdf} className="bg-white/10 p-2 rounded-lg text-[#FFD700]" title="导出选中">
-                                    {isGeneratingPdf ? <Loader2 size={14} className="animate-spin"/> : <FileDown size={14}/>}
+                            <div className="flex gap-2 w-full md:w-auto">
+                                <button onClick={() => setSelectedBillIds(new Set())} className="hidden md:block px-4 py-2 rounded-xl text-xs font-bold text-gray-400 hover:bg-white/10 transition-colors">Cancel</button>
+                                <button onClick={() => handleExportPDF(allBills.filter(b => selectedBillIds.has(b.id)))} disabled={isGeneratingPdf} className="flex-1 md:flex-none justify-center bg-white/10 hover:bg-white/20 text-white px-2 py-2 md:px-3 md:py-2.5 rounded-lg md:rounded-xl text-[10px] md:text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 text-[#FFD700]" title="Export Selected PDF">
+                                    {isGeneratingPdf ? <Loader2 size={14} className="animate-spin"/> : <FileDown size={14}/>} <span className="inline">导出</span>
                                 </button>
-                                <button onClick={() => setIsBatchPayModalOpen(true)} className="bg-[#FFD700] text-black px-3 py-2 sm:px-5 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-black shadow-lg hover:bg-white transition-all active:scale-95 flex items-center gap-1.5">
-                                    <CheckCircle2 size={14}/> <span className="hidden sm:inline">批量支付</span><span className="sm:hidden">支付</span>
+                                <button onClick={() => {setIsBatchPayModalOpen(true); setPayMethod('');}} className="flex-[2] md:flex-none justify-center bg-[#FFD700] text-black px-3 py-2 md:px-6 md:py-2.5 rounded-lg md:rounded-xl text-[11px] md:text-sm font-black shadow-lg hover:bg-white transition-all active:scale-95 flex items-center gap-1.5">
+                                    <CheckCircle2 size={16}/> 批量支付
                                 </button>
                             </div>
                         </div>
@@ -780,22 +743,50 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
 
                 {/* === FOOTER STATS === */}
                 {selectedBillIds.size === 0 && (
-                    <div className="bg-white border-t border-gray-200 p-3 sm:p-4 shrink-0 flex justify-between items-center safe-area-bottom">
-                        <div className="text-[10px] sm:text-xs font-bold text-gray-500">
-                            {filteredBills.length > displayLimit ? `显示 ${displayLimit} / ${filteredBills.length}` : `共 ${stats.count} 笔`}
-                        </div>
-                        <div className="flex gap-3 sm:gap-6 text-right">
-                            {stats.cn > 0 && <div><div className="text-[8px] sm:text-[9px] text-gray-400 uppercase font-black">Credit</div><div className="text-xs sm:text-sm font-black text-orange-600 font-mono">RM {stats.cn.toLocaleString()}</div></div>}
-                            <div><div className="text-[8px] sm:text-[9px] text-gray-400 uppercase font-black">Total</div><div className="text-xs sm:text-sm font-black text-[#1A1A1A] font-mono">RM {stats.total.toLocaleString()}</div></div>
-                            <div><div className="text-[8px] sm:text-[9px] text-gray-400 uppercase font-black">Outstanding</div><div className="text-sm sm:text-lg font-black text-red-600 font-mono">RM {stats.outstanding.toLocaleString()}</div></div>
+                    <div className="bg-white border-t border-gray-200 px-3 py-2.5 md:p-4 shrink-0 flex justify-between items-center safe-area-bottom">
+                        <div className="text-[10px] md:text-xs font-bold text-gray-500 shrink-0">共 {stats.count} 笔</div>
+                        <div className="flex gap-3 md:gap-6 text-right">
+                            {stats.cn > 0 && <div><div className="text-[9px] text-gray-400 uppercase font-black">Total Credit</div><div className="text-sm font-black text-orange-600">RM {stats.cn.toFixed(2)}</div></div>}
+                            <div><div className="text-[9px] text-gray-400 uppercase font-black">Total Amount</div><div className="text-sm font-black text-[#1A1A1A]">RM {stats.total.toFixed(2)}</div></div>
+                            <div><div className="text-[9px] text-gray-400 uppercase font-black">Total Outstanding</div><div className="text-lg font-black text-red-600">RM {stats.outstanding.toFixed(2)}</div></div>
                         </div>
                     </div>
                 )}
 
                 {/* MODALS: BATCH, FORM, DELETE, PAY, PDF... */}
                 {isBatchPayModalOpen && (
-                    <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-                        <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-2">批量支付确认</h3><p className="text-sm text-gray-500 font-bold mb-6">即将支付 {selectedBillIds.size} 笔账单</p><div className="bg-gray-50 p-4 rounded-xl border border-gray-100 mb-6 text-center"><p className="text-xs text-gray-400 font-bold uppercase mb-1">Total Payment</p><p className="text-3xl font-black font-mono text-green-600">RM {batchTotalAmount.toFixed(2)}</p></div><div className="mb-6"><label className="text-[10px] font-bold text-gray-400 uppercase mb-2 block">Payment Method (资金来源)</label><select value={payMethod} onChange={e => setPayMethod(e.target.value)} className="w-full p-4 bg-gray-50 rounded-xl font-bold text-sm outline-none border-2 border-transparent focus:border-[#FFD700]"><option value="BANK_TRANSFER">Bank Transfer (银行转账)</option><option value="CASH">Cash (现金支付)</option><option value="CHEQUE">Cheque (支票)</option><option value="DUITNOW">DuitNow / QR</option></select></div><button onClick={handleBatchPay} disabled={isSaving} className="w-full py-4 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-lg shadow-lg hover:bg-black flex items-center justify-center gap-2">{isSaving ? <Loader2 size={20} className="animate-spin"/> : <CheckCircle2 size={20}/>} 确认支付 (Confirm)</button><button onClick={() => setIsBatchPayModalOpen(false)} className="w-full py-3 mt-2 text-gray-400 text-xs font-bold hover:text-black">取消 (Cancel)</button></div>
+                    <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-3 md:p-4 backdrop-blur-sm animate-in fade-in">
+                        <div className="bg-white w-full max-w-sm max-h-[90vh] overflow-y-auto rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-2xl animate-in zoom-in-95">
+                            <h3 className="font-black text-lg md:text-xl text-[#1A1A1A] mb-1">批量支付确认</h3>
+                            <p className="text-[11px] md:text-sm text-gray-500 font-bold mb-4 md:mb-6">即将支付 {selectedBillIds.size} 笔账单</p>
+                            
+                            <div className="bg-gray-50 p-3 md:p-4 rounded-xl border border-gray-100 mb-4 md:mb-6 text-center">
+                                <p className="text-[10px] md:text-xs text-gray-400 font-bold uppercase mb-1">Total Payment</p>
+                                <p className="text-2xl md:text-3xl font-black font-mono text-green-600">RM {batchTotalAmount.toFixed(2)}</p>
+                            </div>
+                            
+                            <div className="mb-4 md:mb-6">
+                                <label className="text-[9px] md:text-[10px] font-bold text-gray-400 uppercase mb-2 md:mb-3 block text-center">选择支付方式 (Payment Method)</label>
+                                <div className="flex gap-2 md:gap-3">
+                                    <button onClick={() => setPayMethod('BANK_TRANSFER')} className={`flex-1 py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-xs md:text-sm border-2 transition-all flex flex-col items-center justify-center gap-1.5 md:gap-2 ${payMethod === 'BANK_TRANSFER' ? 'bg-[#1A1A1A] text-[#FFD700] border-[#FFD700] shadow-lg scale-105' : 'bg-gray-50 text-gray-400 border-transparent hover:bg-gray-100'}`}>
+                                        <CreditCard className="w-6 h-6 md:w-7 md:h-7"/> Bank
+                                    </button>
+                                    <button onClick={() => setPayMethod('CASH')} className={`flex-1 py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-xs md:text-sm border-2 transition-all flex flex-col items-center justify-center gap-1.5 md:gap-2 ${payMethod === 'CASH' ? 'bg-green-600 text-white border-green-500 shadow-lg scale-105' : 'bg-gray-50 text-gray-400 border-transparent hover:bg-gray-100'}`}>
+                                        <Wallet className="w-6 h-6 md:w-7 md:h-7"/> Cash
+                                    </button>
+                                </div>
+                            </div>
+
+                            {payMethod ? (
+                                <button onClick={handleBatchPay} disabled={isSaving} className="w-full py-3 md:py-4 bg-[#1A1A1A] text-[#FFD700] rounded-xl font-black text-sm md:text-lg shadow-lg hover:bg-black flex items-center justify-center gap-2 animate-in slide-in-from-bottom-2 fade-in">
+                                    {isSaving ? <Loader2 size={18} className="animate-spin"/> : <CheckCircle2 size={18}/>} 确认支付 (Confirm)
+                                </button>
+                            ) : (
+                                <div className="w-full py-3 md:py-4 text-center text-[10px] md:text-xs font-bold text-gray-300 border-2 border-dashed border-gray-200 rounded-xl">请选择上方支付方式</div>
+                            )}
+                            
+                            <button onClick={() => setIsBatchPayModalOpen(false)} className="w-full py-2.5 md:py-3 mt-1 md:mt-2 text-gray-400 text-[10px] md:text-xs font-bold hover:text-black">取消 (Cancel)</button>
+                        </div>
                     </div>
                 )}
 
@@ -838,7 +829,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                                 </div>
                                 
                                 <div><label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block flex items-center gap-1"><LinkIcon size={12}/> Document Link (Google Drive / Photo)</label><div className="flex gap-2"><input type="text" className="flex-grow p-3 bg-white border border-gray-200 rounded-xl text-xs font-bold outline-none" value={editingBill.linkUrl || ''} onChange={e => setEditingBill({...editingBill, linkUrl: e.target.value})} placeholder="https://..." /><button onClick={handlePasteLink} className="p-3 bg-gray-100 rounded-xl hover:bg-gray-200"><Clipboard size={16}/></button></div></div>
-                                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 relative group-focus-within:border-blue-300 transition-colors"><label className="text-[10px] font-black text-blue-600 uppercase mb-2 block flex items-center gap-1"><Tag size={12}/> 标签管理 (Tags)</label><div className="flex flex-wrap gap-2 mb-3">{editingBill.tags?.map(tag => (<span key={tag} className="bg-white text-black px-2 py-1 rounded-lg text-xs font-bold flex items-center gap-1 border border-gray-200 shadow-sm">#{tag} <button onClick={() => handleRemoveTag(tag)} className="hover:text-red-600 ml-1 bg-gray-100 rounded-full p-0.5"><X size={10}/></button></span>))}{(!editingBill.tags || editingBill.tags.length === 0) && <span className="text-xs text-gray-400 italic">暂无标签</span>}</div><div className="flex gap-2 mb-3"><input type="text" value={newTagInput} onChange={(e) => setNewTagInput(e.target.value)} className="flex-grow p-2 bg-white border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-all" placeholder="输入新标签..." onKeyDown={e => { if(e.key === 'Enter') handleAddCustomTag(); }} /><button onClick={handleAddCustomTag} className="bg-blue-600 text-white px-3 rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition-colors">添加 (Add)</button></div></div>
+                                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 relative group-focus-within:border-blue-300 transition-colors"><label className="text-[10px] font-black text-blue-600 uppercase mb-2 block flex items-center gap-1"><Tag size={12}/> 标签管理 (Tags)</label><div className="flex flex-wrap gap-2 mb-3">{(editingBill.tags || []).map(tag => (<span key={tag} className="bg-white text-black px-2 py-1 rounded-lg text-xs font-bold flex items-center gap-1 border border-gray-200 shadow-sm">#{tag} <button onClick={() => handleRemoveTag(tag)} className="hover:text-red-600 ml-1 bg-gray-100 rounded-full p-0.5"><X size={10}/></button></span>))}{(!editingBill.tags || editingBill.tags.length === 0) && <span className="text-xs text-gray-400 italic">暂无标签</span>}</div><div className="flex gap-2 mb-3"><input type="text" value={newTagInput} onChange={(e) => setNewTagInput(e.target.value)} className="flex-grow p-2 bg-white border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-all" placeholder="输入新标签..." onKeyDown={e => { if(e.key === 'Enter') handleAddCustomTag(); }} /><button onClick={handleAddCustomTag} className="bg-blue-600 text-white px-3 rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition-colors">添加 (Add)</button></div></div>
                                 <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 space-y-4"><div><label className="text-[10px] font-bold text-blue-600 uppercase mb-1 block flex items-center gap-1"><Layers size={12}/> Category (会计科目 - 必选)</label><select className="w-full p-3 bg-white border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-[#FFD700] text-[#1A1A1A]" value={editingBill.category || ''} onChange={e => setEditingBill({...editingBill, category: e.target.value})}><option value="">-- Select Category --</option>{Object.entries(ACCOUNTING_CATEGORIES).map(([group, { options }]) => (<optgroup key={group} label={group}>{options.map(opt => (<option key={opt.id} value={opt.id}>{opt.label}</option>))}</optgroup>))}</select></div><div><label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block flex items-center gap-1"><MessageSquare size={12}/> {isVoucherMode ? 'Description / Particulars' : 'Note'}</label><textarea className="w-full p-3 bg-white border border-gray-200 rounded-xl text-xs font-bold outline-none resize-none h-20" placeholder="Notes..." value={editingBill.note || ''} onChange={e => setEditingBill({...editingBill, note: e.target.value})}/></div></div>
                                 
                                 {isVoucherMode && (
@@ -878,7 +869,32 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                                     </div>
                                 )}
 
-                                <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 space-y-4"><h4 className="text-xs font-black text-orange-800 uppercase flex items-center gap-2"><DollarSign size={14}/> Payment Details</h4><div className="grid grid-cols-2 gap-4"><div><label className="text-[10px] font-bold text-orange-700 uppercase mb-1 block">Status</label><select className="w-full p-2 bg-white border border-orange-200 rounded-lg text-xs font-bold outline-none" value={editingBill.paymentStatus} onChange={e => setEditingBill({...editingBill, paymentStatus: e.target.value as any})}><option value="UNPAID">UNPAID (未付)</option><option value="PAID">PAID (已付)</option><option value="PARTIAL">PARTIAL (部分)</option></select></div>{editingBill.paymentStatus === 'PAID' && (<div><label className="text-[10px] font-bold text-orange-700 uppercase mb-1 block">Method</label><select className="w-full p-2 bg-white border border-orange-200 rounded-lg text-xs font-bold outline-none" value={editingBill.paymentMethod} onChange={e => setEditingBill({...editingBill, paymentMethod: e.target.value})}><option value="BANK_TRANSFER">Bank Transfer</option><option value="CASH">Cash</option><option value="CHEQUE">Cheque</option><option value="DUITNOW">DuitNow/QR</option></select></div>)}</div>{editingBill.paymentStatus === 'PAID' && (<div><label className="text-[10px] font-bold text-orange-700 uppercase mb-1 block">Paid By (Who?)</label><select className="w-full p-2 bg-white border border-orange-200 rounded-lg text-xs font-bold outline-none" value={editingBill.paidBy || 'COMPANY'} onChange={e => setEditingBill({...editingBill, paidBy: e.target.value})}><option value="COMPANY">Company (公款)</option>{employees.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}</select>{editingBill.paidBy !== 'COMPANY' && <label className="flex items-center gap-2 mt-2 text-xs font-bold text-orange-800 cursor-pointer"><input type="checkbox" checked={editingBill.isAdvancePayment} onChange={e => setEditingBill({...editingBill, isAdvancePayment: e.target.checked})} className="accent-orange-600"/>Mark as Staff Advance (垫付)</label>}</div>)}</div>
+                                <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 space-y-4">
+                                    <h4 className="text-xs font-black text-orange-800 uppercase flex items-center gap-2"><DollarSign size={14}/> Payment Details</h4>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-orange-700 uppercase mb-1 block">Status</label>
+                                            <select className="w-full p-2 bg-white border border-orange-200 rounded-lg text-xs font-bold outline-none" value={editingBill.paymentStatus} onChange={e => setEditingBill({...editingBill, paymentStatus: e.target.value as any})}><option value="UNPAID">UNPAID (未付)</option><option value="PAID">PAID (已付)</option><option value="PARTIAL">PARTIAL (部分)</option></select>
+                                        </div>
+                                    </div>
+                                    
+                                    {editingBill.paymentStatus === 'PAID' && (
+                                        <div className="space-y-4 animate-in fade-in">
+                                            <div>
+                                                <label className="text-[10px] font-bold text-orange-700 uppercase mb-2 block">Method (支付方式)</label>
+                                                <div className="flex gap-2">
+                                                    <button type="button" onClick={() => setEditingBill({...editingBill, paymentMethod: 'BANK_TRANSFER'})} className={`flex-1 py-2.5 rounded-lg text-xs font-black transition-all border ${editingBill.paymentMethod === 'BANK_TRANSFER' ? 'bg-[#1A1A1A] text-[#FFD700] border-[#1A1A1A] shadow-md' : 'bg-white text-gray-500 border-orange-200 hover:bg-orange-50'}`}>🏦 Bank 转账</button>
+                                                    <button type="button" onClick={() => setEditingBill({...editingBill, paymentMethod: 'CASH'})} className={`flex-1 py-2.5 rounded-lg text-xs font-black transition-all border ${editingBill.paymentMethod === 'CASH' ? 'bg-green-600 text-white border-green-600 shadow-md' : 'bg-white text-gray-500 border-orange-200 hover:bg-orange-50'}`}>💵 Cash 现金</button>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] font-bold text-orange-700 uppercase mb-1 block">Paid By (Who?)</label>
+                                                <select className="w-full p-2 bg-white border border-orange-200 rounded-lg text-xs font-bold outline-none" value={editingBill.paidBy || 'COMPANY'} onChange={e => setEditingBill({...editingBill, paidBy: e.target.value})}><option value="COMPANY">Company (公款)</option>{employees.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}</select>
+                                                {editingBill.paidBy !== 'COMPANY' && <label className="flex items-center gap-2 mt-2 text-xs font-bold text-orange-800 cursor-pointer"><input type="checkbox" checked={editingBill.isAdvancePayment} onChange={e => setEditingBill({...editingBill, isAdvancePayment: e.target.checked})} className="accent-orange-600"/>Mark as Staff Advance (垫付)</label>}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="mt-6 flex gap-3">{editingBill.id && (<button onClick={() => setShowDeleteConfirm(true)} className="p-4 bg-red-50 text-red-600 rounded-2xl hover:bg-red-100 transition-colors"><Trash2 size={20}/></button>)}<button onClick={handleSave} disabled={isSaving} className="flex-grow bg-[#1A1A1A] text-[#FFD700] py-4 rounded-2xl font-black text-lg shadow-lg hover:bg-black flex items-center justify-center gap-2">{isSaving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} 保存账单</button></div>
                             </div>
                         </div>
@@ -886,11 +902,51 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                 )}
 
                 {showDeleteConfirm && (
-                    <div className="fixed inset-0 bg-black/60 z-[160] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-sm rounded-2xl p-6 shadow-2xl text-center border-t-4 border-red-500 animate-in zoom-in-95"><div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><Trash2 size={32}/></div><h3 className="font-black text-xl text-[#1A1A1A] mb-2">确认删除此账单?</h3><p className="text-xs text-gray-500 font-bold mb-6">此操作无法撤销。及其相关的部分付款记录将被永久删除！</p><div className="grid grid-cols-2 gap-3"><button onClick={() => setShowDeleteConfirm(false)} className="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-xs hover:bg-gray-200">取消</button><button onClick={handleDeleteBill} disabled={isSaving} className="py-3 bg-red-600 text-white font-bold rounded-xl text-xs hover:bg-red-700 shadow-lg">确认彻底删除</button></div></div></div>
+                    <div className="fixed inset-0 bg-black/60 z-[160] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center border-t-4 border-red-500 animate-in zoom-in-95"><div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><Trash2 size={32}/></div><h3 className="font-black text-xl text-[#1A1A1A] mb-2">确认删除此账单?</h3><p className="text-xs text-gray-500 font-bold mb-6">此操作无法撤销。如果属于结算单条目，将会通过事务安全剔除。</p><div className="grid grid-cols-2 gap-3"><button onClick={() => setShowDeleteConfirm(false)} className="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-xs hover:bg-gray-200">取消</button><button onClick={handleDeleteBill} disabled={isSaving} className="py-3 bg-red-600 text-white font-bold rounded-xl text-xs hover:bg-red-700 shadow-lg flex items-center justify-center gap-2">{isSaving ? <Loader2 className="animate-spin w-4 h-4"/> : '确认删除'}</button></div></div></div>
                 )}
 
                 {payModalData && (
-                    <div className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95"><h3 className="font-black text-xl text-[#1A1A1A] mb-1">支付账单 (Pay Bill)</h3><p className="text-xs text-gray-500 font-bold mb-6">{payModalData.company} • Inv #{payModalData.id.slice(-6)}</p><div className="space-y-4"><div className="bg-red-50 p-4 rounded-xl border border-red-100 text-center"><div className="text-[10px] text-red-400 uppercase font-black">Outstanding</div><div className="text-2xl font-black text-red-600">RM {payModalData.outstandingAmount?.toFixed(2)}</div></div><div><label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Payment Amount</label><input type="number" value={payAmount} onChange={e => setPayAmount(parseFloat(e.target.value))} className="w-full p-4 bg-gray-50 rounded-xl font-black text-xl outline-none focus:border-[#FFD700] border-2 border-transparent"/></div><div><label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Payment Method (资金来源)</label><select value={payMethod} onChange={e => setPayMethod(e.target.value)} className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none border border-gray-200 focus:border-[#FFD700]"><option value="BANK_TRANSFER">Bank Transfer (银行转账)</option><option value="CASH">Cash (现金支付)</option><option value="CHEQUE">Cheque (支票)</option><option value="DUITNOW">DuitNow / QR</option></select><p className="text-[9px] text-gray-400 mt-1 italic">{payMethod === 'CASH' ? 'Will deduct from Treasury CASH balance.' : 'Will deduct from Treasury BANK balance.'}</p></div><button onClick={handleQuickPay} className="w-full bg-[#1A1A1A] text-[#FFD700] py-4 rounded-xl font-black shadow-lg hover:bg-black flex items-center justify-center gap-2 mt-2"><DollarSign size={18}/> 确认支付 (Confirm)</button><button onClick={() => setPayModalData(null)} className="w-full py-3 text-gray-400 text-xs font-bold hover:text-gray-600">Cancel</button></div></div></div>
+                    <div className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                        <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95">
+                            <h3 className="font-black text-xl text-[#1A1A1A] mb-1">支付账单 (Pay Bill)</h3>
+                            <p className="text-xs text-gray-500 font-bold mb-6">{payModalData.company} • Inv #{payModalData.id.slice(-6)}</p>
+                            
+                            <div className="space-y-4">
+                                <div className="bg-red-50 p-4 rounded-xl border border-red-100 text-center">
+                                    <div className="text-[10px] text-red-400 uppercase font-black">Outstanding</div>
+                                    <div className="text-2xl font-black text-red-600">RM {payModalData.outstandingAmount?.toFixed(2)}</div>
+                                </div>
+                                
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Payment Amount</label>
+                                    <input type="number" value={payAmount} onChange={e => setPayAmount(parseFloat(e.target.value))} className="w-full p-4 bg-gray-50 rounded-xl font-black text-xl outline-none focus:border-[#FFD700] border-2 border-transparent"/>
+                                </div>
+                                
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-3 block text-center">Payment Method (资金来源)</label>
+                                    <div className="flex gap-3">
+                                        <button onClick={() => setPayMethod('BANK_TRANSFER')} className={`flex-1 py-4 rounded-2xl font-black text-sm border-2 transition-all flex flex-col items-center justify-center gap-2 ${payMethod === 'BANK_TRANSFER' ? 'bg-[#1A1A1A] text-[#FFD700] border-[#FFD700] shadow-lg scale-105' : 'bg-gray-50 text-gray-400 border-transparent hover:bg-gray-100'}`}>
+                                            <CreditCard size={28}/> Bank
+                                        </button>
+                                        <button onClick={() => setPayMethod('CASH')} className={`flex-1 py-4 rounded-2xl font-black text-sm border-2 transition-all flex flex-col items-center justify-center gap-2 ${payMethod === 'CASH' ? 'bg-green-600 text-white border-green-500 shadow-lg scale-105' : 'bg-gray-50 text-gray-400 border-transparent hover:bg-gray-100'}`}>
+                                            <Wallet size={28}/> Cash
+                                        </button>
+                                    </div>
+                                    {payMethod && <p className="text-[9px] text-gray-400 mt-2 italic text-center animate-in fade-in">Will deduct from Treasury {payMethod === 'CASH' ? 'CASH' : 'BANK'} balance.</p>}
+                                </div>
+
+                                {payMethod ? (
+                                    <button onClick={handleQuickPay} className="w-full bg-[#1A1A1A] text-[#FFD700] py-4 rounded-xl font-black shadow-lg hover:bg-black flex items-center justify-center gap-2 mt-4 animate-in slide-in-from-bottom-2 fade-in">
+                                        <DollarSign size={18}/> 确认支付 (Confirm)
+                                    </button>
+                                ) : (
+                                    <div className="w-full py-4 mt-4 text-center text-xs font-bold text-gray-300 border-2 border-dashed border-gray-200 rounded-xl">请选择上方支付方式</div>
+                                )}
+                                
+                                <button onClick={() => {setPayModalData(null); setPayMethod('');}} className="w-full py-3 text-gray-400 text-xs font-bold hover:text-gray-600">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
                 )}
 
                 {/* HIDDEN PRINT TEMPLATE */}
@@ -967,7 +1023,7 @@ export const AccountsPayableModule: React.FC<AccountsPayableModuleProps> = ({ on
                                 </div>
                                 <div className="border p-4 rounded">
                                     <p className="text-xs font-bold uppercase text-gray-500 mb-1">Payment Method</p>
-                                    <p className="text-xl font-bold">{printingVoucher.paymentMethod || 'CASH'}</p>
+                                    <p className="text-xl font-bold">{printingVoucher.paymentMethod}</p>
                                 </div>
                             </div>
 

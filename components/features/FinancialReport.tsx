@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Calendar, ArrowRight, PieChart, TrendingUp, Download, Loader2, ListChecks, Info, Users, HelpCircle, Receipt, UserMinus, Briefcase, Calculator, Wallet, Banknote, CreditCard, Truck, ShoppingBag, BarChart3, ChevronRight, AlertCircle, Percent, LayoutList, ChevronLeft, Table2, ExternalLink } from 'lucide-react';
+import { X, Calendar, ArrowRight, PieChart, TrendingUp, Download, Loader2, ListChecks, Info, Users, HelpCircle, Receipt, UserMinus, Briefcase, Calculator, Wallet, Banknote, CreditCard, Truck, ShoppingBag, BarChart3, ChevronRight, AlertCircle, Percent, LayoutList, ChevronLeft, Table2, ExternalLink, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { SettlementRecord, ExpenseItem, BillPaymentRecord, FundTransfer, TreasuryConfig, PayrollRecord } from '../../types';
 import { DataManager } from '../../utils/dataManager';
+import { ModuleGuideButton } from '../ui/ModuleGuide';
 import { jsPDF } from "jspdf";
 import html2canvas from 'html2canvas';
 import { collection, getDocs, query, where } from "firebase/firestore";
@@ -35,6 +36,7 @@ interface DetailedExpenseItem {
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
+    'INGREDIENT_HQ': '食材-总店 (HQ Ingredients)',
     'INGREDIENT_MEAT': '食材-肉类 (Meat)', 'INGREDIENT_SEAFOOD': '食材-海鲜 (Seafood)', 'INGREDIENT_VEG': '食材-蔬果 (Veg)',
     'INGREDIENT_DRY': '食材-干货 (Dry)', 'INGREDIENT_SAUCE': '食材-酱料 (Sauce)', 'INGREDIENT_NOODLE': '食材-面条 (Noodle)',
     'INGREDIENT_OIL': '食材-油类 (Oil)', 'INGREDIENT_EGG': '食材-蛋类 (Eggs)', 'INGREDIENT_FROZEN': '食材-冷冻品 (Frozen)',
@@ -52,8 +54,9 @@ const CATEGORY_LABELS: Record<string, string> = {
     'WASTE': '垃圾处理 (Waste)', 'MARKETING': '营销 (Marketing)', 'PROFESSIONAL': '专业服务 (Professional)',
     'ACCOUNTING': '会计服务 (Accounting)', 'INSURANCE': '保险 (Insurance)', 'LICENSE': '执照 (License)',
     'LOGISTICS': '物流 (Logistics)', 'TRANSPORT': '交通/油费 (Transport)', 'PRINTING': '印刷品 (Printing)',
-    'MISC_OPEX': '其他杂费 (Misc)', 'MBB_COMM': '银行手续费 (Maybank)', 'BANK_FEE': '银行/平台手续费 (Bank Fees)', 'DIVIDEND': '股东分红 (Dividend)',
-    'DEPOSIT': '押金 (Deposit)'
+    'MISC_OPEX': '其他杂费 (Misc)', 'MBB_COMM': '银行手续费 (Maybank)', 'BANK_FEE': '银行刷卡手续费 (Card MDR)', 'DIVIDEND': '股东分红 (Dividend)',
+    'DEPOSIT': '押金 (Deposit)',
+    'PLATFORM_FEE': '平台手续费 (Platform Fee)', 'PLATFORM_FEE_GRAB': 'Grab 手续费', 'PLATFORM_FEE_PANDA': 'FoodPanda 手续费', 'PLATFORM_FEE_SHOPEE': 'ShopeeFood 手续费', 'PLATFORM_FEE_OTHER': '其他平台手续费'
 };
 
 const categorizeExpense = (category: string) => {
@@ -102,6 +105,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
     const [accountingMode, setAccountingMode] = useState<'ACCRUAL' | 'CASH'>('ACCRUAL');
     const [retentionRate, setRetentionRate] = useState(20); 
     const [detailView, setDetailView] = useState<{ title: string, type: string, items: DetailedExpenseItem[] } | null>(null);
+    const [showQuickDates, setShowQuickDates] = useState(false); // 控制手机端日期折叠的状态
 
     const handleMonthChange = (delta: number) => {
         const currentStart = new Date(startDate);
@@ -118,26 +122,33 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const loadData = async () => {
             setLoading(true);
             try {
-                const [bills, funds, config, payrolls] = await Promise.all([
-                    DataManager.getBillPayments(),
-                    DataManager.getFundTransfers(),
+                // 👑 修复 1: 加上 T23:59:59，确保选中月末最后一天晚上的所有数据不丢失！
+                const endOfDay = `${endDate}T23:59:59`;
+
+                // 👑 修复 2: 绕开 DataManager 的截断限制，使用带严格时间区间的查询。
+                // 这样无论查多旧的报表都能查到，且绝不超额计费！
+                const [config, payrolls, setSnap, billsSnap, fundsSnap, expSnap1, expSnap2] = await Promise.all([
                     DataManager.getTreasuryConfig(),
-                    DataManager.getPayrollRecords()
+                    DataManager.getPayrollRecords(), // 薪水表每月只有1条，无所谓全拉
+                    getDocs(query(collection(db, 'settlements'), where("date", ">=", startDate), where("date", "<=", endOfDay))),
+                    getDocs(query(collection(db, 'bill_payments'), where("date", ">=", startDate), where("date", "<=", endOfDay))),
+                    getDocs(query(collection(db, 'fund_transfers'), where("date", ">=", startDate), where("date", "<=", endOfDay))),
+                    // 👑 修复 3: 双重查询，确保“在这个月创建的账”和“在这个月才付款的旧账”统统拉回来！
+                    getDocs(query(collection(db, 'standalone_expenses'), where("time", ">=", startDate), where("time", "<=", endOfDay))),
+                    getDocs(query(collection(db, 'standalone_expenses'), where("paymentDate", ">=", startDate), where("paymentDate", "<=", endOfDay)))
                 ]);
 
-                const settlementsRef = collection(db, 'settlements'); 
-                const expensesRef = collection(db, 'standalone_expenses');
-
-                const [setSnap, expSnap] = await Promise.all([
-                    getDocs(query(settlementsRef, where("date", ">=", startDate), where("date", "<=", endDate))),
-                    getDocs(query(expensesRef, where("time", ">=", startDate), where("time", "<=", endDate)))
-                ]);
+                // 组装并去重 Expenses
+                const expMap = new Map();
+                expSnap1.docs.forEach(d => expMap.set(d.id, { id: d.id, ...d.data() }));
+                expSnap2.docs.forEach(d => expMap.set(d.id, { id: d.id, ...d.data() }));
+                const mergedExpenses = Array.from(expMap.values()) as ExpenseItem[];
 
                 setSettlementRecords(setSnap.docs.map(d => ({ id: d.id, ...d.data() } as SettlementRecord)));
-                setStandaloneExpenses(expSnap.docs.map(d => ({ id: d.id, ...d.data() } as ExpenseItem)));
+                setStandaloneExpenses(mergedExpenses);
+                setBillPayments(billsSnap.docs.map(d => ({ id: d.id, ...d.data() } as BillPaymentRecord)));
+                setTransfers(fundsSnap.docs.map(d => ({ id: d.id, ...d.data() } as FundTransfer)));
                 
-                setBillPayments(bills);
-                setTransfers(funds);
                 setTreasuryConfig(config);
                 setPayrollRecords(payrolls);
             } catch (error) {
@@ -148,7 +159,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             }
         };
         loadData();
-    }, [startDate, endDate]); 
+    }, [startDate, endDate]);
 
     const setQuickDate = (type: 'TODAY' | 'YESTERDAY' | 'WEEK' | 'MONTH' | 'LAST_MONTH') => {
         const now = new Date();
@@ -196,7 +207,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         
         const deliveryBreakdown = { grab: 0, panda: 0, shopee: 0, lalamove: 0 };
 
-        // 🟢 新增：追踪每个外卖平台的 Gross / Net（核销后实收）
         const deliveryRecon: Record<string, { gross: number, net: number, reconDays: number, totalDays: number }> = {
             grab: { gross: 0, net: 0, reconDays: 0, totalDays: 0 },
             panda: { gross: 0, net: 0, reconDays: 0, totalDays: 0 },
@@ -260,7 +270,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 deliveryBreakdown.lalamove += l;
                 deliveryAmt += (g + p + sh + l);
 
-                // 🟢 追踪核销后的实收 Net
                 const rs = (s as any).reconStatus || {};
                 
                 // Grab
@@ -271,7 +280,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                         deliveryRecon.grab.net += rs.grab;
                         deliveryRecon.grab.reconDays += 1;
                     } else if (rs.grab === true) {
-                        // 旧记录完美对账，Net = Gross
                         deliveryRecon.grab.net += g;
                         deliveryRecon.grab.reconDays += 1;
                     }
@@ -363,11 +371,10 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
              }
         });
 
-        // 🟢 新增：Payroll 汇总 — 当月总和 vs 已出资
         const payrollSummary = {
-            monthlyTotal: 0,    // 当月薪资总额 (Net + Statutory)
-            paidAmount: 0,      // 已实际出资金额
-            unpaidAmount: 0,    // 未出资（Draft Statutory 等）
+            monthlyTotal: 0,
+            paidAmount: 0,
+            unpaidAmount: 0,
             staffCount: 0,
             months: [] as string[]
         };
@@ -381,9 +388,7 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 payrollSummary.staffCount = Math.max(payrollSummary.staffCount, Number(p.staffCount || 0));
                 if (!payrollSummary.months.includes(p.month)) payrollSummary.months.push(p.month);
 
-                // Net pay is always paid when POSTED
                 payrollSummary.paidAmount += netPay;
-                // Statutory only if isStatutoryPaid
                 if (p.isStatutoryPaid) {
                     payrollSummary.paidAmount += govtPay;
                 } else {
@@ -392,9 +397,15 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
             }
         });
 
-        const debitFee = 0;
-        const creditFee = 0;
-        const totalCommission = 0;
+        // 🏦 银行刷卡手续费 vs 平台手续费：彻底分开
+        const BANK_FEE_KEYS = ['BANK_FEE', 'MBB_COMM'];
+        const PLATFORM_FEE_KEYS = ['PLATFORM_FEE', 'PLATFORM_FEE_GRAB', 'PLATFORM_FEE_PANDA', 'PLATFORM_FEE_SHOPEE', 'PLATFORM_FEE_OTHER'];
+        
+        const bankFeeList = Object.values(groups).filter(g => BANK_FEE_KEYS.includes(g.id));
+        const totalBankFees = bankFeeList.reduce((sum, g) => sum + g.amount, 0);
+        
+        const platformFeeList = Object.values(groups).filter(g => PLATFORM_FEE_KEYS.includes(g.id));
+        const totalPlatformFees = platformFeeList.reduce((sum, g) => sum + g.amount, 0);
 
         const totalPaymentMethodVolume = revenueDetails.cash + revenueDetails.tng + revenueDetails.debitCard + revenueDetails.creditCard + revenueDetails.amex;
         const cashPercentage = totalPaymentMethodVolume > 0 ? (revenueDetails.cash / totalPaymentMethodVolume) * 100 : 0;
@@ -418,8 +429,25 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
         const settlementCount = settlementRecords.filter(s => isInRange(s.date)).length;
         const avgDailySales = settlementCount > 0 ? revenueDetails.totalRevenue / settlementCount : 0;
 
+        // 🔴 剥离计算外卖宏观数据 (Macro Delivery Data - 仅计算已核销的天数)
+        let macroGross = 0;
+        let macroNet = 0;
+        let macroCommission = 0;
+        (['grab', 'panda', 'shopee'] as const).forEach(plat => {
+            const r = deliveryRecon[plat];
+            if (r.reconDays > 0) {
+                macroGross += r.gross;
+                macroNet += r.net;
+                macroCommission += (r.gross - r.net);
+            }
+        });
+        const macroCommissionRate = macroGross > 0 ? (macroCommission / macroGross) * 100 : 0;
+        const deliveryMacro = { gross: macroGross, net: macroNet, commission: macroCommission, rate: macroCommissionRate };
+
         return {
-            revenueDetails, deliveryBreakdown, deliveryRecon, payrollSummary,
+            revenueDetails, deliveryBreakdown, deliveryRecon, payrollSummary, deliveryMacro,
+            bankFees: { total: totalBankFees, list: bankFeeList },
+            platformFees: { total: totalPlatformFees, list: platformFeeList },
             percentages: { cash: cashPercentage, ewallet: ewalletPercentage },
             grossProfit, netProfit, adjustedNetProfit, netCashFlow, netMargin,
             costs: { totalCOGS, totalLabor, totalOPEX, totalExpenses, totalDeposits, totalCapex },
@@ -431,7 +459,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                 capexList: Object.values(groups).filter(g => g.type === 'CAPEX').sort((a,b) => b.amount - a.amount),
                 depositList: Object.values(groups).filter(g => g.type === 'ASSET').sort((a,b) => b.amount - a.amount)
             },
-            fees: { debitFee, creditFee, totalCommission },
             dailySales, avgDailySales, settlementCount
         };
     }, [settlementRecords, standaloneExpenses, billPayments, payrollRecords, startDate, endDate, accountingMode]);
@@ -723,14 +750,25 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                         <button onClick={() => handleMonthChange(1)} className="p-2 text-gray-400 hover:text-[#FFD700] hover:bg-white/10 rounded-lg transition-colors active:scale-95"><ChevronRight size={18} /></button>
                     </div>
 
-                    <div className="flex flex-col md:flex-row items-center gap-2 md:gap-4 w-full md:w-auto">
-                        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-1.5 px-3 shrink-0 w-full md:w-auto justify-center">
-                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-xs font-bold outline-none cursor-pointer text-center text-gray-600"/>
-                            <ArrowRight size={12} className="text-gray-300"/>
-                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-xs font-bold outline-none cursor-pointer text-center text-gray-600"/>
+                    <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-4 w-full md:w-auto">
+                        
+                        {/* 手机端第一行：日期输入框 + 展开按钮 */}
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1 sm:gap-2 bg-gray-50 border border-gray-200 rounded-xl p-1.5 sm:p-2 px-2 sm:px-3 flex-grow md:flex-grow-0 justify-center">
+                                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-[11px] sm:text-xs font-bold outline-none w-full min-w-[90px] cursor-pointer text-center text-gray-600"/>
+                                <ArrowRight size={12} className="text-gray-300 shrink-0"/>
+                                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-[11px] sm:text-xs font-bold outline-none w-full min-w-[90px] cursor-pointer text-center text-gray-600"/>
+                            </div>
+                            <button 
+                                onClick={() => setShowQuickDates(!showQuickDates)} 
+                                className={`md:hidden px-3 py-2 rounded-xl border transition-all shrink-0 text-[11px] font-black tracking-widest ${showQuickDates ? 'bg-[#1A1A1A] text-[#FFD700] border-[#1A1A1A]' : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'}`}
+                            >
+                                快捷
+                            </button>
                         </div>
-
-                        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl overflow-x-auto w-full md:w-auto scrollbar-hide border border-gray-200/50">
+                        
+                        {/* 手机端第二行：快捷按钮 (默认折叠隐藏，展开时变 3列 网格防挤压) */}
+                        <div className={`${showQuickDates ? 'grid grid-cols-3' : 'hidden'} md:flex gap-1.5 md:gap-1 bg-gray-100 p-1.5 md:p-1 rounded-xl md:overflow-x-auto w-full md:w-auto scrollbar-hide border border-gray-200/50 animate-in slide-in-from-top-2 md:animate-none`}>
                             {[
                                 { key: 'YESTERDAY', label: '昨日' },
                                 { key: 'TODAY', label: '今日' },
@@ -738,7 +776,13 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 { key: 'MONTH', label: '本月' },
                                 { key: 'LAST_MONTH', label: '上月' }
                             ].map(t => (
-                                <button key={t.key} onClick={() => setQuickDate(t.key as any)} className="flex-1 md:flex-none px-3 py-1.5 bg-white shadow-sm rounded-lg text-[10px] font-bold text-gray-600 hover:text-[#1A1A1A] hover:bg-gray-50 transition-colors whitespace-nowrap active:scale-95">{t.label}</button>
+                                <button 
+                                    key={t.key} 
+                                    onClick={() => { setQuickDate(t.key as any); setShowQuickDates(false); }} 
+                                    className="flex-1 md:flex-none px-2 py-2 md:py-1.5 bg-white shadow-sm rounded-lg text-[10px] font-bold text-gray-600 hover:text-[#1A1A1A] hover:bg-gray-50 transition-colors whitespace-nowrap active:scale-95 text-center truncate"
+                                >
+                                    {t.label}
+                                </button>
                             ))}
                         </div>
                     </div>
@@ -768,8 +812,8 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                     {isActive && (<div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#FFD700]/20 to-transparent opacity-50 translate-x-[-100%] animate-[pulse_2s_infinite]"></div>)}
                                     <Icon className={`relative z-10 transition-transform duration-300 w-4 h-4 md:w-[18px] md:h-[18px] shrink-0 ${isActive ? 'text-[#FFD700] scale-110' : 'text-gray-400 group-hover:text-gray-600'}`}/> 
                                     <div className="relative z-10 flex flex-col lg:flex-row items-center lg:gap-1 leading-none mt-0.5 md:mt-0">
-                                        <span className="text-[10px] md:text-sm font-black tracking-wide">{tab.label}</span>
-                                        <span className="hidden lg:inline-block font-mono text-[10px] opacity-70">({tab.en})</span>
+                                        <span className="text-[10px] md:text-sm font-black tracking-tighter md:tracking-wide whitespace-nowrap truncate">{tab.label}</span>
+                                        <span className="hidden lg:inline-block font-mono text-[10px] opacity-70 ml-1">({tab.en})</span>
                                     </div>
                                 </button>
                             );
@@ -792,7 +836,8 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                     )}
                 </div>
 
-                <div className="flex-grow overflow-y-auto p-4 md:p-6 bg-[#F5F7FA] touch-pan-y">
+                {/* 🛡️ 注入 iOS 底部安全区 pb-[calc(2rem+env(safe-area-inset-bottom))] 防遮挡 */}
+                <div className="flex-grow overflow-y-auto p-3 sm:p-4 md:p-6 pb-[calc(2rem+env(safe-area-inset-bottom))] bg-[#F5F7FA] touch-pan-y">
                     {loading ? (
                         <div className="flex items-center justify-center h-40"><Loader2 size={32} className="animate-spin text-gray-400"/></div>
                     ) : (
@@ -808,26 +853,26 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                     </div>
 
                                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-                                        <div className="bg-blue-50 p-4 md:p-5 rounded-2xl border border-blue-100 shadow-sm relative overflow-hidden group">
-                                            <p className="text-[9px] md:text-[10px] font-bold text-blue-600 uppercase mb-1 tracking-wider relative z-10">总营收 (Revenue)</p>
-                                            <p className="text-xl md:text-2xl font-black text-blue-900 font-mono relative z-10">{formatMoney(analytics.revenueDetails.totalRevenue)}</p>
-                                            <p className="text-[9px] text-blue-500 font-bold mt-1 relative z-10">{analytics.settlementCount} 天 · 日均 {formatMoney(analytics.avgDailySales)}</p>
+                                        <div className="bg-blue-50 p-3.5 sm:p-5 rounded-2xl border border-blue-100 shadow-sm relative overflow-hidden group">
+                                            <p className="text-[9px] md:text-[10px] font-bold text-blue-600 uppercase mb-1 tracking-tighter md:tracking-wider relative z-10 whitespace-nowrap truncate">总营收 (Revenue)</p>
+                                            <p className="text-lg sm:text-xl md:text-2xl font-black text-blue-900 font-mono relative z-10 tracking-tighter">{formatMoney(analytics.revenueDetails.totalRevenue)}</p>
+                                            <p className="text-[9px] text-blue-500 font-bold mt-1 relative z-10 whitespace-nowrap truncate">{analytics.settlementCount}天 · 日均 {formatMoney(analytics.avgDailySales)}</p>
                                         </div>
-                                        <div className="bg-red-50 p-4 md:p-5 rounded-2xl border border-red-100 shadow-sm relative overflow-hidden group">
-                                            <p className="text-[9px] md:text-[10px] font-bold text-red-600 uppercase mb-1 tracking-wider relative z-10">总支出 (Expenses)</p>
-                                            <p className="text-xl md:text-2xl font-black text-red-900 font-mono relative z-10">{formatMoney(analytics.costs.totalExpenses)}</p>
-                                            <p className="text-[9px] text-red-400 font-bold mt-1 relative z-10">占营收 {analytics.revenueDetails.totalRevenue > 0 ? ((analytics.costs.totalExpenses / analytics.revenueDetails.totalRevenue) * 100).toFixed(1) : '0'}%</p>
+                                        <div className="bg-red-50 p-3.5 sm:p-5 rounded-2xl border border-red-100 shadow-sm relative overflow-hidden group">
+                                            <p className="text-[9px] md:text-[10px] font-bold text-red-600 uppercase mb-1 tracking-tighter md:tracking-wider relative z-10 whitespace-nowrap truncate">总支出 (Expenses)</p>
+                                            <p className="text-lg sm:text-xl md:text-2xl font-black text-red-900 font-mono relative z-10 tracking-tighter">{formatMoney(analytics.costs.totalExpenses)}</p>
+                                            <p className="text-[9px] text-red-400 font-bold mt-1 relative z-10 whitespace-nowrap truncate">占营收 {analytics.revenueDetails.totalRevenue > 0 ? ((analytics.costs.totalExpenses / analytics.revenueDetails.totalRevenue) * 100).toFixed(1) : '0'}%</p>
                                         </div>
                                         
-                                        <div className={`${analytics.netProfit >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-200'} p-4 md:p-5 rounded-2xl border shadow-sm relative group flex flex-col justify-between`}>
+                                        <div className={`${analytics.netProfit >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-200'} p-3.5 sm:p-5 rounded-2xl border shadow-sm relative group flex flex-col justify-between`}>
                                             <div>
                                                 <div className="flex justify-between items-start">
-                                                    <p className="text-[9px] md:text-[10px] font-bold text-emerald-700 uppercase mb-1 tracking-wider">毛利润 (Gross)</p>
+                                                    <p className="text-[9px] md:text-[10px] font-bold text-emerald-700 uppercase mb-1 tracking-tighter md:tracking-wider whitespace-nowrap truncate">毛利润 (Gross)</p>
                                                 </div>
-                                                <p className={`text-xl md:text-2xl font-black font-mono ${analytics.grossProfit >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>
+                                                <p className={`text-lg sm:text-xl md:text-2xl font-black font-mono tracking-tighter ${analytics.grossProfit >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>
                                                     {formatMoney(analytics.grossProfit)}
                                                 </p>
-                                                <p className="text-[9px] text-emerald-600 font-bold mt-1">
+                                                <p className="text-[9px] text-emerald-600 font-bold mt-1 whitespace-nowrap truncate">
                                                     毛利率 {analytics.revenueDetails.totalRevenue > 0 ? ((analytics.grossProfit / analytics.revenueDetails.totalRevenue) * 100).toFixed(1) : '0'}%
                                                 </p>
                                             </div>
@@ -835,53 +880,51 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                             {analytics.revenueDetails.totalRevenue > 0 && (
                                                 <div className="mt-3 pt-2 border-t border-emerald-200/50">
                                                     {((analytics.grossProfit / analytics.revenueDetails.totalRevenue) * 100) >= 65 ? (
-                                                        <span className="inline-block bg-emerald-100 text-emerald-700 text-[9px] px-2 py-0.5 rounded-md font-black tracking-wide shadow-sm">✅ 定价与损耗健康</span>
+                                                        <span className="inline-block bg-emerald-100 text-emerald-700 text-[8px] sm:text-[9px] px-1.5 sm:px-2 py-0.5 rounded font-black tracking-tighter sm:tracking-wide shadow-sm whitespace-nowrap">✅ 定价与损耗健康</span>
                                                     ) : ((analytics.grossProfit / analytics.revenueDetails.totalRevenue) * 100) < 50 ? (
-                                                        <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 text-[9px] px-2 py-0.5 rounded-md font-black tracking-wide shadow-sm animate-pulse"><AlertCircle size={10}/> 报警: 查损耗/涨价/偷窃</span>
+                                                        <span className="inline-flex items-center gap-0.5 sm:gap-1 bg-red-100 text-red-700 text-[8px] sm:text-[9px] px-1.5 sm:px-2 py-0.5 rounded font-black tracking-tighter sm:tracking-wide shadow-sm animate-pulse whitespace-nowrap"><AlertCircle size={10} className="shrink-0"/> 报警: 查损耗/涨价</span>
                                                     ) : (
-                                                        <span className="inline-block bg-orange-100 text-orange-700 text-[9px] px-2 py-0.5 rounded-md font-black tracking-wide shadow-sm">⚠️ 毛利偏低需优化</span>
+                                                        <span className="inline-block bg-orange-100 text-orange-700 text-[8px] sm:text-[9px] px-1.5 sm:px-2 py-0.5 rounded font-black tracking-tighter sm:tracking-wide shadow-sm whitespace-nowrap">⚠️ 毛利偏低需优化</span>
                                                     )}
                                                 </div>
                                             )}
                                         </div>
 
-                                        <div className={`${analytics.netCashFlow >= 0 ? 'bg-[#1A1A1A]' : 'bg-red-900'} p-4 md:p-5 rounded-2xl shadow-xl relative overflow-hidden group flex flex-col justify-between`}>
+                                        <div className={`${analytics.netCashFlow >= 0 ? 'bg-[#1A1A1A]' : 'bg-red-900'} p-3.5 sm:p-5 rounded-2xl shadow-xl relative overflow-hidden group flex flex-col justify-between`}>
                                             <div>
-                                                <p className="text-[9px] md:text-[10px] font-bold text-[#FFD700] uppercase mb-1 tracking-wider relative z-10">经营净利 (Operating Profit)</p>
-                                                <p className="text-xl md:text-2xl font-black text-white font-mono relative z-10">{formatMoney(analytics.netProfit)}</p>
+                                                <p className="text-[9px] md:text-[10px] font-bold text-[#FFD700] uppercase mb-1 tracking-tighter md:tracking-wider relative z-10 whitespace-nowrap truncate">经营净利 (Net Profit)</p>
+                                                <p className="text-lg sm:text-xl md:text-2xl font-black text-white font-mono relative z-10 tracking-tighter">{formatMoney(analytics.netProfit)}</p>
                                             </div>
                                             
                                             {(analytics.revenueDetails.variance !== 0 || analytics.costs.totalCapex > 0) && (
                                                 <div className="mt-2 pt-2 border-t border-white/20 relative z-10 space-y-1">
                                                     {analytics.revenueDetails.variance !== 0 && (
                                                         <div className="flex justify-between text-[9px] text-white/60 font-mono">
-                                                            <span>现金盘点差异:</span>
-                                                            <span className={analytics.revenueDetails.variance > 0 ? 'text-green-400' : 'text-red-400'}>{analytics.revenueDetails.variance > 0 ? '+' : ''}{formatMoney(analytics.revenueDetails.variance)}</span>
+                                                            <span className="whitespace-nowrap">现金盘点差异:</span>
+                                                            <span className={analytics.revenueDetails.variance > 0 ? 'text-green-400 whitespace-nowrap' : 'text-red-400 whitespace-nowrap'}>{analytics.revenueDetails.variance > 0 ? '+' : ''}{formatMoney(analytics.revenueDetails.variance)}</span>
                                                         </div>
                                                     )}
                                                     {analytics.costs.totalCapex > 0 && (
                                                         <div className="flex justify-between text-[9px] text-white/60 font-mono">
-                                                            <span>- CAPEX:</span>
-                                                            <span className="text-red-400">-{formatMoney(analytics.costs.totalCapex)}</span>
+                                                            <span className="whitespace-nowrap">- CAPEX:</span>
+                                                            <span className="text-red-400 whitespace-nowrap">-{formatMoney(analytics.costs.totalCapex)}</span>
                                                         </div>
                                                     )}
-                                                    <div className="flex justify-between items-center text-[11px] font-bold text-[#FFD700] mt-1 pt-1 border-t border-white/10">
-                                                        <span>= 净现金流:</span>
-                                                        <span className="font-mono">{formatMoney(analytics.netCashFlow)}</span>
+                                                    <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-bold text-[#FFD700] mt-1 pt-1 border-t border-white/10">
+                                                        <span className="whitespace-nowrap">= 净现金流:</span>
+                                                        <span className="font-mono whitespace-nowrap tracking-tighter">{formatMoney(analytics.netCashFlow)}</span>
                                                     </div>
                                                 </div>
                                             )}
                                         </div>
                                     </div>
 
-                                    {/* 🟢 新增：P&L 人工成本摘要 — 当月员工总和 vs 已出资 */}
                                     {analytics.payrollSummary.monthlyTotal > 0 && (
                                         <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
                                             <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2">
                                                 <Users size={16}/> 人工成本摘要 (Labor Summary)
                                             </h4>
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                {/* 当月总和 — 浅色 */}
                                                 <div className="bg-purple-50/60 p-4 rounded-2xl border border-purple-100/80">
                                                     <p className="text-[10px] font-bold text-purple-400 uppercase tracking-wider mb-1">当月薪资总和 (Monthly Total)</p>
                                                     <p className="text-2xl font-black font-mono text-purple-300">{formatMoney(analytics.payrollSummary.monthlyTotal)}</p>
@@ -889,7 +932,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                         {analytics.payrollSummary.staffCount} 名员工 · {analytics.payrollSummary.months.join(', ')}
                                                     </p>
                                                 </div>
-                                                {/* 已出资 — 深色 */}
                                                 <div className="bg-purple-100 p-4 rounded-2xl border border-purple-200">
                                                     <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wider mb-1">已出资 (Paid / Disbursed)</p>
                                                     <p className="text-2xl font-black font-mono text-purple-900">{formatMoney(analytics.payrollSummary.paidAmount)}</p>
@@ -897,7 +939,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                         含 Net Pay + 已缴 Statutory
                                                     </p>
                                                 </div>
-                                                {/* 未出资 — 警示色 */}
                                                 <div className={`p-4 rounded-2xl border ${analytics.payrollSummary.unpaidAmount > 0 ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
                                                     <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${analytics.payrollSummary.unpaidAmount > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                                                         未出资 (Pending Statutory)
@@ -910,7 +951,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                     </p>
                                                 </div>
                                             </div>
-                                            {/* 进度条 */}
                                             {analytics.payrollSummary.monthlyTotal > 0 && (
                                                 <div className="mt-4">
                                                     <div className="flex justify-between text-[10px] font-bold mb-1.5">
@@ -973,77 +1013,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                     )}
 
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                        <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
-                                            <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><PieChart size={16}/> 资金流出结构 (Outflow Structure)</h4>
-                                            {(analytics.costs.totalExpenses + analytics.costs.totalCapex) > 0 ? (
-                                                <div>
-                                                    {(() => {
-                                                        const totalOutflow = analytics.costs.totalExpenses + analytics.costs.totalCapex;
-                                                        return (
-                                                            <>
-                                                                <div className="flex h-8 rounded-full overflow-hidden mb-4 bg-gray-100">
-                                                                    <div className="bg-red-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCOGS / totalOutflow) * 100}%` }}></div>
-                                                                    <div className="bg-purple-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalLabor / totalOutflow) * 100}%` }}></div>
-                                                                    <div className="bg-orange-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalOPEX / totalOutflow) * 100}%` }}></div>
-                                                                    {analytics.costs.totalCapex > 0 && (<div className="bg-blue-400 transition-all duration-700" style={{ width: `${(analytics.costs.totalCapex / totalOutflow) * 100}%` }}></div>)}
-                                                                </div>
-                                                                <div className="space-y-2">
-                                                                    <button onClick={() => handleDrillDown({ type: 'COGS' }, '销货成本 (COGS)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-red-50 transition-colors active:scale-[0.99] group">
-                                                                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-400 rounded-sm shrink-0"></div><span className="text-xs font-bold text-gray-600 group-hover:text-red-700">COGS 食材成本</span></div>
-                                                                        <div className="flex items-center gap-2"><span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCOGS)}</span><span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCOGS / totalOutflow) * 100).toFixed(1)}%</span><ChevronRight size={12} className="text-gray-300"/></div>
-                                                                    </button>
-                                                                    <button onClick={() => handleDrillDown({ type: 'LABOR' }, '人工薪资 (Labor)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-purple-50 transition-colors active:scale-[0.99] group">
-                                                                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-purple-400 rounded-sm shrink-0"></div><span className="text-xs font-bold text-gray-600 group-hover:text-purple-700">Labor 人工成本</span></div>
-                                                                        <div className="flex items-center gap-2"><span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalLabor)}</span><span className="text-[10px] font-bold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalLabor / totalOutflow) * 100).toFixed(1)}%</span><ChevronRight size={12} className="text-gray-300"/></div>
-                                                                    </button>
-                                                                    <button onClick={() => handleDrillDown({ type: 'OPEX' }, '运营支出 (OPEX)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-orange-50 transition-colors active:scale-[0.99] group">
-                                                                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-orange-400 rounded-sm shrink-0"></div><span className="text-xs font-bold text-gray-600 group-hover:text-orange-700">OPEX 运营支出</span></div>
-                                                                        <div className="flex items-center gap-2"><span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalOPEX)}</span><span className="text-[10px] font-bold text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalOPEX / totalOutflow) * 100).toFixed(1)}%</span><ChevronRight size={12} className="text-gray-300"/></div>
-                                                                    </button>
-                                                                    {analytics.costs.totalCapex > 0 && (
-                                                                        <button onClick={() => handleDrillDown({ type: 'CAPEX' }, '资本支出 (CAPEX)')} className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-blue-50 transition-colors active:scale-[0.99] group border-t border-dashed border-gray-200 mt-1 pt-3">
-                                                                            <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-400 rounded-sm shrink-0"></div><span className="text-xs font-bold text-gray-600 group-hover:text-blue-700">CAPEX 资本支出</span></div>
-                                                                            <div className="flex items-center gap-2"><span className="text-xs font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.costs.totalCapex)}</span><span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">{((analytics.costs.totalCapex / totalOutflow) * 100).toFixed(1)}%</span><ChevronRight size={12} className="text-gray-300"/></div>
-                                                                        </button>
-                                                                    )}
-                                                                </div>
-                                                            </>
-                                                        );
-                                                    })()}
-                                                </div>
-                                            ) : (<div className="text-center py-10 text-gray-400 text-xs">暂无支出数据</div>)}
-                                        </div>
-
-                                        <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm">
-                                            <h4 className="font-black text-sm text-[#1A1A1A] mb-4 uppercase tracking-widest flex items-center gap-2"><TrendingUp size={16}/> 利润瀑布图 (Profit Waterfall)</h4>
-                                            {analytics.revenueDetails.totalRevenue > 0 ? (
-                                                <div className="space-y-3">
-                                                    {(() => {
-                                                        const rev = analytics.revenueDetails.totalRevenue;
-                                                        const items = [
-                                                            { label: '营收 Revenue', value: rev, color: 'bg-blue-400', pct: 100 },
-                                                            { label: '− COGS 食材', value: -analytics.costs.totalCOGS, color: 'bg-red-300', pct: (analytics.costs.totalCOGS / rev) * 100 },
-                                                            { label: '= 毛利 Gross', value: analytics.grossProfit, color: 'bg-emerald-400', pct: (analytics.grossProfit / rev) * 100 },
-                                                            { label: '− Labor 人工', value: -analytics.costs.totalLabor, color: 'bg-purple-300', pct: (analytics.costs.totalLabor / rev) * 100 },
-                                                            { label: '− OPEX 运营', value: -analytics.costs.totalOPEX, color: 'bg-orange-300', pct: (analytics.costs.totalOPEX / rev) * 100 },
-                                                            { label: '= 净利 Net', value: analytics.netProfit, color: analytics.netProfit >= 0 ? 'bg-emerald-500' : 'bg-red-500', pct: Math.abs(analytics.netMargin) },
-                                                        ];
-                                                        return items.map((item, i) => (
-                                                            <div key={i} className="flex items-center gap-3">
-                                                                <span className="text-[9px] font-bold text-gray-500 w-20 shrink-0 text-right">{item.label}</span>
-                                                                <div className="flex-1 h-5 bg-gray-50 rounded-full overflow-hidden relative">
-                                                                    <div className={`h-full ${item.color} rounded-full transition-all duration-700`} style={{ width: `${Math.min(100, Math.abs(item.pct))}%` }}></div>
-                                                                </div>
-                                                                <span className={`text-[10px] font-mono font-black w-24 text-right shrink-0 ${item.value >= 0 ? 'text-[#1A1A1A]' : 'text-red-600'}`}>{formatMoney(Math.abs(item.value))}</span>
-                                                            </div>
-                                                        ));
-                                                    })()}
-                                                </div>
-                                            ) : (<div className="text-center py-10 text-gray-400 text-xs">暂无数据</div>)}
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
                                             <div className="flex items-center justify-between">
                                                 <div>
@@ -1122,132 +1091,278 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         </div>
                                     )}
 
-                                    <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm">
-                                        <h4 className="font-black text-sm text-[#1A1A1A] mb-6 uppercase tracking-widest flex items-center gap-2"><Wallet size={16}/> 堂食收款方式 (In-Store Payment Methods)</h4>
-                                        <div className="flex h-4 rounded-full overflow-hidden mb-4 bg-gray-100">
+                                    <div className="bg-white p-4 sm:p-6 rounded-[2rem] border border-gray-200 shadow-sm">
+                                        <h4 className="font-black text-xs sm:text-sm text-[#1A1A1A] mb-4 sm:mb-6 uppercase tracking-tight sm:tracking-widest flex items-center gap-1.5 sm:gap-2 whitespace-nowrap truncate"><Wallet size={16} className="shrink-0"/> 堂食收款方式 <span className="hidden sm:inline">(In-Store Payments)</span></h4>
+                                        <div className="flex h-3 sm:h-4 rounded-full overflow-hidden mb-3 sm:mb-4 bg-gray-100">
                                             <div className="bg-green-500 transition-all duration-1000" style={{ width: `${analytics.percentages.cash}%` }}></div>
                                             <div className="bg-blue-500 transition-all duration-1000" style={{ width: `${analytics.percentages.ewallet}%` }}></div>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="p-4 bg-green-50 rounded-2xl border border-green-100">
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <span className="text-xs font-bold text-green-700 flex items-center gap-2"><Banknote size={14}/> Cash (现金)</span>
-                                                    <span className="text-lg font-black text-green-800">{analytics.percentages.cash.toFixed(1)}%</span>
+                                        <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
+                                            <div className="p-3 sm:p-4 bg-green-50 rounded-xl sm:rounded-2xl border border-green-100 flex flex-col justify-between">
+                                                <div className="flex flex-col 2xl:flex-row 2xl:justify-between 2xl:items-start mb-1 sm:mb-2 gap-0.5">
+                                                    <span className="text-[10px] sm:text-xs font-bold text-green-700 flex items-center gap-1.5 whitespace-nowrap truncate"><Banknote size={14} className="shrink-0"/> <span className="truncate">Cash (现金)</span></span>
+                                                    <span className="text-sm sm:text-lg font-black text-green-800 tracking-tighter leading-none">{analytics.percentages.cash.toFixed(1)}%</span>
                                                 </div>
-                                                <div className="text-xl font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.cash)}</div>
+                                                <div className="text-base sm:text-xl font-mono font-black text-[#1A1A1A] tracking-tighter whitespace-nowrap truncate">{formatMoney(analytics.revenueDetails.cash)}</div>
                                             </div>
-                                            <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <span className="text-xs font-bold text-blue-700 flex items-center gap-2"><CreditCard size={14}/> Digital (Bank/QR)</span>
-                                                    <span className="text-lg font-black text-blue-800">{analytics.percentages.ewallet.toFixed(1)}%</span>
+                                            <div className="p-3 sm:p-4 bg-blue-50 rounded-xl sm:rounded-2xl border border-blue-100 flex flex-col justify-between">
+                                                <div className="flex flex-col 2xl:flex-row 2xl:justify-between 2xl:items-start mb-1 sm:mb-2 gap-0.5">
+                                                    <span className="text-[10px] sm:text-xs font-bold text-blue-700 flex items-center gap-1.5 whitespace-nowrap truncate"><CreditCard size={14} className="shrink-0"/> <span className="truncate">Digital (电子)</span></span>
+                                                    <span className="text-sm sm:text-lg font-black text-blue-800 tracking-tighter leading-none">{analytics.percentages.ewallet.toFixed(1)}%</span>
                                                 </div>
-                                                <div className="text-xl font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.tng + analytics.revenueDetails.debitCard + analytics.revenueDetails.creditCard + analytics.revenueDetails.amex)}</div>
-                                                <div className="mt-2 text-[10px] text-blue-600 space-y-0.5">
-                                                    <div className="flex justify-between"><span>Debit Card:</span><span>{formatMoney(analytics.revenueDetails.debitCard)}</span></div>
-                                                    <div className="flex justify-between"><span>Credit Card:</span><span>{formatMoney(analytics.revenueDetails.creditCard)}</span></div>
-                                                    <div className="flex justify-between"><span>Amex:</span><span>{formatMoney(analytics.revenueDetails.amex)}</span></div>
-                                                    <div className="flex justify-between"><span>TNG eWallet:</span><span>{formatMoney(analytics.revenueDetails.tng)}</span></div>
+                                                <div className="text-base sm:text-xl font-mono font-black text-[#1A1A1A] tracking-tighter whitespace-nowrap truncate">{formatMoney(analytics.revenueDetails.tng + analytics.revenueDetails.debitCard + analytics.revenueDetails.creditCard + analytics.revenueDetails.amex)}</div>
+                                                <div className="mt-1.5 sm:mt-2 text-[9px] sm:text-[10px] text-blue-600 space-y-0.5 sm:space-y-1">
+                                                    <div className="flex justify-between items-center"><span className="truncate pr-1">Debit:</span><span className="font-mono tracking-tighter">{formatMoney(analytics.revenueDetails.debitCard)}</span></div>
+                                                    <div className="flex justify-between items-center"><span className="truncate pr-1">Credit:</span><span className="font-mono tracking-tighter">{formatMoney(analytics.revenueDetails.creditCard)}</span></div>
+                                                    <div className="flex justify-between items-center"><span className="truncate pr-1">Amex:</span><span className="font-mono tracking-tighter">{formatMoney(analytics.revenueDetails.amex)}</span></div>
+                                                    <div className="flex justify-between items-center"><span className="truncate pr-1">TNG:</span><span className="font-mono tracking-tighter">{formatMoney(analytics.revenueDetails.tng)}</span></div>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* 🟢 改版：外卖渠道分析 — 每个平台单独显示 Gross / Net / 抽佣% */}
-                                    <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm">
-                                        <h4 className="font-black text-sm text-[#1A1A1A] mb-2 uppercase tracking-widest flex items-center gap-2"><Truck size={16}/> 外卖渠道分析 (Delivery Channels)</h4>
-                                        <p className="text-[10px] text-gray-400 font-bold mb-5">Gross 为系统营业额 · Net 为核销后银行实收 · Commission 为平台抽佣</p>
-
-                                        {/* 总览行 */}
-                                        <div className="flex justify-between items-center p-4 bg-gray-50 rounded-xl mb-4 border border-gray-200">
-                                            <div className="flex items-center gap-3">
-                                                <div className="bg-white p-2 rounded-lg shadow-sm text-gray-600"><Truck size={18}/></div>
-                                                <div>
-                                                    <span className="font-bold text-sm text-gray-700">Delivery Total (Gross)</span>
-                                                    <p className="text-[10px] text-gray-400 font-bold">所有外卖平台营业总额</p>
-                                                </div>
-                                            </div>
-                                            <span className="font-mono font-black text-xl text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.delivery)}</span>
+                                    {/* 🔴 外卖平台抽佣明细 (Delivery Platform Commission) */}
+                                    <div className="bg-white p-5 sm:p-6 rounded-[2rem] shadow-sm border border-gray-200">
+                                        <div className="flex justify-between items-center mb-5 sm:mb-6">
+                                            <h3 className="font-black text-[#1A1A1A] text-sm md:text-base flex items-center gap-2 uppercase tracking-widest">
+                                                <Truck className="text-orange-500" size={18}/>
+                                                外卖营收分析 (Delivery Revenue)
+                                            </h3>
+                                            <span className="text-[10px] bg-orange-50 text-orange-600 px-2 py-1 rounded font-bold uppercase tracking-widest hidden md:inline-block border border-orange-100">Gross vs Net</span>
                                         </div>
 
-                                        {/* 各平台详细卡片 */}
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                            {(['grab', 'panda', 'shopee'] as const).map(platform => {
-                                                const recon = analytics.deliveryRecon[platform];
-                                                const colors = PLATFORM_COLORS[platform];
-                                                if (recon.gross <= 0) return null;
-                                                
-                                                const commission = recon.reconDays > 0 ? (recon.gross - recon.net) : 0;
-                                                const commissionPct = recon.reconDays > 0 && recon.gross > 0 ? ((commission / recon.gross) * 100) : 0;
-                                                const hasRecon = recon.reconDays > 0;
-                                                const allReconciled = recon.reconDays === recon.totalDays;
+                                        {analytics.deliveryMacro.gross > 0 ? (
+                                            <div className="mb-6 sm:mb-8 space-y-4">
+                                                <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-xl text-[10px] text-gray-500 font-bold border border-gray-100">
+                                                    <Info size={12} className="shrink-0"/>
+                                                    此处为宏观分析（按 Gross-Net 差额估算抽佣率），实际入账金额以上方「手续费总览」为准。
+                                                </div>
+                                                <div className="flex justify-between items-end">
+                                                    <div>
+                                                        <p className="text-xs font-bold text-gray-400 mb-1">已核销总营业额 (Gross)</p>
+                                                        <p className="font-mono text-xl md:text-2xl font-black text-[#1A1A1A]">RM {analytics.deliveryMacro.gross.toFixed(2)}</p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-xs font-bold text-gray-400 mb-1">已核销实收 (Net)</p>
+                                                        <p className="font-mono text-xl md:text-2xl font-black text-green-600">RM {analytics.deliveryMacro.net.toFixed(2)}</p>
+                                                    </div>
+                                                </div>
 
-                                                return (
-                                                    <div key={platform} className={`p-4 rounded-2xl border ${colors.border} ${colors.bg}`}>
-                                                        <div className="flex justify-between items-center mb-3">
-                                                            <span className={`text-xs font-black ${colors.text} uppercase`}>{colors.label}</span>
-                                                            {!allReconciled && recon.totalDays > 0 && (
-                                                                <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                                                                    {recon.reconDays}/{recon.totalDays} 天已核销
-                                                                </span>
-                                                            )}
-                                                            {allReconciled && recon.totalDays > 0 && (
-                                                                <span className="text-[9px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
-                                                                    ✅ 全部核销
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        
-                                                        <div className="space-y-2">
-                                                            <div className="flex justify-between items-center">
-                                                                <span className="text-[10px] font-bold text-gray-500">Gross (营业额)</span>
-                                                                <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(recon.gross)}</span>
-                                                            </div>
-                                                            
-                                                            {hasRecon && (
-                                                                <>
-                                                                    <div className="flex justify-between items-center">
-                                                                        <span className="text-[10px] font-bold text-green-600">Net (实收)</span>
-                                                                        <span className="font-mono font-black text-green-700">{formatMoney(recon.net)}</span>
-                                                                    </div>
-                                                                    <div className="flex justify-between items-center pt-2 border-t border-gray-200/50">
-                                                                        <span className="text-[10px] font-bold text-red-500">Commission (抽佣)</span>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="font-mono font-bold text-red-600 text-xs">-{formatMoney(commission)}</span>
-                                                                            <span className="text-[9px] font-black text-red-500 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">{commissionPct.toFixed(1)}%</span>
-                                                                        </div>
-                                                                    </div>
-                                                                </>
-                                                            )}
-                                                            
-                                                            {!hasRecon && (
-                                                                <p className="text-[10px] text-gray-400 italic pt-1">尚未核销，无 Net 数据</p>
-                                                            )}
+                                                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 shadow-inner">
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <span className="text-xs font-black uppercase text-gray-600">综合抽佣率 (Commission Rate)</span>
+                                                        <span className={`font-black text-lg ${analytics.deliveryMacro.rate > 30 ? 'text-red-600' : 'text-orange-500'}`}>
+                                                            {analytics.deliveryMacro.rate.toFixed(1)}%
+                                                        </span>
+                                                    </div>
+                                                    <div className="w-full bg-gray-200 rounded-full h-3 mb-2 overflow-hidden flex">
+                                                        <div className="bg-green-500 h-full transition-all duration-1000" style={{ width: `${100 - analytics.deliveryMacro.rate}%` }}></div>
+                                                        <div className={`h-full transition-all duration-1000 ${analytics.deliveryMacro.rate > 30 ? 'bg-red-500' : 'bg-orange-400'}`} style={{ width: `${analytics.deliveryMacro.rate}%` }}></div>
+                                                    </div>
+                                                    <div className="flex justify-between text-[10px] font-bold">
+                                                        <span className="text-green-600">到手: RM {analytics.deliveryMacro.net.toFixed(2)}</span>
+                                                        <span className={analytics.deliveryMacro.rate > 30 ? 'text-red-600' : 'text-orange-500'}>被抽: RM {analytics.deliveryMacro.commission.toFixed(2)}</span>
+                                                    </div>
+                                                </div>
+
+                                                {analytics.deliveryMacro.rate > 30 ? (
+                                                    <div className="bg-red-50 border border-red-200 p-3 rounded-xl flex gap-3 items-start">
+                                                        <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5"/>
+                                                        <div>
+                                                            <p className="text-xs font-black text-red-800">利润警报：外卖成本过高！</p>
+                                                            <p className="text-[10px] text-red-600 mt-1 font-bold">当前平均抽成已达 {analytics.deliveryMacro.rate.toFixed(1)}%。建议检查是否误开平台 Ads，或调高外卖菜单定价。</p>
                                                         </div>
                                                     </div>
-                                                );
-                                            })}
-                                        </div>
-
-                                        {/* Lalamove 单独显示 (无核销机制) */}
-                                        {analytics.deliveryBreakdown.lalamove > 0 && (
-                                            <div className="mt-4 flex justify-between items-center p-3 bg-blue-50 rounded-xl border border-blue-100">
-                                                <span className="text-xs font-bold text-blue-700">Lalamove (自行配送)</span>
-                                                <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.deliveryBreakdown.lalamove)}</span>
+                                                ) : (
+                                                    <div className="bg-green-50 border border-green-200 p-3 rounded-xl flex gap-3 items-center">
+                                                        <CheckCircle2 size={18} className="text-green-600 shrink-0"/>
+                                                        <p className="text-[10px] font-bold text-green-800">平台抽佣率处于健康范围内 (30% 以下)。</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="mb-6 sm:mb-8 p-4 bg-gray-50 rounded-xl border border-gray-100 text-center text-xs text-gray-500 italic">
+                                                <Info size={16} className="mx-auto mb-2 opacity-50"/>
+                                                本时段暂无已核销的外卖数据，无法计算综合抽佣率。<br/>请前往「每日结算 -{'>'} 历史记录」进行数字对账。
                                             </div>
                                         )}
 
-                                        {/* In-Store vs Delivery 对比 */}
-                                        <div className="mt-4 pt-4 border-t border-gray-200 grid grid-cols-2 gap-4">
-                                            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                                                <span className="text-xs font-bold text-gray-600 flex items-center gap-2"><ShoppingBag size={14}/> In-Store</span>
-                                                <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.totalRevenue - analytics.revenueDetails.delivery)}</span>
+                                        <div className="border-t border-gray-100 pt-5 sm:pt-6">
+                                            <p className="text-[9px] sm:text-[10px] text-gray-400 font-bold mb-3 sm:mb-4 uppercase tracking-widest leading-relaxed">
+                                                各平台明细 <span className="sm:hidden"><br/>(Gross营业额 · Net实收)</span><span className="hidden sm:inline">(Gross 为系统营业额 · Net 为核销实收)</span>
+                                            </p>
+                                            
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+                                                {(['grab', 'panda', 'shopee'] as const).map(platform => {
+                                                    const recon = analytics.deliveryRecon[platform];
+                                                    const colors = PLATFORM_COLORS[platform];
+                                                    if (recon.gross <= 0) return null;
+                                                    
+                                                    const commission = recon.reconDays > 0 ? (recon.gross - recon.net) : 0;
+                                                    const commissionPct = recon.reconDays > 0 && recon.gross > 0 ? ((commission / recon.gross) * 100) : 0;
+                                                    const hasRecon = recon.reconDays > 0;
+                                                    const allReconciled = recon.reconDays === recon.totalDays;
+
+                                                    return (
+                                                        <div key={platform} className={`p-3.5 sm:p-4 rounded-2xl border ${colors.border} ${colors.bg}`}>
+                                                            <div className="flex justify-between items-center mb-2.5 sm:mb-3 gap-2">
+                                                                <span className={`text-[11px] sm:text-xs font-black ${colors.text} uppercase whitespace-nowrap truncate pr-1`}>{colors.label}</span>
+                                                                {!allReconciled && recon.totalDays > 0 && (
+                                                                    <span className="text-[8px] sm:text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 sm:px-2 py-0.5 rounded-full border border-amber-200 whitespace-nowrap shrink-0">
+                                                                        {recon.reconDays}/{recon.totalDays} 天已核销
+                                                                    </span>
+                                                                )}
+                                                                {allReconciled && recon.totalDays > 0 && (
+                                                                    <span className="text-[8px] sm:text-[9px] font-bold text-green-600 bg-green-50 px-1.5 sm:px-2 py-0.5 rounded-full border border-green-200 whitespace-nowrap shrink-0">
+                                                                        ✅ 全部核销
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="space-y-1.5 sm:space-y-2">
+                                                                <div className="flex justify-between items-center gap-1">
+                                                                    <span className="text-[9px] sm:text-[10px] font-bold text-gray-500 whitespace-nowrap">Gross <span className="hidden sm:inline">(营业额)</span></span>
+                                                                    <span className="font-mono font-black text-[#1A1A1A] tracking-tighter whitespace-nowrap truncate text-right">{formatMoney(recon.gross)}</span>
+                                                                </div>
+                                                                {hasRecon && (
+                                                                    <>
+                                                                        <div className="flex justify-between items-center gap-1">
+                                                                            <span className="text-[9px] sm:text-[10px] font-bold text-green-600 whitespace-nowrap">Net <span className="hidden sm:inline">(实收)</span></span>
+                                                                            <span className="font-mono font-black text-green-700 tracking-tighter whitespace-nowrap truncate text-right">{formatMoney(recon.net)}</span>
+                                                                        </div>
+                                                                        <div className="flex justify-between items-center pt-1.5 sm:pt-2 border-t border-gray-200/50 gap-1">
+                                                                            <span className="text-[9px] sm:text-[10px] font-bold text-red-500 whitespace-nowrap">Comm <span className="hidden sm:inline">(抽佣)</span></span>
+                                                                            <div className="flex items-center justify-end gap-1 sm:gap-2 shrink-0">
+                                                                                <span className="font-mono font-bold text-red-600 text-[10px] sm:text-xs tracking-tighter whitespace-nowrap truncate">-{formatMoney(commission)}</span>
+                                                                                <span className="text-[8px] sm:text-[9px] font-black text-red-500 bg-red-50 px-1 sm:px-1.5 py-0.5 rounded border border-red-200 whitespace-nowrap shrink-0">{commissionPct.toFixed(1)}%</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </>
+                                                                )}
+                                                                {!hasRecon && (
+                                                                    <p className="text-[9px] sm:text-[10px] text-gray-400 italic pt-1 whitespace-nowrap truncate">尚未核销，无 Net 数据</p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
-                                            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                                                <span className="text-xs font-bold text-gray-600 flex items-center gap-2"><Truck size={14}/> Delivery</span>
-                                                <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.revenueDetails.delivery)}</span>
+
+                                            {analytics.deliveryBreakdown.lalamove > 0 && (
+                                                <div className="mt-4 flex justify-between items-center p-3 bg-blue-50 rounded-xl border border-blue-100">
+                                                    <span className="text-xs font-bold text-blue-700">Lalamove (自行配送)</span>
+                                                    <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(analytics.deliveryBreakdown.lalamove)}</span>
+                                                </div>
+                                            )}
+
+                                            <div className="mt-5 sm:mt-6 pt-4 border-t border-gray-200 grid grid-cols-2 gap-3 sm:gap-4">
+                                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 sm:p-4 bg-gray-50 rounded-xl sm:rounded-2xl border border-gray-100 gap-1 sm:gap-0">
+                                                    <span className="text-[10px] sm:text-xs font-bold text-gray-600 flex items-center gap-1.5 whitespace-nowrap truncate">
+                                                        <ShoppingBag size={14} className="shrink-0"/> <span className="truncate">In-Store</span>
+                                                    </span>
+                                                    <span className="text-sm sm:text-base font-mono font-black text-[#1A1A1A] tracking-tighter whitespace-nowrap truncate">
+                                                        {formatMoney(analytics.revenueDetails.totalRevenue - analytics.revenueDetails.delivery)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 sm:p-4 bg-orange-50 rounded-xl sm:rounded-2xl border border-orange-100 gap-1 sm:gap-0">
+                                                    <span className="text-[10px] sm:text-xs font-bold text-orange-700 flex items-center gap-1.5 whitespace-nowrap truncate">
+                                                        <Truck size={14} className="shrink-0"/> <span className="truncate">Delivery</span>
+                                                    </span>
+                                                    <span className="text-sm sm:text-base font-mono font-black text-orange-800 tracking-tighter whitespace-nowrap truncate">
+                                                        {formatMoney(analytics.revenueDetails.delivery)}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
+
+                                    {/* 🏦 银行手续费明细 (Bank & Payment Fees) */}
+                                    <div className="bg-white p-5 sm:p-6 rounded-[2rem] shadow-sm border border-gray-200">
+                                        <div className="flex justify-between items-center mb-5 sm:mb-6">
+                                            <h3 className="font-black text-[#1A1A1A] text-sm md:text-base flex items-center gap-2 uppercase tracking-widest">
+                                                <CreditCard className="text-blue-500" size={18}/>
+                                                银行手续费 (Bank & Payment Fees)
+                                            </h3>
+                                            <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded font-bold uppercase tracking-widest hidden md:inline-block border border-blue-100">Bank</span>
+                                        </div>
+
+                                        {analytics.bankFees.total > 0 ? (
+                                            <div className="space-y-4">
+                                                <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                                                    <div className="flex justify-between items-center mb-3">
+                                                        <span className="text-xs font-black uppercase text-blue-700">本期银行手续费合计</span>
+                                                        <span className="font-black text-xl font-mono text-blue-700 tracking-tighter">{formatMoney(analytics.bankFees.total)}</span>
+                                                    </div>
+                                                    {(() => {
+                                                        const storeRevenue = analytics.revenueDetails.totalRevenue - analytics.revenueDetails.delivery;
+                                                        const bankPct = storeRevenue > 0 ? (analytics.bankFees.total / storeRevenue) * 100 : 0;
+                                                        return (
+                                                            <>
+                                                                <div className="w-full bg-blue-100 rounded-full h-2.5 mb-2 overflow-hidden">
+                                                                    <div className="bg-blue-500 h-full transition-all duration-1000 rounded-full" style={{ width: `${Math.min(bankPct * 5, 100)}%` }}></div>
+                                                                </div>
+                                                                <div className="flex justify-between text-[10px] font-bold">
+                                                                    <span className="text-blue-600">占堂食营收 {bankPct.toFixed(2)}%</span>
+                                                                    <span className="text-gray-400">堂食营收: {formatMoney(storeRevenue)}</span>
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    {analytics.bankFees.list.map((fee: any) => (
+                                                        <div key={fee.id} onClick={() => handleDrillDown({ categoryId: fee.id }, fee.label)} className="flex justify-between items-center p-3.5 bg-gray-50 hover:bg-blue-50/50 rounded-xl border border-gray-100 cursor-pointer transition-colors group active:scale-[0.98]">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                                                                    <CreditCard size={14} className="text-blue-600"/>
+                                                                </div>
+                                                                <span className="text-sm font-bold text-gray-700 group-hover:text-blue-800">{CATEGORY_LABELS[fee.id] || fee.id}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-mono font-black text-[#1A1A1A]">{formatMoney(fee.amount)}</span>
+                                                                <ChevronRight size={14} className="text-gray-300 group-hover:text-blue-500"/>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                {analytics.bankFees.total > 0 && (() => {
+                                                    const storeRevenue = analytics.revenueDetails.totalRevenue - analytics.revenueDetails.delivery;
+                                                    const bankPct = storeRevenue > 0 ? (analytics.bankFees.total / storeRevenue) * 100 : 0;
+                                                    return bankPct > 2 ? (
+                                                        <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl flex gap-3 items-start">
+                                                            <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5"/>
+                                                            <div>
+                                                                <p className="text-xs font-black text-amber-800">注意：银行手续费偏高</p>
+                                                                <p className="text-[10px] text-amber-600 mt-1 font-bold">占堂食营收 {bankPct.toFixed(2)}% (建议控制在 2% 以下)。可考虑与银行谈判降低 MDR 或鼓励现金/TNG 支付。</p>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="bg-green-50 border border-green-200 p-3 rounded-xl flex gap-3 items-center">
+                                                            <CheckCircle2 size={16} className="text-green-600 shrink-0"/>
+                                                            <p className="text-[10px] font-bold text-green-800">银行手续费占比正常 (2% 以下)。</p>
+                                                        </div>
+                                                    );
+                                                })()}
+
+                                                <div className="bg-gray-50 border border-gray-200 p-3.5 rounded-xl mt-3">
+                                                    <p className="text-[10px] font-black text-gray-600 mb-1.5">💡 如何区分银行费 vs 平台费？</p>
+                                                    <div className="text-[10px] text-gray-500 space-y-1 leading-relaxed">
+                                                        <p>• <span className="font-mono bg-blue-50 px-1 rounded border border-blue-100 text-blue-700">BANK_FEE</span> / <span className="font-mono bg-blue-50 px-1 rounded border border-blue-100 text-blue-700">MBB_COMM</span> → 仅限银行刷卡 MDR（Visa/MC/Amex 手续费）</p>
+                                                        <p>• <span className="font-mono bg-pink-50 px-1 rounded border border-pink-100 text-pink-700">PLATFORM_FEE</span> → Grab/Panda/Shopee 平台收取的额外手续费、广告费</p>
+                                                        <p className="text-gray-400 italic pt-1">如之前已混入，请前往「应付账款」修改对应条目的类别。</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="p-6 bg-gray-50 rounded-xl border border-gray-100 text-center">
+                                                <CreditCard size={24} className="mx-auto mb-2 text-gray-300"/>
+                                                <p className="text-xs text-gray-500 italic">本时段暂无银行手续费记录。</p>
+                                                <p className="text-[10px] text-gray-400 mt-1">如有信用卡/借记卡 MDR 费用，请在「应付账款」模块录入，类别选 <span className="font-mono bg-gray-200 px-1 rounded">BANK_FEE</span> 或 <span className="font-mono bg-gray-200 px-1 rounded">MBB_COMM</span>。</p>
+                                            </div>
+                                        )}
+                                    </div>
+
                                 </div>
                             )}
 
@@ -1258,26 +1373,26 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                         {accountingMode === 'ACCRUAL' ? '📋 权责发生制 — 费用含未付账单，按收货日归入。点击行项可查看付款状态。' : '💰 收付实现制 — 仅显示已实际付款的费用。'}
                                     </div>
                                     
-                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                                        <button onClick={() => handleDrillDown({ type: 'COGS' }, '销货成本 (COGS)')} className="bg-red-50 p-5 rounded-[2rem] border border-red-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[120px]">
-                                            <div className="flex justify-between items-center mb-2"><p className="text-[10px] font-bold text-red-600 uppercase">COGS (Cost of Goods)</p><ChevronRight size={16} className="text-red-300 group-hover:text-red-500 transition-colors"/></div>
-                                            <p className="text-2xl font-black text-[#1A1A1A] font-mono">{formatMoney(analytics.costs.totalCOGS)}</p>
-                                            <div className="mt-2 text-[10px] font-bold text-red-400">{analytics.margins.cogs.toFixed(1)}% of Sales</div>
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                                        <button onClick={() => handleDrillDown({ type: 'COGS' }, '销货成本 (COGS)')} className="bg-red-50 p-3.5 sm:p-5 rounded-2xl sm:rounded-[2rem] border border-red-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[100px] sm:min-h-[120px]">
+                                            <div className="flex justify-between items-center mb-1 sm:mb-2"><p className="text-[9px] sm:text-[10px] font-bold text-red-600 uppercase truncate pr-1">COGS (销货成本)</p><ChevronRight size={14} className="text-red-300 group-hover:text-red-500 transition-colors shrink-0"/></div>
+                                            <p className="text-lg sm:text-2xl font-black text-[#1A1A1A] font-mono tracking-tighter">{formatMoney(analytics.costs.totalCOGS)}</p>
+                                            <div className="mt-1 sm:mt-2 text-[9px] sm:text-[10px] font-bold text-red-400 truncate">{analytics.margins.cogs.toFixed(1)}% of Sales</div>
                                         </button>
-                                        <button onClick={() => handleDrillDown({ type: 'LABOR' }, '人工薪资 (Labor)')} className="bg-purple-50 p-5 rounded-[2rem] border border-purple-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[120px]">
-                                            <div className="flex justify-between items-center mb-2"><p className="text-[10px] font-bold text-purple-600 uppercase">Labor (人工薪资)</p><ChevronRight size={16} className="text-purple-300 group-hover:text-purple-500 transition-colors"/></div>
-                                            <p className="text-2xl font-black text-[#1A1A1A] font-mono">{formatMoney(analytics.costs.totalLabor)}</p>
-                                            <div className="mt-2 text-[10px] font-bold text-purple-400">{analytics.margins.labor.toFixed(1)}% of Sales</div>
+                                        <button onClick={() => handleDrillDown({ type: 'LABOR' }, '人工薪资 (Labor)')} className="bg-purple-50 p-3.5 sm:p-5 rounded-2xl sm:rounded-[2rem] border border-purple-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[100px] sm:min-h-[120px]">
+                                            <div className="flex justify-between items-center mb-1 sm:mb-2"><p className="text-[9px] sm:text-[10px] font-bold text-purple-600 uppercase truncate pr-1">Labor (人工薪资)</p><ChevronRight size={14} className="text-purple-300 group-hover:text-purple-500 transition-colors shrink-0"/></div>
+                                            <p className="text-lg sm:text-2xl font-black text-[#1A1A1A] font-mono tracking-tighter">{formatMoney(analytics.costs.totalLabor)}</p>
+                                            <div className="mt-1 sm:mt-2 text-[9px] sm:text-[10px] font-bold text-purple-400 truncate">{analytics.margins.labor.toFixed(1)}% of Sales</div>
                                         </button>
-                                        <button onClick={() => handleDrillDown({ type: 'OPEX' }, '运营支出 (OPEX)')} className="bg-orange-50 p-5 rounded-[2rem] border border-orange-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[120px]">
-                                            <div className="flex justify-between items-center mb-2"><p className="text-[10px] font-bold text-orange-600 uppercase">OPEX (运营支出)</p><ChevronRight size={16} className="text-orange-300 group-hover:text-orange-500 transition-colors"/></div>
-                                            <p className="text-2xl font-black text-[#1A1A1A] font-mono">{formatMoney(analytics.costs.totalOPEX)}</p>
-                                            <div className="mt-2 text-[10px] font-bold text-orange-400">{analytics.margins.opex.toFixed(1)}% of Sales</div>
+                                        <button onClick={() => handleDrillDown({ type: 'OPEX' }, '运营支出 (OPEX)')} className="bg-orange-50 p-3.5 sm:p-5 rounded-2xl sm:rounded-[2rem] border border-orange-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[100px] sm:min-h-[120px]">
+                                            <div className="flex justify-between items-center mb-1 sm:mb-2"><p className="text-[9px] sm:text-[10px] font-bold text-orange-600 uppercase truncate pr-1">OPEX (运营支出)</p><ChevronRight size={14} className="text-orange-300 group-hover:text-orange-500 transition-colors shrink-0"/></div>
+                                            <p className="text-lg sm:text-2xl font-black text-[#1A1A1A] font-mono tracking-tighter">{formatMoney(analytics.costs.totalOPEX)}</p>
+                                            <div className="mt-1 sm:mt-2 text-[9px] sm:text-[10px] font-bold text-orange-400 truncate">{analytics.margins.opex.toFixed(1)}% of Sales</div>
                                         </button>
-                                        <button onClick={() => handleDrillDown({ type: 'CAPEX' }, '资本支出 (CAPEX)')} className="bg-blue-50 p-5 rounded-[2rem] border border-blue-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[120px]">
-                                            <div className="flex justify-between items-center mb-2"><p className="text-[10px] font-bold text-blue-600 uppercase">CAPEX (资本支出)</p><ChevronRight size={16} className="text-blue-300 group-hover:text-blue-500 transition-colors"/></div>
-                                            <p className="text-2xl font-black text-[#1A1A1A] font-mono">{formatMoney(analytics.costs.totalCapex)}</p>
-                                            <div className="mt-2 text-[10px] font-bold text-blue-400">资产类，不计入当期损益</div>
+                                        <button onClick={() => handleDrillDown({ type: 'CAPEX' }, '资本支出 (CAPEX)')} className="bg-blue-50 p-3.5 sm:p-5 rounded-2xl sm:rounded-[2rem] border border-blue-100 text-left hover:shadow-md transition-all active:scale-[0.98] group min-h-[100px] sm:min-h-[120px]">
+                                            <div className="flex justify-between items-center mb-1 sm:mb-2"><p className="text-[9px] sm:text-[10px] font-bold text-blue-600 uppercase truncate pr-1">CAPEX (资本支出)</p><ChevronRight size={14} className="text-blue-300 group-hover:text-blue-500 transition-colors shrink-0"/></div>
+                                            <p className="text-lg sm:text-2xl font-black text-[#1A1A1A] font-mono tracking-tighter">{formatMoney(analytics.costs.totalCapex)}</p>
+                                            <div className="mt-1 sm:mt-2 text-[8px] sm:text-[10px] font-bold text-blue-400 truncate">不计入当期损益</div>
                                         </button>
                                     </div>
 
@@ -1422,15 +1537,27 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                                 <h4 className="text-sm font-black text-[#1A1A1A] uppercase tracking-widest mb-4 ml-2 flex items-center gap-2"><Users size={16}/> 股东分配明细 (Breakdown)</h4>
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                                     {(treasuryConfig?.shareholders || []).map(sh => {
-                                                        const distributableTotal = analytics.netCashFlow * ((100 - retentionRate) / 100);
-                                                        const shareAmount = distributableTotal * (sh.equityPercentage / 100);
+                                                        const distributableTotal = analytics.netProfit * ((100 - retentionRate) / 100);
+                                                        
+                                                        // 核心修改：无视股权比例，强制平分为 3 份
+                                                        const shareAmount = distributableTotal / 3;
+                                                        
                                                         return (
                                                             <div key={sh.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between group hover:border-[#FFD700] transition-all">
                                                                 <div className="flex items-center gap-3">
-                                                                    <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center font-black text-gray-500 text-sm border-2 border-white shadow-sm">{sh.name.charAt(0)}</div>
-                                                                    <div><div className="font-bold text-sm text-[#1A1A1A]">{sh.name}</div><div className="text-[10px] font-black text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded w-fit mt-0.5">{sh.equityPercentage}% Equity</div></div>
+                                                                    <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center font-black text-gray-500 text-sm border-2 border-white shadow-sm">
+                                                                        {sh.name.charAt(0)}
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="font-bold text-sm text-[#1A1A1A]">{sh.name}</div>
+                                                                        {/* UI 更新：将原本的股权 % 改为显示 "1/3 均分" 标签 */}
+                                                                        <div className="text-[10px] font-black text-blue-700 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded w-fit mt-0.5">1/3 均分 (Equal Split)</div>
+                                                                    </div>
                                                                 </div>
-                                                                <div className="text-right"><div className="text-xs font-bold text-gray-400 uppercase">Payout</div><div className="text-lg font-mono font-black text-[#1A1A1A]">{formatMoney(shareAmount)}</div></div>
+                                                                <div className="text-right">
+                                                                    <div className="text-xs font-bold text-gray-400 uppercase">Payout</div>
+                                                                    <div className="text-lg font-mono font-black text-[#1A1A1A]">{formatMoney(shareAmount)}</div>
+                                                                </div>
                                                             </div>
                                                         );
                                                     })}
@@ -1442,7 +1569,6 @@ export const FinancialReport: React.FC<FinancialReportProps> = ({ onClose }) => 
                                 </div>
                              )}
 
-                            {/* PDF 打印隐藏区 */}
                             <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
                                 <div ref={printRef} className="w-[800px] bg-white p-12 font-sans text-black relative" style={{ minHeight: '1122px' }}>
                                     <div className="flex justify-between items-end border-b-4 border-black pb-6 mb-8">

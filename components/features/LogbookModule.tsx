@@ -1,6 +1,6 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { BookOpen, AlertCircle, CheckCircle2, Clock, Trash2, Shield, AlertTriangle, FileText, Camera, X, Image as ImageIcon, Upload, Loader2, ChevronDown, Filter, Zap, PenTool, Maximize2, ArrowRight, Eye, Lightbulb, Edit3, User, Gavel, Coins } from 'lucide-react';
+// ⚠️ 修复 1: 引入了缺失的 Check 组件
+import { BookOpen, AlertCircle, CheckCircle2, Clock, Trash2, Shield, AlertTriangle, FileText, Camera, X, Image as ImageIcon, Upload, Loader2, ChevronDown, Filter, Zap, PenTool, Maximize2, ArrowRight, Eye, Lightbulb, Edit3, User, Gavel, Coins, Check, Calendar } from 'lucide-react';
 import { LogEntry, LogCategory, LogPriority, Employee, MisconductRecord } from '../../types';
 import { uploadToCloudinary } from '../utils';
 import { DataManager } from '../../utils/dataManager';
@@ -24,6 +24,28 @@ export const LogbookModule: React.FC<LogbookModuleProps> = ({ viewOnly = false, 
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'HIGH_PRIORITY' | 'COMPLAINT'>('ALL');
   const [employees, setEmployees] = useState<Employee[]>([]);
+  
+  // 📅 日期筛选状态 - 默认显示最近 7 天
+  const [dateRange, setDateRange] = useState<{start: string, end: string}>(() => {
+      const today = new Date();
+      const weekAgo = new Date(today);
+      weekAgo.setDate(today.getDate() - 7);
+      return { start: weekAgo.toISOString().split('T')[0], end: today.toISOString().split('T')[0] };
+  });
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const applyQuickDate = (type: 'TODAY' | 'YESTERDAY' | '7DAYS' | 'THIS_MONTH' | 'LAST_MONTH') => {
+      const now = new Date();
+      const s = new Date(now);
+      const e = new Date(now);
+      if (type === 'TODAY') { /* default */ }
+      else if (type === 'YESTERDAY') { s.setDate(now.getDate() - 1); e.setDate(now.getDate() - 1); }
+      else if (type === '7DAYS') { s.setDate(now.getDate() - 7); }
+      else if (type === 'THIS_MONTH') { s.setDate(1); e.setMonth(e.getMonth() + 1); e.setDate(0); }
+      else if (type === 'LAST_MONTH') { s.setDate(1); s.setMonth(s.getMonth() - 1); e.setDate(0); }
+      setDateRange({ start: s.toISOString().split('T')[0], end: e.toISOString().split('T')[0] });
+      setShowDatePicker(false);
+  };
   
   // Form State
   const [form, setForm] = useState<{ issue: string; action: string; category: LogCategory; priority: LogPriority; image: string; }>({ 
@@ -60,12 +82,17 @@ export const LogbookModule: React.FC<LogbookModuleProps> = ({ viewOnly = false, 
 
   useEffect(() => {
     const loadData = async () => {
-        const [l, e] = await Promise.all([
-            DataManager.getLogs(),
-            DataManager.getEmployees()
-        ]);
-        setLogs(l);
-        setEmployees(e.filter(emp => !emp.isArchived && !emp.role.includes('Owner'))); // Active staff only
+        try {
+            const [l, e] = await Promise.all([
+                DataManager.getLogs(), // ⚠️ 注意 Firebase 计费地雷：日后数据量大时，必须在 DataManager 限制拉取条数 limit(50)
+                DataManager.getEmployees()
+            ]);
+            setLogs(l || []);
+            // ⚠️ 修复 2: 增加 (emp.role || '') 防止 undefined.includes 导致崩溃
+            setEmployees((e || []).filter(emp => !emp.isArchived && !(emp.role || '').includes('Owner')));
+        } catch (error) {
+            console.error("Load Data Error:", error);
+        }
     };
     loadData();
   }, []);
@@ -161,8 +188,9 @@ export const LogbookModule: React.FC<LogbookModuleProps> = ({ viewOnly = false, 
 
   // --- SOLUTION EDITING ---
   const canEditSolution = useMemo(() => {
-      if (!currentEmployee) return false;
-      const role = currentEmployee.role.toUpperCase();
+      // ⚠️ 修复 3: 增加 !currentEmployee.role 拦截，防止 .toUpperCase 崩溃
+      if (!currentEmployee || !currentEmployee.role) return false;
+      const role = String(currentEmployee.role).toUpperCase();
       return role.includes('OWNER') || role.includes('老板') || 
              role.includes('MANAGER') || role.includes('经理') ||
              role.includes('SUPERVISOR') || role.includes('主管');
@@ -184,11 +212,16 @@ export const LogbookModule: React.FC<LogbookModuleProps> = ({ viewOnly = false, 
       setSolutionText('');
   };
 
-  const filteredLogs = logs.filter(log => {
-      if (activeFilter === 'HIGH_PRIORITY') return log.priority === 'HIGH';
-      if (activeFilter === 'COMPLAINT') return log.category === 'COMPLAINT';
-      return true;
-  });
+  const filteredLogs = useMemo(() => {
+      let list = logs;
+      // 📅 日期范围过滤
+      if (dateRange.start) list = list.filter(l => l.date >= dateRange.start);
+      if (dateRange.end) list = list.filter(l => l.date <= dateRange.end);
+      // 类别过滤
+      if (activeFilter === 'HIGH_PRIORITY') list = list.filter(l => l.priority === 'HIGH');
+      else if (activeFilter === 'COMPLAINT') list = list.filter(l => l.category === 'COMPLAINT');
+      return list;
+  }, [logs, dateRange, activeFilter]);
 
   return (
     <div className="p-4 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300 pb-24">
@@ -245,7 +278,8 @@ export const LogbookModule: React.FC<LogbookModuleProps> = ({ viewOnly = false, 
                                          <label className="text-[10px] font-bold text-red-400 uppercase mb-1 block">Staff (责任人)</label>
                                          <select value={misconductForm.empId} onChange={e => setMisconductForm({...misconductForm, empId: e.target.value})} className="w-full p-2 bg-white border border-red-200 rounded-lg text-xs font-bold outline-none">
                                              <option value="">Select Staff...</option>
-                                             {employees.map(e => <option key={e.id} value={e.id}>{e.name} ({e.role.split('(')[0]})</option>)}
+                                             {/* ⚠️ 修复 4: 增加 (e.role || '') 防止 split 崩溃 */}
+                                             {employees.map(e => <option key={e.id} value={e.id}>{e.name} ({ (e.role || '').split('(')[0] })</option>)}
                                          </select>
                                      </div>
                                      
@@ -298,6 +332,49 @@ export const LogbookModule: React.FC<LogbookModuleProps> = ({ viewOnly = false, 
 
         {/* === LOG LIST === */}
         <div className="space-y-4">
+            
+            {/* 📅 日期筛选控制栏 */}
+            <div className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 space-y-2">
+                <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+                    {[
+                        { label: '今日', value: 'TODAY' as const },
+                        { label: '昨日', value: 'YESTERDAY' as const },
+                        { label: '近7天', value: '7DAYS' as const },
+                        { label: '本月', value: 'THIS_MONTH' as const },
+                        { label: '上月', value: 'LAST_MONTH' as const },
+                    ].map(item => (
+                        <button key={item.value} onClick={() => applyQuickDate(item.value)} className="px-2.5 py-1.5 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-[10px] font-bold whitespace-nowrap text-gray-500 transition-all shrink-0">{item.label}</button>
+                    ))}
+                    <button onClick={() => setShowDatePicker(!showDatePicker)} className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 transition-all ${dateRange.start ? 'bg-blue-600 text-white border border-blue-600' : 'bg-white border border-gray-200 text-gray-500 hover:bg-blue-50'}`}>
+                        <Calendar size={10}/> {dateRange.start && dateRange.end ? `${dateRange.start.slice(5)} ~ ${dateRange.end.slice(5)}` : '自选日期'}
+                    </button>
+                    {(dateRange.start || dateRange.end) && (
+                        <button onClick={() => { setDateRange({start:'', end:''}); setShowDatePicker(false); }} className="p-1 hover:bg-gray-100 rounded-full text-gray-400 shrink-0"><X size={12}/></button>
+                    )}
+                    <span className="text-[10px] text-gray-400 font-bold ml-auto shrink-0">{filteredLogs.length} 笔</span>
+                </div>
+                {showDatePicker && (
+                    <div className="flex items-center gap-2 bg-blue-50 p-2 rounded-xl border border-blue-100 animate-in fade-in slide-in-from-top-1">
+                        <input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({...prev, start: e.target.value}))} className="flex-1 bg-white text-xs font-bold p-2 outline-none rounded-lg border border-blue-200 text-center"/>
+                        <span className="text-gray-400 text-xs font-bold">至</span>
+                        <input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({...prev, end: e.target.value}))} className="flex-1 bg-white text-xs font-bold p-2 outline-none rounded-lg border border-blue-200 text-center"/>
+                        <button onClick={() => setShowDatePicker(false)} className="p-1.5 bg-blue-600 text-white rounded-lg shrink-0"><CheckCircle2 size={14}/></button>
+                    </div>
+                )}
+            </div>
+
+            <div className="flex bg-gray-200/60 p-1 rounded-xl w-fit shadow-inner border border-gray-200">
+                <button onClick={() => setActiveFilter('ALL')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeFilter === 'ALL' ? 'bg-white text-[#1A1A1A] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>全部日志 (All)</button>
+                <button onClick={() => setActiveFilter('HIGH_PRIORITY')} className={`flex items-center gap-1 px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeFilter === 'HIGH_PRIORITY' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><AlertTriangle size={12}/> 紧急 (High)</button>
+                <button onClick={() => setActiveFilter('COMPLAINT')} className={`flex items-center gap-1 px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeFilter === 'COMPLAINT' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><AlertCircle size={12}/> 客诉 (Complaint)</button>
+            </div>
+
+            {filteredLogs.length === 0 && (
+                <div className="text-center py-12 text-gray-400 font-bold text-sm bg-white rounded-2xl border-2 border-dashed border-gray-200">
+                    该分类下暂无日志
+                </div>
+            )}
+
             {filteredLogs.map(log => {
                 const catInfo = getCategoryLabel(log.category);
                 const isAcknowledged = !!log.acknowledgedBy;
@@ -343,7 +420,20 @@ export const LogbookModule: React.FC<LogbookModuleProps> = ({ viewOnly = false, 
                                     )}
 
                                     <div className="flex items-center gap-2 mt-2">
-                                        <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-1.5 py-0.5 rounded flex items-center gap-1 border border-gray-100"><Shield size={10}/> {log.creatorName}</span>
+                                        <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-1.5 py-0.5 rounded flex items-center gap-1 border border-gray-100"><Shield size={10}/> 记录人: {log.creatorName}</span>
+                                        
+                                        {/* Acknowledge Status */}
+                                        {isAcknowledged ? (
+                                            <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded flex items-center gap-1 border border-blue-100">
+                                                <CheckCircle2 size={10}/> {log.acknowledgedBy} 已阅
+                                            </span>
+                                        ) : (
+                                            viewOnly && canEditSolution && (
+                                                <button onClick={() => handleAcknowledge(log.id)} className="text-[10px] text-white font-bold bg-blue-500 px-2 py-0.5 rounded flex items-center gap-1 shadow-sm active:scale-95 hover:bg-blue-600 transition-transform">
+                                                    <Check size={10}/> 标记已阅 (Acknowledge)
+                                                </button>
+                                            )
+                                        )}
                                     </div>
                                 </div>
                                 
@@ -355,7 +445,6 @@ export const LogbookModule: React.FC<LogbookModuleProps> = ({ viewOnly = false, 
             })}
         </div>
 
-        {/* ... (Keep existing Modals: Lightbox, Solution, Delete) ... */}
         {viewImage && (<div className="fixed inset-0 bg-black/95 z-[200] flex items-center justify-center p-4" onClick={() => setViewImage(null)}><img src={viewImage} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" onClick={e => e.stopPropagation()}/></div>)}
         {solutionModalOpen && (<div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4"><div className="bg-white w-full max-w-md rounded-2xl p-6 shadow-2xl"><textarea value={solutionText} onChange={e => setSolutionText(e.target.value)} className="w-full p-3 border-2 border-gray-200 rounded-xl text-sm font-bold outline-none h-32 resize-none mb-4"/><div className="flex gap-2"><button onClick={() => setSolutionModalOpen(false)} className="flex-1 py-3 bg-gray-100 font-bold rounded-xl text-sm">取消</button><button onClick={handleSaveSolution} className="flex-[2] py-3 bg-green-600 text-white font-bold rounded-xl text-sm">确认</button></div></div></div>)}
         {deleteCandidateId && (<div className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-xs text-center"><h4 className="text-xl font-black mb-2">确认删除?</h4><div className="grid grid-cols-2 gap-3"><button onClick={() => setDeleteCandidateId(null)} className="py-3 bg-gray-100 font-bold rounded-xl text-sm">取消</button><button onClick={confirmDelete} className="py-3 bg-red-600 text-white font-bold rounded-xl text-sm">确认</button></div></div></div>)}
