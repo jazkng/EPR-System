@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Clock, LogIn, LogOut, User, Search, CheckCircle2, AlertCircle, Calendar, X, History, Briefcase, Coffee, Edit3, Lock, AlertTriangle, ListChecks, FileBarChart, CheckSquare, XCircle, TrendingUp, ChefHat, Utensils, Trash2, Check, ArrowRight, CalendarOff, Palmtree, Home, Zap, ChevronDown, Users, FileDown, Loader2, Droplets } from 'lucide-react';
 import { Employee, AttendanceRecord, RosterStatus } from '../../types';
 import { DataManager } from '../../utils/dataManager';
 import { jsPDF } from "jspdf";
 import html2canvas from 'html2canvas';
+// ✅ 不再需要直接 import firebase/firestore — 统一走 DataManager
 
 interface AttendanceConsoleProps {
     onClose: () => void;
@@ -11,7 +12,6 @@ interface AttendanceConsoleProps {
 
 // --- CONSTANTS ---
 const STANDARD_WORK_HOURS = 10;
-// Defaults strictly for fallback if profile data is missing
 const DEFAULT_LOCAL_REST = 4;
 const DEFAULT_FOREIGN_REST = 2;
 
@@ -22,10 +22,13 @@ const getRosterBadge = (status: RosterStatus) => {
         case 'ANNUAL': return { label: '年假 (AL)', color: 'bg-blue-50 text-blue-600 border-blue-200', icon: Palmtree };
         case 'LEAVE': return { label: '事假 (UL)', color: 'bg-red-50 text-red-600 border-red-200', icon: CalendarOff };
         case 'ABSENT': return { label: '缺席 (ABS)', color: 'bg-purple-50 text-purple-600 border-purple-200', icon: XCircle };
-        default: return null; // WORK or undefined
+        default: return null;
     }
 };
 
+// ============================================================
+// ROLL CALL MODAL
+// ============================================================
 const RollCallModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
@@ -118,8 +121,9 @@ const RollCallModal: React.FC<{
     };
 
     return (
-        <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] relative">
+        // ✅ iOS: 手机端底部弹出
+        <div className="fixed inset-0 bg-black/80 z-[200] flex items-end md:items-center justify-center md:p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-t-3xl md:rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[95vh] md:max-h-[90vh] relative">
                 <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-3xl">
                     <div>
                         <h3 className="font-black text-2xl text-[#1A1A1A]">快速点名 (Roll Call)</h3>
@@ -142,25 +146,19 @@ const RollCallModal: React.FC<{
                                         {staff.avatar ? <img src={staff.avatar} className="w-full h-full object-cover rounded-full"/> : staff.name.charAt(0)}
                                     </div>
                                     <div>
-                                        <div className="font-black text-lg text-[#1A1A1A] flex items-center gap-2">
-                                            {staff.name}
-                                            {rosterBadge && (
-                                                <span className={`text-[9px] px-2 py-0.5 rounded border flex items-center gap-1 ${rosterBadge.color}`}>
-                                                    <rosterBadge.icon size={10} /> {rosterBadge.label}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="text-xs text-gray-400 font-bold uppercase tracking-wider">{staff.role.split('(')[0]}</div>
+                                        <h4 className="font-black text-[#1A1A1A]">{staff.name}</h4>
+                                        <p className="text-[10px] text-gray-400 font-bold">{staff.role.split('(')[0]}</p>
+                                        {rosterBadge && planStatus !== 'WORK' && (
+                                            <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold border ${rosterBadge.color} mt-1 inline-block`}>{rosterBadge.label}</span>
+                                        )}
                                     </div>
                                 </div>
-
-                                <div className="flex items-center gap-3">
-                                    {isPresent ? (
+                                <div className="flex items-center gap-2">
+                                    {processingId === staff.id ? (
+                                        <Loader2 size={24} className="animate-spin text-gray-400"/>
+                                    ) : isPresent ? (
                                         <>
-                                            <div className="text-right mr-2 bg-green-50 px-3 py-1.5 rounded-lg border border-green-100">
-                                                <div className="text-xs font-black text-green-700 uppercase">{record.status === 'COMPLETED' ? 'WORK (To 2AM)' : record.status}</div>
-                                                <div className="text-xs text-gray-500 font-mono font-bold">{record.durationMinutes ? `${(record.durationMinutes/60).toFixed(1)}h` : new Date(record.clockIn).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
-                                            </div>
+                                            <span className="bg-green-100 text-green-700 px-3 py-1.5 rounded-lg text-xs font-bold"><CheckCircle2 size={14} className="inline mr-1 -mt-0.5"/> Present</span>
                                             <button onClick={() => setDeleteCandidateId(staff.id)} disabled={!!processingId} className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 border border-red-100 transition-colors">
                                                 <X size={20}/>
                                             </button>
@@ -173,11 +171,12 @@ const RollCallModal: React.FC<{
                                         </div>
                                     ) : (
                                         <>
-                                            <button onClick={() => { setCustomTimeId(staff.id); setCustomTimeValue('16:00'); }} disabled={!!processingId || !!customTimeId} className="px-4 py-3 bg-white border-2 border-gray-200 text-gray-700 rounded-xl text-sm font-bold shadow-sm hover:bg-gray-50 hover:border-gray-300 flex items-center gap-2">
+                                            {/* ✅ 手机触控: min-h-[44px] */}
+                                            <button onClick={() => { setCustomTimeId(staff.id); setCustomTimeValue('16:00'); }} disabled={!!processingId || !!customTimeId} className="px-4 py-3 min-h-[44px] bg-white border-2 border-gray-200 text-gray-700 rounded-xl text-sm font-bold shadow-sm hover:bg-gray-50 hover:border-gray-300 flex items-center gap-2">
                                                 <Clock size={16}/> 打卡
                                             </button>
-                                            <button onClick={() => handleQuickPresent(staff)} disabled={!!processingId || !!customTimeId} className="px-5 py-3 bg-[#1A1A1A] text-[#FFD700] rounded-xl text-sm font-bold shadow-md flex items-center gap-2 hover:bg-black active:scale-95 transition-transform">
-                                                <CheckSquare size={16}/> 全天
+                                            <button onClick={() => handleQuickPresent(staff)} disabled={!!processingId || !!customTimeId} className="px-4 py-3 min-h-[44px] bg-green-500 text-white rounded-xl text-sm font-bold shadow-sm hover:bg-green-600 flex items-center gap-2">
+                                                <CheckCircle2 size={16}/> 全天
                                             </button>
                                         </>
                                     )}
@@ -187,12 +186,16 @@ const RollCallModal: React.FC<{
                     })}
                 </div>
 
+                {/* ✅ iOS safe area 底部 */}
+                <div className="pb-[env(safe-area-inset-bottom)]" />
+
+                {/* Delete Confirmation */}
                 {deleteCandidateId && (
-                    <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm rounded-3xl animate-in fade-in">
-                        <div className="bg-white rounded-3xl p-8 w-full max-w-sm text-center shadow-2xl border-t-8 border-red-500 animate-in zoom-in-95">
-                            <Trash2 size={48} className="text-red-500 mx-auto mb-4"/>
-                            <h3 className="font-black text-2xl text-[#1A1A1A] mb-2">确认删除考勤?</h3>
-                            <p className="text-sm text-gray-500 font-bold mb-8">此操作将移除该员工的今日记录。</p>
+                    <div className="absolute inset-0 bg-black/50 z-10 flex items-center justify-center p-6 rounded-3xl backdrop-blur-sm">
+                        <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center">
+                            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4"><Trash2 size={28} className="text-red-500"/></div>
+                            <h4 className="font-black text-lg mb-2">撤回打卡 (Undo Clock In)?</h4>
+                            <p className="text-sm text-gray-500 mb-6">将删除 <span className="font-bold text-black">{staffList.find(s => s.id === deleteCandidateId)?.name}</span> 的考勤记录</p>
                             <div className="grid grid-cols-2 gap-4">
                                 <button onClick={() => setDeleteCandidateId(null)} className="py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-2xl font-bold text-sm">取消</button>
                                 <button onClick={confirmMarkAbsent} className="py-4 bg-red-600 text-white hover:bg-red-700 rounded-2xl font-bold text-sm shadow-xl">确认删除</button>
@@ -205,6 +208,9 @@ const RollCallModal: React.FC<{
     );
 };
 
+// ============================================================
+// ✅ COMPLIANCE REPORT MODAL — 修复「读取报表失败」
+// ============================================================
 const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; staffList: Employee[]; }> = ({ isOpen, onClose, staffList }) => {
     const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
     const [records, setRecords] = useState<AttendanceRecord[]>([]);
@@ -214,26 +220,12 @@ const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; st
 
     useEffect(() => { if (isOpen) loadReport(); }, [isOpen, month]);
 
-    // 👑 护栏修复：直接向 Firestore 请求特定月份的所有考勤记录，保证不被底层的 limit 截断。
+    // ✅ 修复核心: 使用 DataManager 而非直接调用 Firestore
+    // 原代码用了 db/collection/query/where/getDocs 但没有 import，导致运行时报错
     const loadReport = async () => {
         setLoading(true);
         try {
-            const startStr = `${month}-01`;
-            // 计算当月最后一天
-            const year = parseInt(month.slice(0, 4));
-            const mon = parseInt(month.slice(5, 7));
-            const lastDay = new Date(year, mon, 0).getDate();
-            const endStr = `${month}-${String(lastDay).padStart(2, '0')}`;
-            
-            // 精确捞取这一个月内的数据，绝对安全且省流量
-            const q = query(
-                collection(db, 'attendance'), 
-                where('date', '>=', startStr), 
-                where('date', '<=', endStr)
-            );
-            const snap = await getDocs(q);
-            const data = snap.docs.map(d => d.data() as AttendanceRecord);
-            
+            const data = await DataManager.getAttendanceByMonth(month);
             setRecords(data);
         } catch (error) {
             console.error("Failed to load compliance report", error);
@@ -244,8 +236,8 @@ const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; st
     };
 
     const reportData = useMemo(() => {
-            const daysInMonth = new Date(parseInt(month.slice(0,4)), parseInt(month.slice(5,7)), 0).getDate();
-            return staffList.filter(s => !s.isAttendanceExempt).map(emp => {
+        const daysInMonth = new Date(parseInt(month.slice(0,4)), parseInt(month.slice(5,7)), 0).getDate();
+        return staffList.filter(s => !s.isAttendanceExempt).map(emp => {
             const empRecords = records.filter(r => r.employeeId === emp.id);
             const totalMinutes = empRecords.reduce((sum, r) => sum + (r.durationMinutes || 0), 0);
             const daysWorked = empRecords.length;
@@ -284,8 +276,9 @@ const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; st
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh]">
+        // ✅ iOS: 手机底部弹出
+        <div className="fixed inset-0 bg-black/80 z-[200] flex items-end md:items-center justify-center md:p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-t-3xl md:rounded-3xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[95vh] md:max-h-[90vh]">
                 <div className="p-6 border-b border-gray-100 flex justify-between items-center shrink-0">
                     <div className="flex items-center gap-4">
                         <div className="bg-blue-50 p-2.5 rounded-xl text-blue-600"><FileBarChart size={24}/></div>
@@ -324,6 +317,9 @@ const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; st
                         </tbody>
                     </table>
                 </div>
+
+                {/* ✅ iOS safe area 底部 */}
+                <div className="pb-[env(safe-area-inset-bottom)]" />
             </div>
 
             {/* HIDDEN PRINT TEMPLATE */}
@@ -377,8 +373,11 @@ const ComplianceReportModal: React.FC<{ isOpen: boolean; onClose: () => void; st
             </div>
         </div>
     );
-}
+};
 
+// ============================================================
+// SECURITY PIN MODAL — ✅ iOS 适配
+// ============================================================
 const SecurityPinModal: React.FC<{ isOpen: boolean; onClose: () => void; onSuccess: () => void; employeeName: string; targetPin: string; }> = ({ isOpen, onClose, onSuccess, employeeName, targetPin }) => {
     const [pin, setPin] = useState('');
     const [error, setError] = useState('');
@@ -386,19 +385,25 @@ const SecurityPinModal: React.FC<{ isOpen: boolean; onClose: () => void; onSucce
     const handleVerify = () => { if (pin === targetPin) { onSuccess(); onClose(); } else { setError('Wrong PIN'); setPin(''); } };
     if (!isOpen) return null;
     return (
-        <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl flex flex-col items-center border-t-8 border-[#FFD700]">
+        <div className="fixed inset-0 bg-black/80 z-[200] flex items-end md:items-center justify-center md:p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-t-3xl md:rounded-3xl p-6 md:p-8 w-full max-w-sm shadow-2xl flex flex-col items-center border-t-8 border-[#FFD700] pb-[max(env(safe-area-inset-bottom),1.5rem)]">
                 <div className="w-20 h-20 bg-yellow-50 rounded-full flex items-center justify-center mb-6"><Lock size={40} className="text-yellow-600"/></div>
                 <h3 className="font-black text-2xl text-[#1A1A1A] mb-2">身份验证</h3>
                 <p className="text-sm text-gray-500 font-bold mb-8">请输入 <span className="text-black bg-gray-100 px-2 py-0.5 rounded">{employeeName}</span> 的密码</p>
                 <input type="password" value={pin} onChange={e => { setPin(e.target.value); setError(''); }} className="w-full p-5 bg-gray-50 rounded-2xl text-center text-3xl font-black tracking-[0.5em] outline-none border-2 focus:border-[#FFD700] mb-6 shadow-inner" placeholder="••••" autoFocus />
                 {error && <p className="text-red-500 text-sm font-bold mb-6 animate-pulse flex items-center gap-2"><AlertCircle size={16}/> {error}</p>}
-                <div className="grid grid-cols-2 gap-4 w-full"><button onClick={onClose} className="py-4 bg-gray-100 rounded-2xl font-bold text-gray-600 text-sm hover:bg-gray-200">取消</button><button onClick={handleVerify} disabled={!pin} className="py-4 bg-[#1A1A1A] text-[#FFD700] rounded-2xl font-bold shadow-xl disabled:opacity-50 text-sm hover:scale-105 transition-transform">确认 (Confirm)</button></div>
+                <div className="grid grid-cols-2 gap-4 w-full">
+                    <button onClick={onClose} className="py-4 min-h-[44px] bg-gray-100 rounded-2xl font-bold text-gray-600 text-sm hover:bg-gray-200">取消</button>
+                    <button onClick={handleVerify} disabled={!pin} className="py-4 min-h-[44px] bg-[#1A1A1A] text-[#FFD700] rounded-2xl font-bold shadow-xl disabled:opacity-50 text-sm hover:scale-105 transition-transform">确认 (Confirm)</button>
+                </div>
             </div>
         </div>
     );
 };
 
+// ============================================================
+// EDIT RECORD MODAL — ✅ iOS 适配
+// ============================================================
 const EditRecordModal: React.FC<{ isOpen: boolean; onClose: () => void; record: AttendanceRecord; onSave: (updated: AttendanceRecord) => void; }> = ({ isOpen, onClose, record, onSave }) => {
     const [inTime, setInTime] = useState('');
     const [outTime, setOutTime] = useState('');
@@ -414,13 +419,25 @@ const EditRecordModal: React.FC<{ isOpen: boolean; onClose: () => void; record: 
     };
     if (!isOpen) return null;
     return (
-        <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl"><h3 className="font-black text-2xl text-[#1A1A1A] mb-6">修正考勤记录</h3><div className="space-y-6 mb-8"><div><label className="text-xs font-bold text-gray-400 uppercase block mb-2">上班时间 (Clock In)</label><input type="time" value={inTime} onChange={e => setInTime(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl font-mono text-xl font-bold border-2 border-gray-200 outline-none focus:border-[#FFD700]" /></div><div><label className="text-xs font-bold text-gray-400 uppercase block mb-2">下班时间 (Clock Out)</label><input type="time" value={outTime} onChange={e => setOutTime(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl font-mono text-xl font-bold border-2 border-gray-200 outline-none focus:border-[#FFD700]" /></div></div><div className="grid grid-cols-2 gap-4"><button onClick={onClose} className="py-4 bg-gray-100 rounded-2xl font-bold text-gray-600">取消</button><button onClick={handleSave} className="py-4 bg-[#1A1A1A] text-[#FFD700] rounded-2xl font-bold shadow-lg">保存修正</button></div></div>
+        <div className="fixed inset-0 bg-black/80 z-[200] flex items-end md:items-center justify-center md:p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-t-3xl md:rounded-3xl p-6 md:p-8 w-full max-w-sm shadow-2xl pb-[max(env(safe-area-inset-bottom),1.5rem)]">
+                <h3 className="font-black text-2xl text-[#1A1A1A] mb-6">修正考勤记录</h3>
+                <div className="space-y-6 mb-8">
+                    <div><label className="text-xs font-bold text-gray-400 uppercase block mb-2">上班时间 (Clock In)</label><input type="time" value={inTime} onChange={e => setInTime(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl font-mono text-xl font-bold border-2 border-gray-200 outline-none focus:border-[#FFD700]" /></div>
+                    <div><label className="text-xs font-bold text-gray-400 uppercase block mb-2">下班时间 (Clock Out)</label><input type="time" value={outTime} onChange={e => setOutTime(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl font-mono text-xl font-bold border-2 border-gray-200 outline-none focus:border-[#FFD700]" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <button onClick={onClose} className="py-4 min-h-[44px] bg-gray-100 rounded-2xl font-bold text-gray-600">取消</button>
+                    <button onClick={handleSave} className="py-4 min-h-[44px] bg-[#1A1A1A] text-[#FFD700] rounded-2xl font-bold shadow-lg">保存修正</button>
+                </div>
+            </div>
         </div>
     );
 };
 
-// --- MAIN COMPONENT ---
+// ============================================================
+// MAIN COMPONENT — ✅ 缓存优化 + iOS适配
+// ============================================================
 export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose }) => {
     const [staffList, setStaffList] = useState<Employee[]>([]);
     const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
@@ -441,6 +458,10 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
     // Batch Menu State
     const [showBatchMenu, setShowBatchMenu] = useState(false);
     const batchMenuRef = useRef<HTMLDivElement>(null);
+
+    // ✅ 成本优化: 员工数据5分钟缓存
+    const staffCacheRef = useRef<{ data: Employee[]; ts: number } | null>(null);
+    const STAFF_CACHE_TTL = 5 * 60 * 1000;
 
     // Scroll Lock
     useEffect(() => {
@@ -463,29 +484,40 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
     useEffect(() => { const dateStr = getBusinessDate(); setSelectedDate(dateStr); loadData(dateStr); }, []);
 
     const getBusinessDate = () => { const now = new Date(); if (now.getHours() < 4) now.setDate(now.getDate() - 1); return now.toISOString().split('T')[0]; };
-    const loadData = async (dateStr: string) => {
+    
+    // ✅ 成本优化: 带缓存的 loadData
+    const loadData = useCallback(async (dateStr: string, forceRefreshStaff = false) => {
         setIsLoading(true);
-        const allStaff = await DataManager.getEmployees();
-        setStaffList(allStaff.filter(s => !s.isArchived && !s.role.includes('Owner')));
-        
-        const [attendanceData, { roster }] = await Promise.all([
-            DataManager.getAttendanceByDate(dateStr),
-            DataManager.getRosterData()
-        ]);
-        
-        setTodayRecords(attendanceData);
-        setDailyRoster(roster[dateStr] || {}); 
-        setIsLoading(false);
-    };
+        try {
+            const now = Date.now();
+            const cacheValid = staffCacheRef.current && 
+                              (now - staffCacheRef.current.ts < STAFF_CACHE_TTL) && 
+                              !forceRefreshStaff;
+
+            if (!cacheValid) {
+                const allStaff = await DataManager.getEmployees();
+                const filtered = allStaff.filter(s => !s.isArchived && !s.role.includes('Owner'));
+                staffCacheRef.current = { data: filtered, ts: now };
+                setStaffList(filtered);
+            }
+
+            const [attendanceData, { roster }] = await Promise.all([
+                DataManager.getAttendanceByDate(dateStr),
+                DataManager.getRosterData()
+            ]);
+
+            setTodayRecords(attendanceData);
+            setDailyRoster(roster[dateStr] || {});
+        } catch (error) {
+            console.error("loadData failed:", error);
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
 
     const initiateClockAction = (employee: Employee, type: 'IN' | 'OUT') => { 
-        if (type === 'IN') {
-             setPendingAction({ type, employee }); 
-             setSecurityModalOpen(true); 
-        } else {
-             setPendingAction({ type, employee });
-             setSecurityModalOpen(true);
-        }
+        setPendingAction({ type, employee }); 
+        setSecurityModalOpen(true); 
     };
     
     const executeClockAction = async () => {
@@ -541,19 +573,15 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
         setShowBatchMenu(false); 
 
         const eligibleStaff = staffList.filter(staff => {
-            if (staff.isAttendanceExempt) return false; // 排除免打卡员工
-
+            if (staff.isAttendanceExempt) return false;
             const hasRecord = todayRecords.some(r => r.employeeId === staff.id);
             if (hasRecord) return false;
-
             const status = dailyRoster[staff.id];
             if (status && ['OFF', 'MC', 'LEAVE', 'ABSENT', 'ANNUAL'].includes(status)) return false;
-
             if (targetGroup !== 'ALL') {
                 const staffGroup = getBatchGroup(staff.role);
                 if (staffGroup !== targetGroup) return false;
             }
-
             return true;
         });
 
@@ -611,7 +639,7 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
         setTodayRecords(prev => prev.map(r => r.id === updated.id ? updated : r));
     };
 
-    // 切换员工免打卡状态
+    // ✅ 成本优化: 同步更新缓存
     const toggleExemptStatus = async (staff: Employee) => {
         if (!confirm(`确定要将 ${staff.name} 设为 ${staff.isAttendanceExempt ? '需要打卡' : '免打卡 (无需考勤)'} 吗？`)) return;
         setIsLoading(true);
@@ -619,6 +647,11 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
             const updatedStaff = { ...staff, isAttendanceExempt: !staff.isAttendanceExempt };
             await DataManager.saveEmployee(updatedStaff);
             setStaffList(prev => prev.map(s => s.id === staff.id ? updatedStaff : s));
+            if (staffCacheRef.current) {
+                staffCacheRef.current.data = staffCacheRef.current.data.map(
+                    s => s.id === staff.id ? updatedStaff : s
+                );
+            }
         } catch (e) {
             console.error(e);
             alert('状态更新失败');
@@ -629,11 +662,11 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
 
     const filteredStaff = staffList.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.id.includes(searchTerm));
     
-    // --- UPDATED FOUR-TIER ROLE CLASSIFICATION ---
+    // --- FOUR-TIER ROLE CLASSIFICATION ---
     const isWaterBar = (role: string) => ['BAR', '水吧'].some(r => role.toUpperCase().includes(r));
     const isDishwasher = (role: string) => ['DISH', '洗碗', 'CLEANER', '清洁', '后勤'].some(r => role.toUpperCase().includes(r));
     const isFOH = (role: string) => ['MANAGER', 'SUPERVISOR', 'COUNTER', 'CAPTAIN', 'WAITER', 'PART_TIME'].some(r => role.toUpperCase().includes(r)) && !isWaterBar(role) && !isDishwasher(role);
-    const isBOH = (role: string) => !isFOH(role) && !isWaterBar(role) && !isDishwasher(role); // Everyone else defaults to Kitchen/BOH
+    const isBOH = (role: string) => !isFOH(role) && !isWaterBar(role) && !isDishwasher(role);
 
     const fohStaff = filteredStaff.filter(s => isFOH(s.role));
     const waterBarStaff = filteredStaff.filter(s => isWaterBar(s.role));
@@ -684,21 +717,16 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                         <div className="flex flex-wrap items-center gap-2">
                             <h3 className="font-black text-lg text-[#1A1A1A] leading-none">{staff.name}</h3>
                             <button onClick={() => toggleExemptStatus(staff)} className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition-colors shadow-sm active:scale-95 ${staff.isAttendanceExempt ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>
-                                {staff.isAttendanceExempt ? '免打卡人员' : '设为免打卡'}
+                                {staff.isAttendanceExempt ? '免打卡' : '设为免打卡'}
                             </button>
-                            {isLate && <span className="bg-red-100 text-red-600 text-[9px] font-black px-1.5 py-0.5 rounded-md animate-pulse">LATE</span>}
-                            {rosterBadge && !isCompleted && (
-                                <span className={`text-[9px] px-2 py-0.5 rounded border flex items-center gap-1 font-bold ${rosterBadge.color}`}>
-                                    <rosterBadge.icon size={10} /> {rosterBadge.label}
-                                </span>
-                            )}
                         </div>
-                        <div className="text-xs font-bold text-gray-400 uppercase mt-1 tracking-wider">{staff.role.split('(')[0]}</div>
-                        <div className="text-[10px] font-mono text-gray-300 mt-0.5">#{staff.id}</div>
+                        <p className="text-xs text-gray-400 font-bold mt-1">{staff.role.split('(')[0]}</p>
+                        {isLate && <span className="text-[9px] text-red-500 font-bold bg-red-50 px-2 py-0.5 rounded-full border border-red-100">迟到 (Late)</span>}
+                        {rosterBadge && isPlannedOff && <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold border ${rosterBadge.color} ml-1`}>{rosterBadge.label}</span>}
                     </div>
                 </div>
 
-                <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                     {staff.isAttendanceExempt ? (
                         <div className="flex-1 flex justify-center">
                             <span className="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 border border-blue-100 w-full justify-center">
@@ -728,7 +756,8 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                     ) : (
                         <>
                             <span className="text-xs font-bold text-gray-300 italic">{isPlannedOff ? 'Scheduled OFF' : 'Not Started'}</span>
-                            <button onClick={() => initiateClockAction(staff, 'IN')} className={`border-2 text-sm font-bold px-6 py-2.5 rounded-xl transition-all shadow-sm flex items-center gap-2 ${isPlannedOff ? 'bg-orange-50 border-orange-200 text-orange-600 hover:bg-orange-100' : 'bg-white border-gray-200 text-gray-600 hover:bg-green-50 hover:text-green-700 hover:border-green-200'}`}>
+                            {/* ✅ 手机触控: min-h-[44px] + 更大的 padding */}
+                            <button onClick={() => initiateClockAction(staff, 'IN')} className={`border-2 text-sm font-bold px-4 py-3 md:px-6 md:py-2.5 min-h-[44px] rounded-xl transition-all shadow-sm flex items-center gap-2 ${isPlannedOff ? 'bg-orange-50 border-orange-200 text-orange-600 hover:bg-orange-100' : 'bg-white border-gray-200 text-gray-600 hover:bg-green-50 hover:text-green-700 hover:border-green-200'}`}>
                                 <LogIn size={16}/> {isPlannedOff ? '加班 (OT)' : '上班 (In)'}
                             </button>
                         </>
@@ -740,7 +769,7 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
 
     return (
         <div className="fixed inset-0 bg-[#F5F7FA] z-[100] flex flex-col animate-in fade-in duration-200 font-sans">
-            {/* Header - Mobile & iPad Optimized & Safe-Area */}
+            {/* Header - ✅ iOS Safe Area 顶部已有 */}
             <div className="bg-[#1A1A1A] px-4 pb-4 pt-[max(env(safe-area-inset-top),1rem)] md:px-5 md:pb-5 md:pt-[max(env(safe-area-inset-top),1.25rem)] flex flex-col md:flex-row justify-between items-center text-white shrink-0 shadow-xl z-20 border-b-4 border-[#FFD700]">
                 <div className="flex items-center gap-3 md:gap-5 w-full md:w-auto mb-3 md:mb-0">
                     <div className="bg-[#FFD700] text-black p-2 md:p-3 rounded-xl md:rounded-2xl shadow-gold"><Briefcase size={20} className="md:w-7 md:h-7" /></div>
@@ -759,20 +788,16 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                         >
                             <Zap size={14} className="md:w-[18px] md:h-[18px]" fill="currentColor"/> <span className="hidden sm:inline">一键开工</span><span className="sm:hidden">批量</span> <ChevronDown size={14} className={`transition-transform ${showBatchMenu ? 'rotate-180' : ''}`}/>
                         </button>
-                        
                         {showBatchMenu && (
-                            <div className="absolute top-full left-0 md:left-auto md:right-0 mt-2 w-48 md:w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-50 animate-in slide-in-from-top-2">
-                                <button onClick={() => handleBatchClockIn('FLOOR')} className="w-full text-left px-3 py-2 md:px-4 md:py-3 hover:bg-blue-50 flex items-center gap-3 border-b border-gray-50">
-                                    <div className="p-1.5 md:p-2 bg-blue-100 text-blue-600 rounded-lg"><Coffee size={14} className="md:w-4 md:h-4"/></div>
-                                    <div><span className="font-bold text-xs md:text-sm text-[#1A1A1A]">楼面 & 水吧</span><p className="text-[8px] md:text-[10px] text-gray-400">Floor, Bar & Dish</p></div>
+                            <div className="absolute top-full mt-2 right-0 bg-white rounded-2xl shadow-2xl border border-gray-100 z-50 min-w-[200px] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                                <button onClick={() => handleBatchClockIn('FLOOR')} className="w-full px-5 py-4 text-left hover:bg-gray-50 flex items-center gap-3 border-b border-gray-50 transition-colors">
+                                    <Briefcase size={18} className="text-yellow-600"/><div><span className="text-xs md:text-sm text-[#1A1A1A] font-bold">楼面开工</span><p className="text-[8px] md:text-[10px] text-gray-400">FOH + Bar + Dish</p></div>
                                 </button>
-                                <button onClick={() => handleBatchClockIn('KITCHEN')} className="w-full text-left px-3 py-2 md:px-4 md:py-3 hover:bg-orange-50 flex items-center gap-3 border-b border-gray-50">
-                                    <div className="p-1.5 md:p-2 bg-orange-100 text-orange-600 rounded-lg"><ChefHat size={14} className="md:w-4 md:h-4"/></div>
-                                    <div><span className="font-bold text-xs md:text-sm text-[#1A1A1A]">厨房团队</span><p className="text-[8px] md:text-[10px] text-gray-400">Kitchen Team</p></div>
+                                <button onClick={() => handleBatchClockIn('KITCHEN')} className="w-full px-5 py-4 text-left hover:bg-gray-50 flex items-center gap-3 border-b border-gray-50 transition-colors">
+                                    <ChefHat size={18} className="text-orange-600"/><div><span className="text-xs md:text-sm text-[#1A1A1A] font-bold">厨房开工</span><p className="text-[8px] md:text-[10px] text-gray-400">Kitchen Core</p></div>
                                 </button>
-                                <button onClick={() => handleBatchClockIn('ALL')} className="w-full text-left px-3 py-2 md:px-4 md:py-3 hover:bg-gray-50 flex items-center gap-3">
-                                    <div className="p-1.5 md:p-2 bg-gray-100 text-gray-600 rounded-lg"><Users size={14} className="md:w-4 md:h-4"/></div>
-                                    <div><span className="font-bold text-xs md:text-sm text-[#1A1A1A]">全员开工</span><p className="text-[8px] md:text-[10px] text-gray-400">All Staff</p></div>
+                                <button onClick={() => handleBatchClockIn('ALL')} className="w-full px-5 py-4 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors">
+                                    <Users size={18} className="text-blue-600"/><div><span className="text-xs md:text-sm text-[#1A1A1A]">全员开工</span><p className="text-[8px] md:text-[10px] text-gray-400">All Staff</p></div>
                                 </button>
                             </div>
                         )}
@@ -787,6 +812,7 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 </div>
             </div>
 
+            {/* Toolbar */}
             <div className="bg-white px-6 py-4 border-b border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0 z-10 shadow-sm">
                 <div className="flex items-center gap-3 w-full md:w-auto bg-gray-50 p-1.5 rounded-2xl border border-gray-200">
                     <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()-1); setSelectedDate(d.toISOString().split('T')[0]); loadData(d.toISOString().split('T')[0]); }} className="p-3 hover:bg-white rounded-xl text-gray-500 transition-colors shadow-sm"><TrendingUp size={20} className="rotate-180"/></button>
@@ -794,11 +820,12 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                     <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()+1); setSelectedDate(d.toISOString().split('T')[0]); loadData(d.toISOString().split('T')[0]); }} className="p-3 hover:bg-white rounded-xl text-gray-500 transition-colors shadow-sm"><TrendingUp size={20}/></button>
                 </div>
                 
-                <div className="flex gap-6 text-sm font-bold text-gray-500">
-                    <span className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1 rounded-lg"><div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></div> Active: {todayRecords.filter(r => {
+                {/* ✅ 手机端自动换行 */}
+                <div className="flex flex-wrap gap-3 md:gap-6 text-sm font-bold text-gray-500">
+                    <span className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 rounded-lg"><div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></div> Active: {todayRecords.filter(r => {
                         return r.clockOut && new Date(r.clockOut).getTime() > new Date().getTime();
                     }).length}</span>
-                    <span className="flex items-center gap-2 bg-gray-100 text-gray-600 px-3 py-1 rounded-lg"><div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div> Total: {todayRecords.length}</span>
+                    <span className="flex items-center gap-2 bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg"><div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div> Total: {todayRecords.length}</span>
                 </div>
 
                 <div className="relative w-full md:w-80">
@@ -807,8 +834,9 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 </div>
             </div>
 
+            {/* Staff Grid - ✅ iOS 底部 safe area */}
             <div className="flex-grow overflow-y-auto bg-[#F5F7FA]">
-                <div className="p-4 md:p-8 grid grid-cols-1 gap-8">
+                <div className="p-4 md:p-8 pb-[max(env(safe-area-inset-bottom),2rem)] grid grid-cols-1 gap-8">
                     {isLoading ? <div className="text-center py-20 text-gray-400 font-bold animate-pulse text-lg">Loading Staff Data...</div> : (
                         <>
                             {/* FOH Section */}
@@ -834,22 +862,20 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                                         {sortedWaterBar.map(renderStaffCard)}
-                                        {sortedWaterBar.length === 0 && <div className="text-center py-12 text-gray-400 text-sm font-bold italic col-span-full bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">No Water Bar Staff Found</div>}
                                     </div>
                                 </div>
                             )}
 
-                            {/* Dishwasher / Support Section */}
+                            {/* Dishwasher Section */}
                             {(sortedDishwasher.length > 0 || searchTerm) && (
                                 <div className="space-y-4">
                                     <div className="flex items-center gap-3 mb-2 pb-2 border-b-2 border-gray-100 mt-4">
-                                        <div className="p-2.5 bg-teal-100 text-teal-600 rounded-xl"><Droplets size={24}/></div>
-                                        <h3 className="font-black text-gray-800 text-xl tracking-tight">后勤与洗碗 (Support/Dish)</h3>
+                                        <div className="p-2.5 bg-cyan-100 text-cyan-600 rounded-xl"><Droplets size={24}/></div>
+                                        <h3 className="font-black text-gray-800 text-xl tracking-tight">洗碗/清洁 (Dishwasher)</h3>
                                         <span className="bg-gray-200 text-gray-600 text-xs font-black px-3 py-1 rounded-full">{sortedDishwasher.length}</span>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                                         {sortedDishwasher.map(renderStaffCard)}
-                                        {sortedDishwasher.length === 0 && <div className="text-center py-12 text-gray-400 text-sm font-bold italic col-span-full bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">No Support/Dish Staff Found</div>}
                                     </div>
                                 </div>
                             )}
@@ -871,9 +897,14 @@ export const AttendanceConsole: React.FC<AttendanceConsoleProps> = ({ onClose })
                 </div>
             </div>
 
+            {/* Modals */}
             <SecurityPinModal isOpen={securityModalOpen} onClose={() => setSecurityModalOpen(false)} onSuccess={executeClockAction} employeeName={pendingAction?.employee.name || ''} targetPin={pendingAction?.employee.pin || '0000'} />
             {editingRecord && <EditRecordModal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} record={editingRecord} onSave={saveEditedRecord} />}
-            <RollCallModal isOpen={showRollCall} onClose={() => setShowRollCall(false)} staffList={staffList} todayRecords={todayRecords} dateStr={selectedDate} onUpdate={() => loadData(selectedDate)} dailyRoster={dailyRoster} />
+            {/* ✅ 成本优化: 点名后只刷新考勤，不重拉员工 */}
+            <RollCallModal isOpen={showRollCall} onClose={() => setShowRollCall(false)} staffList={staffList} todayRecords={todayRecords} dateStr={selectedDate} onUpdate={async () => {
+                const freshAttendance = await DataManager.getAttendanceByDate(selectedDate);
+                setTodayRecords(freshAttendance);
+            }} dailyRoster={dailyRoster} />
             <ComplianceReportModal isOpen={showReport} onClose={() => setShowReport(false)} staffList={staffList} />
         </div>
     );
